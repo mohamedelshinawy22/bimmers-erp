@@ -1,0 +1,151 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# BimmerERP — Zero-Data-Loss Production Infrastructure
+#
+#   PostgreSQL 16 : WAL continuous archiving → point-in-time recovery
+#   Redis 7       : AOF persistence + optional dashboard cache
+#   App           : Next.js standalone, gated on a healthy database
+#
+# Every credential comes from .env — never hardcode secrets here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # Named volumes are created root-owned; the postgres user could not write the
+  # WAL archive, silently failing every archive_command and eventually filling
+  # pg_wal. This one-shot init fixes ownership before postgres starts.
+  wal-init:
+    image: alpine:3.20
+    container_name: bimmer_wal_init
+    command: sh -c "mkdir -p /wal_archive && chown -R 70:70 /wal_archive && chmod 700 /wal_archive"
+    volumes:
+      - wal_archive:/wal_archive
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bimmer_postgres
+    restart: always
+    depends_on:
+      wal-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      # Data-checksums catch silent disk corruption at read time.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      TZ: Africa/Cairo
+    command: >
+      postgres
+        -c wal_level=replica
+        -c max_wal_size=1GB
+        -c min_wal_size=80MB
+        -c checkpoint_completion_target=0.9
+        -c checkpoint_timeout=5min
+        -c archive_mode=on
+        -c archive_timeout=300
+        -c archive_command='test ! -f /wal_archive/%f && cp %p /wal_archive/%f'
+        -c synchronous_commit=on
+        -c full_page_writes=on
+        -c fsync=on
+        -c max_connections=200
+        -c shared_buffers=512MB
+        -c effective_cache_size=1536MB
+        -c work_mem=16MB
+        -c maintenance_work_mem=128MB
+        -c random_page_cost=1.1
+        -c default_statistics_target=200
+        -c log_min_duration_statement=500
+        -c log_lock_waits=on
+        -c deadlock_timeout=1s
+        -c idle_in_transaction_session_timeout=60000
+        -c statement_timeout=60000
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - wal_archive:/wal_archive
+      - ./backups:/backups
+    ports:
+      # Bind to loopback only: never expose PostgreSQL on a public interface.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: bimmer_redis
+    restart: always
+    command: >
+      redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+        --maxmemory 256mb
+        --maxmemory-policy noeviction
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bimmer_app
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=20&pool_timeout=20"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD is required}
+      NEXT_PUBLIC_CURRENCY: ${NEXT_PUBLIC_CURRENCY:-ج.م}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-BimmerERP}
+      TZ: Africa/Cairo
+    ports:
+      # Loopback only. Terminate TLS in a reverse proxy in front of this; the
+      # login route and all server actions would otherwise be exposed in plain
+      # HTTP on every host interface (Docker publishes to 0.0.0.0 and bypasses
+      # the host firewall via NAT).
+      - "127.0.0.1:3000:3000"
+
+  # WAL retention. archive_timeout forces a segment switch every 5 minutes even
+  # when idle (~4.6 GB/day), and nothing else prunes the archive — once the
+  # volume fills, archive_command fails permanently, pg_wal backs up and
+  # PostgreSQL stops accepting writes. Keep 7 days and prune hourly.
+  wal-retention:
+    image: postgres:16-alpine
+    container_name: bimmer_wal_retention
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - wal_archive:/wal_archive
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          find /wal_archive -type f -mtime +7 -delete 2>/dev/null || true
+          sleep 3600
+        done
+
+volumes:
+  pgdata:
+  wal_archive:
+  redisdata:

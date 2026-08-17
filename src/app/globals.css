@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-bmw-cardBorder;
+  }
+
+  html,
+  body {
+    @apply bg-bmw-black text-bmw-silver;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Latin numerals everywhere: Arabic-Indic digits are unreadable on invoices. */
+  body {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Kill the spinner arrows on money inputs — they cause mis-keyed prices. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  ::selection {
+    @apply bg-bmw-blue/40 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-bmw-carbon;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-bmw-cardBorder;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-bmw-blue/60;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-bmw-blue ring-offset-2 ring-offset-bmw-black;
+  }
+}
+
+@layer components {
+  .bmw-card {
+    @apply rounded-2xl border border-bmw-cardBorder bg-bmw-card;
+  }
+
+  .bmw-m-stripe {
+    background: linear-gradient(
+      to right,
+      #002c5f 0%,
+      #002c5f 33.33%,
+      #0066b1 33.33%,
+      #0066b1 66.66%,
+      #e2231a 66.66%,
+      #e2231a 100%
+    );
+  }
+
+  .tabular {
+    @apply font-mono tabular-nums;
+  }
+}
+
+@media print {
+  /* Invoices print on white thermal/A4 paper, never dark. */
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+.print-only {
+  display: none;
+}

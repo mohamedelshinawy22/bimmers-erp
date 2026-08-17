@@ -1,0 +1,450 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// BimmerERP — PostgreSQL 16 Schema
+// ACID-compliant inventory + accounting core for new BMW spare parts.
+// pg_trgm GIN indexes provide sub-millisecond fuzzy search on OEM/name fields.
+// ─────────────────────────────────────────────────────────────────────────────
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // Pooled URL (PgBouncer, transaction mode) is fine for queries but not for
+  // DDL. Prisma runs migrations over directUrl against the unpooled endpoint.
+  directUrl  = env("DIRECT_URL")
+  extensions = [pg_trgm, uuid_ossp(map: "uuid-ossp")]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "relationJoins"]
+  // "native" covers local development. The rhel target is declared explicitly
+  // for Vercel/AWS Lambda: `prisma generate` runs on Vercel's build image and
+  // `native` normally resolves correctly there, but declaring the runtime target
+  // guarantees a matching query engine is emitted and traced into the function
+  // bundle. Precautionary — this has not been confirmed as the cause of any
+  // observed failure.
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  CASHIER
+  STOREKEEPER
+}
+
+enum AccountType {
+  CUSTOMER
+  WORKSHOP_BMW
+  SUPPLIER
+  EXPENSE
+}
+
+/// SALE and PURCHASE are the only types the application creates today.
+/// Returns are currently handled by voiding the original document, which writes
+/// SALE_RETURN / PURCHASE_RETURN rows into StockMovement. The remaining values
+/// are reserved for standalone returns and quotations and are not yet reachable.
+enum InvoiceType {
+  SALE
+  PURCHASE
+  SALE_RETURN
+  PURCHASE_RETURN
+  PRICE_QUOTATION
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  CREDIT
+}
+
+enum PaymentMethod {
+  CASH
+  VISA
+  SPLIT
+  ON_ACCOUNT
+}
+
+enum TreasuryType {
+  CASH_DRAWER
+  BANK_ACCOUNT
+  POS_TERMINAL
+  WALLET
+}
+
+enum TransactionType {
+  RECEIPT
+  PAYMENT
+  TRANSFER
+}
+
+enum StockMoveReason {
+  PURCHASE
+  SALE
+  SALE_RETURN
+  PURCHASE_RETURN
+  MANUAL_ADJUSTMENT
+  OPENING_BALANCE
+  STOCKTAKE
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  fullName     String
+  passwordHash String
+  role         Role      @default(CASHIER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  invoices   Invoice[]
+  stockMoves StockMovement[]
+  shifts     TreasuryShift[]
+}
+
+model Brand {
+  id            String     @id @default(uuid())
+  name          String     @unique
+  originCountry String?
+  isOem         Boolean    @default(false)
+  parts         PartItem[]
+  createdAt     DateTime   @default(now())
+}
+
+model BmwChassis {
+  id                  String            @id @default(uuid())
+  code                String            @unique // E36, E46, E90, F30, G20, G30...
+  series              String // 3 Series, 5 Series, X5...
+  productionStartYear Int
+  productionEndYear   Int?
+  parts               PartChassis[]
+  vehicles            CustomerVehicle[]
+  createdAt           DateTime          @default(now())
+
+  @@index([series])
+}
+
+model BmwEngine {
+  id           String            @id @default(uuid())
+  code         String            @unique // N20, B48, B58, N55, M54, S58...
+  displacement String?
+  fuelType     String            @default("Petrol")
+  parts        PartEngine[]
+  vehicles     CustomerVehicle[]
+  createdAt    DateTime          @default(now())
+}
+
+model WarehouseBin {
+  id            String     @id @default(uuid())
+  warehouseName String     @default("المستودع الرئيسي")
+  aisle         String // الممر (A1, A2)
+  rack          String // الحامل (01, 02)
+  shelf         String // الرف (A, B)
+  boxBin        String // الصندوق (12, 14)
+  fullCode      String     @unique
+  parts         PartItem[]
+  createdAt     DateTime   @default(now())
+
+  @@unique([warehouseName, aisle, rack, shelf, boxBin])
+}
+
+model PartItem {
+  id                  String  @id @default(uuid())
+  oemNumber           String  @unique // 11 digits BMW (e.g. 34116859066)
+  partNumberFormatted String?
+  nameAr              String
+  nameEn              String?
+  brandId             String
+  brand               Brand   @relation(fields: [brandId], references: [id])
+  brandPartNumber     String? // Brembo P06088
+  barcode             String? @unique
+  category            String // الفرامل، التعليق، المحرك، الكهرباء
+  sidePosition        String? // أمامي يمين، أمامي شمال، خلفي
+
+  binLocationId String?
+  binLocation   WarehouseBin? @relation(fields: [binLocationId], references: [id])
+
+  buyPriceLast       Decimal @default(0.0) @db.Decimal(12, 2)
+  buyPriceAvg        Decimal @default(0.0) @db.Decimal(12, 2)
+  sellPriceRetail    Decimal @db.Decimal(12, 2)
+  sellPriceWholesale Decimal @db.Decimal(12, 2)
+  sellPriceMin       Decimal @db.Decimal(12, 2)
+
+  stockQuantity   Int     @default(0)
+  /// Reserved-but-not-yet-shipped units. No feature writes this yet, so it is
+  /// always 0; the sale availability check (`stockQuantity - stockReserved`) is
+  /// written against it so adding reservations later needs no changes there.
+  stockReserved   Int     @default(0)
+  minReorderLevel Int     @default(2)
+  isActive        Boolean @default(true)
+
+  compatibleChassis PartChassis[]
+  compatibleEngines PartEngine[]
+  invoiceItems      InvoiceItem[]
+  stockMovements    StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // oemNumber + barcode already carry unique btree indexes.
+  @@index([nameAr], map: "PartItem_nameAr_btree_idx")
+  @@index([category])
+  @@index([brandId])
+  @@index([binLocationId])
+  @@index([isActive, stockQuantity])
+  // Matches the catalog list's ORDER BY (isActive desc, nameAr asc).
+  @@index([isActive(sort: Desc), nameAr])
+  // Sub-millisecond fuzzy / infix search (pg_trgm)
+  @@index([oemNumber(ops: raw("gin_trgm_ops"))], map: "PartItem_oemNumber_trgm_idx", type: Gin)
+  @@index([nameAr(ops: raw("gin_trgm_ops"))], map: "PartItem_nameAr_trgm_idx", type: Gin)
+}
+
+model PartChassis {
+  partId    String
+  chassisId String
+  notes     String?
+  part      PartItem   @relation(fields: [partId], references: [id], onDelete: Cascade)
+  chassis   BmwChassis @relation(fields: [chassisId], references: [id], onDelete: Cascade)
+
+  @@id([partId, chassisId])
+  @@index([chassisId])
+}
+
+model PartEngine {
+  partId   String
+  engineId String
+  part     PartItem  @relation(fields: [partId], references: [id], onDelete: Cascade)
+  engine   BmwEngine @relation(fields: [engineId], references: [id], onDelete: Cascade)
+
+  @@id([partId, engineId])
+  @@index([engineId])
+}
+
+model Account {
+  id               String      @id @default(uuid())
+  accountNumber    String      @unique
+  name             String
+  type             AccountType @default(CUSTOMER)
+  phone            String?
+  email            String?
+  address          String?
+  taxNumber        String?
+  creditLimit      Decimal     @default(0.0) @db.Decimal(12, 2)
+  currentBalance   Decimal     @default(0.0) @db.Decimal(12, 2) // موجب (له)، سالب (عليه)
+  defaultPriceTier String      @default("RETAIL")
+  isActive         Boolean     @default(true)
+
+  vehicles     CustomerVehicle[]
+  invoices     Invoice[]
+  transactions TreasuryTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "Account_name_trgm_idx", type: Gin)
+}
+
+model CustomerVehicle {
+  id          String      @id @default(uuid())
+  accountId   String
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vin         String // 17 characters
+  chassisId   String?
+  chassis     BmwChassis? @relation(fields: [chassisId], references: [id])
+  engineId    String?
+  engine      BmwEngine?  @relation(fields: [engineId], references: [id])
+  modelYear   Int?
+  plateNumber String?
+  notes       String?
+  invoices    Invoice[]
+  createdAt   DateTime    @default(now())
+
+  @@index([accountId])
+  @@index([vin])
+}
+
+model Treasury {
+  id             String       @id @default(uuid())
+  name           String
+  type           TreasuryType @default(CASH_DRAWER)
+  currentBalance Decimal      @default(0.0) @db.Decimal(14, 2)
+  isActive       Boolean      @default(true)
+
+  invoices     Invoice[]
+  transactions TreasuryTransaction[]
+  shifts       TreasuryShift[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Cashier shift / Z-Report envelope.
+///
+/// `bookOpeningBalance` is the treasury's own balance snapshotted at open time.
+/// `openingBalance` is what the cashier declared. Reconciling against the
+/// snapshot (not the declared figure) is what makes the Z-report trustworthy:
+/// previously the expected balance was derived from a free-text number, and with
+/// no open shift it defaulted to 0 — so the report always showed a bogus
+/// variance equal to the treasury's entire carried-forward balance.
+model TreasuryShift {
+  id                 String    @id @default(uuid())
+  shiftNumber        String    @unique
+  treasuryId         String
+  treasury           Treasury  @relation(fields: [treasuryId], references: [id])
+  openedByUserId     String
+  openedByUser       User      @relation(fields: [openedByUserId], references: [id])
+  openingBalance     Decimal   @db.Decimal(14, 2)
+  bookOpeningBalance Decimal   @default(0.0) @db.Decimal(14, 2)
+  closingBalance     Decimal?  @db.Decimal(14, 2)
+  countedCash        Decimal?  @db.Decimal(14, 2)
+  varianceAmount     Decimal?  @db.Decimal(14, 2)
+  /// Set when a non-zero cash variance was posted to the treasury on close.
+  varianceTxId       String?
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  notes              String?
+
+  @@index([treasuryId, closedAt])
+}
+
+model Invoice {
+  id            String           @id @default(uuid())
+  invoiceNumber String           @unique
+  type          InvoiceType      @default(SALE)
+  accountId     String
+  account       Account          @relation(fields: [accountId], references: [id])
+  treasuryId    String?
+  treasury      Treasury?        @relation(fields: [treasuryId], references: [id])
+  vehicleId     String?
+  vehicle       CustomerVehicle? @relation(fields: [vehicleId], references: [id])
+  userId        String
+  user          User             @relation(fields: [userId], references: [id])
+
+  subtotal        Decimal @db.Decimal(12, 2)
+  discountAmount  Decimal @default(0.0) @db.Decimal(12, 2)
+  taxAmount       Decimal @default(0.0) @db.Decimal(12, 2)
+  grandTotal      Decimal @db.Decimal(12, 2)
+  paidAmount      Decimal @default(0.0) @db.Decimal(12, 2)
+  remainingAmount Decimal @default(0.0) @db.Decimal(12, 2)
+
+  paymentStatus PaymentStatus @default(PAID)
+  paymentMethod PaymentMethod @default(CASH)
+  notes         String?
+
+  isVoided   Boolean   @default(false)
+  voidedAt   DateTime?
+  voidReason String?
+
+  items        InvoiceItem[]
+  transactions TreasuryTransaction[]
+  stockMoves   StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceNumber])
+  @@index([createdAt])
+  @@index([accountId, paymentStatus])
+  @@index([type, createdAt])
+}
+
+model InvoiceItem {
+  id                  String   @id @default(uuid())
+  invoiceId           String
+  invoice             Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  partId              String
+  part                PartItem @relation(fields: [partId], references: [id])
+  quantity            Int
+  unitPrice           Decimal  @db.Decimal(12, 2)
+  unitCostSnapshot    Decimal  @db.Decimal(12, 2)
+  totalPrice          Decimal  @db.Decimal(12, 2)
+  binLocationSnapshot String?
+
+  @@index([invoiceId])
+  @@index([partId])
+}
+
+/// Append-only stock ledger. Every quantity change is replayable from here,
+/// so PartItem.stockQuantity is always reconcilable (zero-data-loss guarantee).
+///
+/// `seq` gives the ledger a total order. `createdAt` alone is not sufficient:
+/// concurrent cashiers commit within the same millisecond, so timestamps tie and
+/// the replay becomes ambiguous. Because a writer holds the part's FOR UPDATE
+/// lock until commit, per-part `seq` order is exactly per-part commit order.
+model StockMovement {
+  id            String          @id @default(uuid())
+  seq           BigInt          @unique @default(autoincrement())
+  partId        String
+  part          PartItem        @relation(fields: [partId], references: [id])
+  invoiceId     String?
+  invoice       Invoice?        @relation(fields: [invoiceId], references: [id])
+  reason        StockMoveReason
+  quantityDelta Int // negative = out, positive = in
+  balanceAfter  Int
+  unitCost      Decimal?        @db.Decimal(12, 2)
+  performedById String
+  performedBy   User            @relation(fields: [performedById], references: [id])
+  note          String?
+  createdAt     DateTime        @default(now())
+
+  @@index([partId, seq])
+  @@index([partId, createdAt])
+  @@index([invoiceId])
+}
+
+model TreasuryTransaction {
+  id                String          @id @default(uuid())
+  transactionNumber String          @unique
+  treasuryId        String
+  treasury          Treasury        @relation(fields: [treasuryId], references: [id])
+  accountId         String?
+  account           Account?        @relation(fields: [accountId], references: [id])
+  invoiceId         String?
+  invoice           Invoice?        @relation(fields: [invoiceId], references: [id])
+  type              TransactionType
+  amount            Decimal         @db.Decimal(12, 2)
+  description       String
+  createdByUser     String
+  createdAt         DateTime        @default(now())
+
+  @@index([treasuryId, createdAt])
+  @@index([accountId, createdAt])
+  @@index([invoiceId])
+  // Supports date-range scans that are not scoped to one treasury.
+  @@index([createdAt])
+  @@index([type, createdAt])
+}
+
+model SystemAuditTrail {
+  id          String   @id @default(uuid())
+  tableName   String
+  recordId    String
+  action      String // INSERT, UPDATE, DELETE, LOGIN, VOID
+  oldData     Json?
+  newData     Json?
+  performedBy String
+  ipAddress   String?
+  timestamp   DateTime @default(now())
+
+  @@index([tableName, recordId])
+  @@index([timestamp])
+}
+
+/// Gap-free, race-free document numbering. Incremented with an atomic
+/// UPDATE ... RETURNING inside the same transaction as the document itself.
+model DocumentCounter {
+  scope     String   @id // e.g. "INV-20260816", "TRX", "SHIFT"
+  lastValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+/// Operator-editable configuration + user-defined custom fields.
+model SystemSetting {
+  key       String   @id
+  value     String
+  group     String   @default("GENERAL")
+  label     String
+  updatedAt DateTime @updatedAt
+}
