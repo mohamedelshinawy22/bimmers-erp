@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { createSession, destroySession, requirePermission, SESSION_COOKIE } from "@/lib/auth";
+import { createSession, destroySession, requirePermission } from "@/lib/auth";
 import { fail, ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { revalidatePath } from "next/cache";
@@ -113,7 +113,6 @@ export async function createUserAction(
   }
 }
 
-export { SESSION_COOKIE };
 
 /**
  * Deactivate / reactivate a user.
