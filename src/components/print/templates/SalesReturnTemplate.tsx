@@ -1,7 +1,7 @@
 import type { InvoicePrintData } from "@/lib/invoice-print-types";
-import { SalesA4Template } from "./sales-a4-template";
+import { ReturnInvoiceTemplate } from "./return-invoice-template";
 
-/** Sales-return documents share the signed invoice data contract and A4 layout. */
+/** Formal Arabic credit note for returned sales items. */
 export function SalesReturnTemplate({ data }: { data: InvoicePrintData }) {
-  return <SalesA4Template data={data} />;
+  return <ReturnInvoiceTemplate data={data} kind="SALE_RETURN" />;
 }

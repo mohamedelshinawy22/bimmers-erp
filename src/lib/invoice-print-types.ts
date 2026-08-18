@@ -18,7 +18,7 @@ export interface InvoicePrintData {
     id: string; invoiceNumber: string; type: string; createdAt: string; paymentMethod: string; paymentStatus: string;
     subtotal: number; discountAmount: number; taxAmount: number; grandTotal: number; paidAmount: number; remainingAmount: number;
     notes?: string | null; isVoided: boolean; voidReason?: string | null; treasuryName?: string | null; cashierName?: string | null;
-    accountBalanceBefore?: number | null; accountBalanceAfter?: number | null; verificationUrl: string; qrPayload: string;
+    accountBalanceBefore?: number | null; accountBalanceAfter?: number | null; sourceInvoiceNumber?: string | null; verificationUrl: string; qrPayload: string;
   };
   account: { name: string; accountNumber: string; phone?: string | null; taxNumber?: string | null; vehicleLabel?: string | null };
   lines: InvoicePrintLine[];

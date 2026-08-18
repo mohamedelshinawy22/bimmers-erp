@@ -1,7 +1,7 @@
 import type { InvoicePrintData } from "@/lib/invoice-print-types";
-import { PurchaseA4Template } from "./purchase-a4-template";
+import { ReturnInvoiceTemplate } from "./return-invoice-template";
 
-/** Purchase-return documents share the signed purchase invoice data contract and A4 layout. */
+/** Formal Arabic debit note for returned purchase items. */
 export function PurchaseReturnTemplate({ data }: { data: InvoicePrintData }) {
-  return <PurchaseA4Template data={data} />;
+  return <ReturnInvoiceTemplate data={data} kind="PURCHASE_RETURN" />;
 }
