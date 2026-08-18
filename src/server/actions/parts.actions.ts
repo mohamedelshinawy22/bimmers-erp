@@ -209,21 +209,16 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
         },
       });
 
+      // Resolve newly typed codes before replacing the relation matrix.
+      const customChassisIds = await Promise.all(input.chassisCodes.map(async (code) => (await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id));
+      const customEngineIds = await Promise.all(input.engineCodes.map(async (code) => (await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id));
+      const allChassisIds = [...new Set([...input.chassisIds, ...customChassisIds])];
+      const allEngineIds = [...new Set([...input.engineIds, ...customEngineIds])];
       // Replace the fitment matrix wholesale — simpler and race-free within the tx.
       await tx.partChassis.deleteMany({ where: { partId: input.id } });
-      if (input.chassisIds.length) {
-        await tx.partChassis.createMany({
-          data: input.chassisIds.map((chassisId) => ({ partId: input.id, chassisId })),
-          skipDuplicates: true,
-        });
-      }
+      if (allChassisIds.length) await tx.partChassis.createMany({ data: allChassisIds.map((chassisId) => ({ partId: input.id, chassisId })), skipDuplicates: true });
       await tx.partEngine.deleteMany({ where: { partId: input.id } });
-      if (input.engineIds.length) {
-        await tx.partEngine.createMany({
-          data: input.engineIds.map((engineId) => ({ partId: input.id, engineId })),
-          skipDuplicates: true,
-        });
-      }
+      if (allEngineIds.length) await tx.partEngine.createMany({ data: allEngineIds.map((engineId) => ({ partId: input.id, engineId })), skipDuplicates: true });
 
       await writeAudit(tx, {
         tableName: "PartItem",
