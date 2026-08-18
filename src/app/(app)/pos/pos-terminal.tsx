@@ -422,11 +422,12 @@ export function PosTerminal({
                       className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-right transition-colors hover:bg-bmw-card disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-white">{part.nameAr}</p>
+                        <div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-sm font-bold text-white">{part.nameAr}</p>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم</Badge> : null}</div>
                         <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-bmw-muted">
                           <span>{formatOemNumber(part.oemNumber)}</span>
+                          {part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}
                           <span className="text-bmw-cardBorder">|</span>
-                          <span>{part.brandName}</span>
+                          <span className="font-bold text-bmw-silver">{part.brandName}</span>
                           {part.binCode ? (
                             <>
                               <span className="text-bmw-cardBorder">|</span>

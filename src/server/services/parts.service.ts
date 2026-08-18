@@ -34,6 +34,9 @@ export interface PartRow {
   engineIds: string[];
   chassisCodes: string[];
   engineCodes: string[];
+  duplicateOemCount: number;
+  duplicateNameCount: number;
+  duplicateBrands: string[];
 }
 
 const partInclude = {
@@ -45,7 +48,36 @@ const partInclude = {
 
 type PartWithRelations = Prisma.PartItemGetPayload<{ include: typeof partInclude }>;
 
-function toRow(p: PartWithRelations): PartRow {
+type DuplicateMetadata = {
+  oemCounts: Map<string, number>;
+  nameCounts: Map<string, number>;
+  brandsByOem: Map<string, string[]>;
+};
+
+async function getDuplicateMetadata(parts: Array<{ oemNumber: string; nameAr: string }>): Promise<DuplicateMetadata> {
+  const oems = [...new Set(parts.map((part) => part.oemNumber))];
+  const names = [...new Set(parts.map((part) => part.nameAr))];
+  if (!oems.length) return { oemCounts: new Map(), nameCounts: new Map(), brandsByOem: new Map() };
+  const active = { isActive: true, isDeleted: false };
+  const [oemGroups, nameGroups, variants] = await Promise.all([
+    prisma.partItem.groupBy({ by: ["oemNumber"], where: { ...active, oemNumber: { in: oems } }, _count: { _all: true } }),
+    prisma.partItem.groupBy({ by: ["nameAr"], where: { ...active, nameAr: { in: names } }, _count: { _all: true } }),
+    prisma.partItem.findMany({ where: { ...active, oemNumber: { in: oems } }, select: { oemNumber: true, brand: { select: { name: true } } }, orderBy: { brand: { name: "asc" } } }),
+  ]);
+  const brandsByOem = new Map<string, string[]>();
+  for (const variant of variants) {
+    const brands = brandsByOem.get(variant.oemNumber) ?? [];
+    if (!brands.includes(variant.brand.name)) brands.push(variant.brand.name);
+    brandsByOem.set(variant.oemNumber, brands);
+  }
+  return {
+    oemCounts: new Map(oemGroups.map((group) => [group.oemNumber, group._count._all])),
+    nameCounts: new Map(nameGroups.map((group) => [group.nameAr, group._count._all])),
+    brandsByOem,
+  };
+}
+
+function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts: new Map(), nameCounts: new Map(), brandsByOem: new Map() }): PartRow {
   return {
     id: p.id,
     oemNumber: p.oemNumber,
@@ -73,6 +105,9 @@ function toRow(p: PartWithRelations): PartRow {
     engineIds: p.compatibleEngines.map((e) => e.engineId),
     chassisCodes: p.compatibleChassis.map((c) => c.chassis.code),
     engineCodes: p.compatibleEngines.map((e) => e.engine.code),
+    duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0,
+    duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0,
+    duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name],
   };
 }
 
@@ -128,7 +163,8 @@ export async function searchParts(
     prisma.partItem.count({ where }),
   ]);
 
-  return { rows: rows.map(toRow), total, page: input.page, pageSize: input.pageSize };
+  const duplicates = await getDuplicateMetadata(rows);
+  return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.pageSize };
 }
 
 /**
@@ -156,6 +192,13 @@ export interface PosPartRow {
   stockQuantity: number;
   stockReserved: number;
   minReorderLevel: number;
+  duplicateOemCount: number;
+  duplicateNameCount: number;
+  duplicateBrands: string[];
+}
+
+function toPosRow(p: { id: string; oemNumber: string; nameAr: string; nameEn: string | null; brandPartNumber: string | null; category: string; sidePosition: string | null; sellPriceRetail: Prisma.Decimal; sellPriceWholesale: Prisma.Decimal; sellPriceMin: Prisma.Decimal; stockQuantity: number; stockReserved: number; minReorderLevel: number; brand: { name: string; isOem: boolean }; binLocation: { fullCode: string } | null }, duplicates: DuplicateMetadata): PosPartRow {
+  return { id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel, duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0, duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0, duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name] };
 }
 
 export async function quickSearchParts(query: string, limit = 12): Promise<PosPartRow[]> {
@@ -200,24 +243,8 @@ export async function quickSearchParts(query: string, limit = 12): Promise<PosPa
     take: limit,
   });
 
-  return rows.map((p) => ({
-    id: p.id,
-    oemNumber: p.oemNumber,
-    nameAr: p.nameAr,
-    nameEn: p.nameEn,
-    brandName: p.brand.name,
-    isOem: p.brand.isOem,
-    brandPartNumber: p.brandPartNumber,
-    category: p.category,
-    sidePosition: p.sidePosition,
-    binCode: p.binLocation?.fullCode ?? null,
-    sellPriceRetail: num(p.sellPriceRetail),
-    sellPriceWholesale: num(p.sellPriceWholesale),
-    sellPriceMin: num(p.sellPriceMin),
-    stockQuantity: p.stockQuantity,
-    stockReserved: p.stockReserved,
-    minReorderLevel: p.minReorderLevel,
-  }));
+  const duplicates = await getDuplicateMetadata(rows);
+  return rows.map((row) => toPosRow(row, duplicates));
 }
 
 export async function getPosPartsByIds(ids: string[]): Promise<PosPartRow[]> {
@@ -227,13 +254,16 @@ export async function getPosPartsByIds(ids: string[]): Promise<PosPartRow[]> {
     where: { id: { in: unique }, isDeleted: false },
     select: { id: true, oemNumber: true, nameAr: true, nameEn: true, brandPartNumber: true, category: true, sidePosition: true, sellPriceRetail: true, sellPriceWholesale: true, sellPriceMin: true, stockQuantity: true, stockReserved: true, minReorderLevel: true, brand: { select: { name: true, isOem: true } }, binLocation: { select: { fullCode: true } } },
   });
+  const [duplicates] = await Promise.all([getDuplicateMetadata(rows)]);
   const order = new Map(unique.map((id, index) => [id, index]));
-  return rows.map((p) => ({ id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel })).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  return rows.map((row) => toPosRow(row, duplicates)).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
 export async function getPartById(id: string): Promise<PartRow | null> {
   const part = await prisma.partItem.findUnique({ where: { id }, include: partInclude });
-  return part ? toRow(part) : null;
+  if (!part) return null;
+  const duplicates = await getDuplicateMetadata([part]);
+  return toRow(part, duplicates);
 }
 
 /** Ids of parts at or below their reorder level, worst deficit first. */
@@ -264,7 +294,8 @@ export async function getLowStockParts(limit = 50): Promise<PartRow[]> {
     include: partInclude,
   });
   const order = new Map(ids.map((r, i) => [r.id, i]));
-  return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map(toRow);
+  const duplicates = await getDuplicateMetadata(rows);
+  return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map((row) => toRow(row, duplicates));
 }
 
 export async function getPartFormOptions() {

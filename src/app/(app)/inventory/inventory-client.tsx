@@ -248,10 +248,10 @@ export function InventoryClient({
                 >
                   <TD><input aria-label={`تحديد ${part.nameAr}`} type="checkbox" checked={selectedIds.includes(part.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, part.id])] : current.filter((id) => id !== part.id))}/></TD>
                   <TD className="whitespace-nowrap font-mono text-xs text-bmw-blue">
-                    {formatOemNumber(part.oemNumber)}
+                    <div className="flex flex-wrap items-center gap-1.5"><span>{formatOemNumber(part.oemNumber)}</span>{part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}</div>
                   </TD>
                   <TD className="max-w-[240px]">
-                    <p className="truncate font-bold text-white">{part.nameAr}</p>
+                    <div className="flex flex-wrap items-center gap-1.5"><p className="truncate font-bold text-white">{part.nameAr}</p>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم ×{part.duplicateNameCount}</Badge> : null}</div>
                     <p className="truncate text-[11px] text-bmw-muted">
                       {[part.category, part.sidePosition].filter(Boolean).join(" • ")}
                     </p>

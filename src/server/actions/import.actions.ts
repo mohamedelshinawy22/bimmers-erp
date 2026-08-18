@@ -76,12 +76,6 @@ export async function executeInventoryImportAction(raw: ImportInput) {
 
     if (rows.length === 0) throw new BusinessRuleError("لا توجد أصناف سليمة قابلة للاستيراد بعد استبعاد الصفوف غير الصالحة.");
 
-    const seen = new Set<string>();
-    for (const row of rows) {
-      if (seen.has(row.oemNumber)) throw new BusinessRuleError(`رقم OEM ${row.oemNumber} مكرر داخل الصفوف السليمة في ملف الاستيراد.`);
-      seen.add(row.oemNumber);
-    }
-
     const checksum = createHash("sha256").update(JSON.stringify(rows.map((row) => ({ ...row, barcode: row.barcode || null })))).digest("hex");
     const previous = await prisma.importJob.findFirst({ where: { checksum, type: "INVENTORY", status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
     if (previous) return ok({ jobId: previous.id, duplicate: true, total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created: 0, skipped: rows.length, summary: previous.summary });
@@ -97,10 +91,12 @@ export async function executeInventoryImportAction(raw: ImportInput) {
           let chunkCreated = 0;
           let chunkSkipped = 0;
           for (const row of chunk) {
-            const exists = await tx.partItem.findUnique({ where: { oemNumber: row.oemNumber }, select: { id: true } });
+            const brand = await tx.brand.upsert({ where: { normalizedName: key(row.brand) }, update: {}, create: { name: row.brand, normalizedName: key(row.brand) }, select: { id: true } });
+            // A shared OEM is valid across brands. A repeated row for the same
+            // OEM + brand is idempotently skipped, preserving opening-stock safety.
+            const exists = await tx.partItem.findUnique({ where: { oemNumber_brandId: { oemNumber: row.oemNumber, brandId: brand.id } }, select: { id: true } });
             if (exists) { chunkSkipped += 1; continue; }
 
-            const brand = await tx.brand.upsert({ where: { normalizedName: key(row.brand) }, update: {}, create: { name: row.brand, normalizedName: key(row.brand) }, select: { id: true } });
             const category = await tx.category.upsert({ where: { normalizedName: key(row.category) }, update: {}, create: { name: row.category, normalizedName: key(row.category) }, select: { id: true } });
             const chassisIds: string[] = [];
             for (const code of codes(row.chassis)) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);

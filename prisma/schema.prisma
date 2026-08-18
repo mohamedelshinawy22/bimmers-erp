@@ -323,7 +323,7 @@ model WarehouseBin {
 
 model PartItem {
   id                  String    @id @default(uuid())
-  oemNumber           String    @unique // 11 digits BMW (e.g. 34116859066)
+  oemNumber           String // OEM may repeat across genuine, aftermarket, and supplier brands.
   partNumberFormatted String?
   nameAr              String
   nameEn              String?
@@ -367,7 +367,9 @@ model PartItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // oemNumber + barcode already carry unique btree indexes.
+  // A brand may only have one catalog variant for an OEM; the OEM itself may repeat across brands.
+  @@unique([oemNumber, brandId], map: "PartItem_oemNumber_brandId_key")
+  @@index([oemNumber], map: "PartItem_oemNumber_btree_idx")
   @@index([nameAr], map: "PartItem_nameAr_btree_idx")
   @@index([category])
   @@index([brandId])
