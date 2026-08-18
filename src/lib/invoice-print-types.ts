@@ -1,4 +1,4 @@
-export type InvoicePrintFormat = "A4_STANDARD" | "THERMAL_80";
+export type InvoicePrintFormat = "A4_STANDARD" | "A5" | "THERMAL_80" | "THERMAL_57" | "E_INVOICE";
 
 export interface InvoicePrintLine {
   id: string;
@@ -26,5 +26,8 @@ export interface InvoicePrintData {
 
 export const PRINT_FORMATS: Array<{ value: InvoicePrintFormat; label: string }> = [
   { value: "A4_STANDARD", label: "A4 رسمي" },
+  { value: "A5", label: "A5 نصف صفحة" },
   { value: "THERMAL_80", label: "حراري 80 مم" },
+  { value: "THERMAL_57", label: "حراري 57 مم" },
+  { value: "E_INVOICE", label: "فاتورة إلكترونية" },
 ];
