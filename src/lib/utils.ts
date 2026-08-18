@@ -145,6 +145,8 @@ export const ARABIC_LABELS = {
     BANK_ACCOUNT: "حساب بنكي",
     POS_TERMINAL: "ماكينة دفع",
     WALLET: "محفظة إلكترونية",
+    INSTAPAY: "إنستا باي",
+    OTHER: "أخرى",
   },
   transactionType: {
     RECEIPT: "سند قبض",

@@ -109,6 +109,29 @@ enum TreasuryType {
   BANK_ACCOUNT
   POS_TERMINAL
   WALLET
+  INSTAPAY
+  OTHER
+}
+
+enum BarcodeCodeType {
+  BARCODE
+  OEM_CODE
+  ITEM_CODE
+}
+
+enum BarcodePriceType {
+  RETAIL
+  WHOLESALE
+  NONE
+}
+
+enum ImportJobStatus {
+  PENDING
+  VALIDATING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
 enum TransactionType {
@@ -142,6 +165,8 @@ model User {
   stockMoves StockMovement[]
   shifts     TreasuryShift[]
   heldSales  HeldSale[]
+  transfers  TreasuryTransfer[]
+  importJobs ImportJob[]
 }
 
 model Brand {
@@ -158,9 +183,14 @@ model Category {
   id             String     @id @default(uuid())
   name           String     @unique
   normalizedName String     @unique
+  parentId       String?
+  parent         Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children       Category[] @relation("CategoryHierarchy")
   parts          PartItem[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+
+  @@index([parentId])
 }
 
 model BmwChassis {
@@ -333,18 +363,23 @@ model CustomerVehicle {
 
 model Treasury {
   id             String       @id @default(uuid())
-  name           String
+  name           String       @unique
   type           TreasuryType @default(CASH_DRAWER)
   currentBalance Decimal      @default(0.0) @db.Decimal(14, 2)
+  isDefault      Boolean      @default(false)
   isActive       Boolean      @default(true)
 
-  invoices     Invoice[]
-  transactions TreasuryTransaction[]
-  shifts       TreasuryShift[]
-  heldSales    HeldSale[]
+  invoices          Invoice[]
+  transactions      TreasuryTransaction[]
+  shifts            TreasuryShift[]
+  heldSales         HeldSale[]
+  transfersSent     TreasuryTransfer[]    @relation("TransferFrom")
+  transfersReceived TreasuryTransfer[]    @relation("TransferTo")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([isActive, isDefault])
 }
 
 /// Cashier shift / Z-Report envelope.
@@ -559,26 +594,90 @@ model StockMovement {
 }
 
 model TreasuryTransaction {
-  id                String          @id @default(uuid())
-  transactionNumber String          @unique
+  id                String            @id @default(uuid())
+  transactionNumber String            @unique
   treasuryId        String
-  treasury          Treasury        @relation(fields: [treasuryId], references: [id])
+  treasury          Treasury          @relation(fields: [treasuryId], references: [id])
   accountId         String?
-  account           Account?        @relation(fields: [accountId], references: [id])
+  account           Account?          @relation(fields: [accountId], references: [id])
   invoiceId         String?
-  invoice           Invoice?        @relation(fields: [invoiceId], references: [id])
+  invoice           Invoice?          @relation(fields: [invoiceId], references: [id])
+  transferId        String?
+  transfer          TreasuryTransfer? @relation(fields: [transferId], references: [id])
   type              TransactionType
-  amount            Decimal         @db.Decimal(12, 2)
+  category          String?
+  amount            Decimal           @db.Decimal(12, 2)
   description       String
   createdByUser     String
-  createdAt         DateTime        @default(now())
+  createdAt         DateTime          @default(now())
 
   @@index([treasuryId, createdAt])
   @@index([accountId, createdAt])
   @@index([invoiceId])
-  // Supports date-range scans that are not scoped to one treasury.
+  @@index([transferId])
   @@index([createdAt])
   @@index([type, createdAt])
+}
+
+model TreasuryTransfer {
+  id             String                @id @default(uuid())
+  transferNumber String                @unique
+  fromTreasuryId String
+  fromTreasury   Treasury              @relation("TransferFrom", fields: [fromTreasuryId], references: [id])
+  toTreasuryId   String
+  toTreasury     Treasury              @relation("TransferTo", fields: [toTreasuryId], references: [id])
+  amount         Decimal               @db.Decimal(12, 2)
+  notes          String?
+  createdById    String
+  createdBy      User                  @relation(fields: [createdById], references: [id])
+  transactions   TreasuryTransaction[]
+  createdAt      DateTime              @default(now())
+
+  @@index([fromTreasuryId, createdAt])
+  @@index([toTreasuryId, createdAt])
+}
+
+model BarcodeConfig {
+  id                String           @id @default(uuid())
+  scopeKey          String           @unique @default("COMPANY")
+  storeNameText     String           @default("الشافعي لقطع غيار BMW")
+  labelWidthMm      Decimal          @default(46.0) @db.Decimal(6, 2)
+  barcodeHeightMm   Decimal          @default(10.0) @db.Decimal(6, 2)
+  topMarginMm       Decimal          @default(0.0) @db.Decimal(6, 2)
+  leftMarginMm      Decimal          @default(1.0) @db.Decimal(6, 2)
+  fontFamily        String           @default("Arial")
+  titleFontSize     Int              @default(10)
+  partNameFontSize  Int              @default(9)
+  codeFontSize      Int              @default(10)
+  priceFontSize     Int              @default(10)
+  codeType          BarcodeCodeType  @default(BARCODE)
+  priceType         BarcodePriceType @default(NONE)
+  showPartName      Boolean          @default(true)
+  showCode          Boolean          @default(true)
+  showPrice         Boolean          @default(false)
+  includeTaxInPrice Boolean          @default(false)
+  twoLinePartName   Boolean          @default(false)
+  dualHorizontal    Boolean          @default(false)
+  dualVertical      Boolean          @default(false)
+  dualGapMm         Decimal          @default(1.0) @db.Decimal(6, 2)
+  targetPrinter     String           @default("Xprinter XP-370B")
+  updatedAt         DateTime         @updatedAt
+}
+
+model ImportJob {
+  id          String          @id @default(uuid())
+  type        String
+  status      ImportJobStatus @default(PENDING)
+  checksum    String
+  mapping     Json
+  summary     Json?
+  createdById String
+  createdBy   User            @relation(fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([createdById, status])
+  @@index([checksum])
 }
 
 model SystemAuditTrail {

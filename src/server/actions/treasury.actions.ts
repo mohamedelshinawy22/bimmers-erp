@@ -20,6 +20,7 @@ import {
 import { nextShiftNumber, nextTransactionNumber } from "@/server/services/numbering.service";
 import { lockAccountForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { treasuryReportSchema, treasurySchema, type TreasuryInput, type TreasuryReportInput } from "@/lib/validations/treasury";
 
 
 
@@ -110,6 +111,71 @@ export async function createTreasuryTransactionAction(
   }
 }
 
+export async function createTreasuryAction(raw: TreasuryInput): Promise<ActionResult<{ id: string; name: string }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    const input = treasurySchema.parse(raw);
+    const treasury = await prisma.$transaction(async (tx) => {
+      if (input.isDefault) await tx.treasury.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+      const created = await tx.treasury.create({ data: input });
+      await writeAudit(tx, { tableName: "Treasury", recordId: created.id, action: "INSERT", newData: created, performedBy: user.id });
+      return created;
+    }, TX_OPTIONS);
+    revalidatePath("/treasury");
+    return ok({ id: treasury.id, name: treasury.name });
+  } catch (error) { return toActionError(error, "createTreasuryAction"); }
+}
+
+export async function updateTreasuryAction(id: string, raw: TreasuryInput): Promise<ActionResult<{ id: string }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    const input = treasurySchema.parse(raw);
+    await prisma.$transaction(async (tx) => {
+      const before = await tx.treasury.findUnique({ where: { id } });
+      if (!before) throw new BusinessRuleError("الخزينة غير موجودة.");
+      if (input.isDefault) await tx.treasury.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
+      const updated = await tx.treasury.update({ where: { id }, data: input });
+      await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "UPDATE", oldData: before, newData: updated, performedBy: user.id });
+    }, TX_OPTIONS);
+    revalidatePath("/treasury");
+    return ok({ id });
+  } catch (error) { return toActionError(error, "updateTreasuryAction"); }
+}
+
+export async function deactivateTreasuryAction(id: string): Promise<ActionResult<{ id: string; hardDeleted: boolean }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    const result = await prisma.$transaction(async (tx) => {
+      const treasury = await tx.treasury.findUnique({ where: { id }, include: { _count: { select: { transactions: true, shifts: true, invoices: true, heldSales: true, transfersSent: true, transfersReceived: true } } } });
+      if (!treasury) throw new BusinessRuleError("الخزينة غير موجودة.");
+      const hasHistory = Object.values(treasury._count).some((count) => count > 0) || !treasury.currentBalance.eq(0);
+      if (!hasHistory) { await tx.treasury.delete({ where: { id } }); await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "DELETE", oldData: treasury, performedBy: user.id }); return { hardDeleted: true }; }
+      const updated = await tx.treasury.update({ where: { id }, data: { isActive: false, isDefault: false } });
+      await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "UPDATE", oldData: treasury, newData: updated, performedBy: user.id });
+      return { hardDeleted: false };
+    }, TX_OPTIONS);
+    revalidatePath("/treasury");
+    return ok({ id, ...result });
+  } catch (error) { return toActionError(error, "deactivateTreasuryAction"); }
+}
+
+export async function getTreasuryReportAction(raw: TreasuryReportInput) {
+  try {
+    await requirePermission("treasury.read");
+    const input = treasuryReportSchema.parse(raw);
+    const where = input.treasuryIds.length ? { in: input.treasuryIds } : undefined;
+    const [treasuries, prior, period] = await Promise.all([
+      prisma.treasury.findMany({ where: { isActive: true, ...(where ? { id: where } : {}) }, select: { id: true, name: true, currentBalance: true } }),
+      prisma.treasuryTransaction.groupBy({ by: ["treasuryId"], where: { ...(where ? { treasuryId: where } : {}), createdAt: { lt: input.fromDate } }, _sum: { amount: true } }),
+      prisma.treasuryTransaction.groupBy({ by: ["treasuryId"], where: { ...(where ? { treasuryId: where } : {}), createdAt: { gte: input.fromDate, lt: input.toDate } }, _sum: { amount: true } }),
+    ]);
+    const priorMap = new Map(prior.map((row) => [row.treasuryId, money(row._sum.amount ?? 0)]));
+    const periodMap = new Map(period.map((row) => [row.treasuryId, money(row._sum.amount ?? 0)]));
+    const rows = treasuries.map((treasury) => { const opening = priorMap.get(treasury.id) ?? money(0); const netMovement = periodMap.get(treasury.id) ?? money(0); return { id: treasury.id, name: treasury.name, previousBalance: Number(opening), netMovement: Number(netMovement), endingBalance: Number(opening.add(netMovement)), currentBalance: Number(treasury.currentBalance) }; });
+    return ok({ fromDate: input.fromDate.toISOString(), toDate: input.toDate.toISOString(), rows, totals: rows.reduce((sum, row) => ({ previousBalance: sum.previousBalance + row.previousBalance, netMovement: sum.netMovement + row.netMovement, endingBalance: sum.endingBalance + row.endingBalance, currentBalance: sum.currentBalance + row.currentBalance }), { previousBalance: 0, netMovement: 0, endingBalance: 0, currentBalance: 0 }) });
+  } catch (error) { return toActionError(error, "getTreasuryReportAction"); }
+}
+
 /** Internal transfer — both treasuries locked in sorted order (deadlock-free). */
 export async function transferBetweenTreasuriesAction(
   raw: TreasuryTransferInput,
@@ -142,12 +208,23 @@ export async function transferBetweenTreasuriesAction(
 
         const outNumber = await nextTransactionNumber(tx);
         const inNumber = await nextTransactionNumber(tx);
+        const transfer = await tx.treasuryTransfer.create({
+          data: {
+            transferNumber: `TRF-${outNumber}`,
+            fromTreasuryId: from.id,
+            toTreasuryId: to.id,
+            amount,
+            notes: input.description || null,
+            createdById: user.id,
+          },
+        });
 
         await tx.treasuryTransaction.createMany({
           data: [
             {
               transactionNumber: outNumber,
               treasuryId: from.id,
+              transferId: transfer.id,
               type: "TRANSFER",
               amount: amount.neg(),
               description: `تحويل صادر إلى "${to.name}" — ${input.description}`,
@@ -156,6 +233,7 @@ export async function transferBetweenTreasuriesAction(
             {
               transactionNumber: inNumber,
               treasuryId: to.id,
+              transferId: transfer.id,
               type: "TRANSFER",
               amount,
               description: `تحويل وارد من "${from.name}" — ${input.description}`,
@@ -169,7 +247,7 @@ export async function transferBetweenTreasuriesAction(
           recordId: from.id,
           action: "UPDATE",
           oldData: { from: from.currentBalance, to: to.currentBalance },
-          newData: { transferred: amount, fromId: from.id, toId: to.id },
+          newData: { transferred: amount, fromId: from.id, toId: to.id, transferId: transfer.id },
           performedBy: user.id,
         });
 
