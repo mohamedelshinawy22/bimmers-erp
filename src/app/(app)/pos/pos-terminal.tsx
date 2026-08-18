@@ -25,7 +25,7 @@ import { lineTotal as calcLineTotal, round2, sum as sumMoney, taxOf } from "@/li
 import type { PosPartRow } from "@/server/services/parts.service";
 import type { AccountVehicle, PosAccount } from "@/server/services/accounts.service";
 import { getAccountVehiclesAction, searchPartsForPosAction } from "@/server/actions/search.actions";
-import { createSaleInvoiceAction, type InvoiceResult } from "@/server/actions/invoice.actions";
+import { createSaleInvoiceAction, updateSaleInvoiceAction, type InvoiceResult } from "@/server/actions/invoice.actions";
 import { holdSaleAction } from "@/server/actions/held-sales.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { QuickPartModal } from "@/components/pos/quick-part-modal";
@@ -70,6 +70,7 @@ interface PosTerminalProps {
   enforceCreditLimit: boolean;
   allowNegativeStock: boolean;
   receiptFooter: string;
+  initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; vehicleId: string | null; paymentMethod: PaymentMethod; discountAmount: number; paidAmount: number; notes: string | null; lines: CartLine[] };
 }
 
 type PaymentMethod = "CASH" | "VISA" | "SPLIT" | "ON_ACCOUNT";
@@ -95,6 +96,7 @@ export function PosTerminal({
   enforceCreditLimit,
   allowNegativeStock,
   receiptFooter,
+  initialDraft,
 }: PosTerminalProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -121,6 +123,20 @@ export function PosTerminal({
   const [receipt, setReceipt] = useState<InvoiceResult | null>(null);
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const isEditMode = Boolean(initialDraft);
+
+  useEffect(() => {
+    if (!initialDraft) return;
+    setCart(initialDraft.lines);
+    setAccountId(initialDraft.accountId);
+    setTreasuryId(initialDraft.treasuryId ?? "");
+    setVehicleId(initialDraft.vehicleId ?? "");
+    setPaymentMethod(initialDraft.paymentMethod);
+    setInvoiceDiscount(initialDraft.discountAmount);
+    setPaidInput(String(initialDraft.paidAmount));
+    setNotes(initialDraft.notes ?? "");
+    setError(null);
+  }, [initialDraft]);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
@@ -175,7 +191,7 @@ export function PosTerminal({
         const index = current.findIndex((l) => l.part.id === part.id);
         if (index >= 0) {
           const existing = current[index]!;
-          if (!allowNegativeStock && existing.quantity + 1 > available) {
+          if (!isEditMode && !allowNegativeStock && existing.quantity + 1 > available) {
             setError(`الرصيد المتاح للصنف "${part.nameAr}" هو ${available} فقط.`);
             return current;
           }
@@ -183,7 +199,7 @@ export function PosTerminal({
           next[index] = { ...existing, quantity: existing.quantity + 1 };
           return next;
         }
-        if (!allowNegativeStock && available <= 0) {
+        if (!isEditMode && !allowNegativeStock && available <= 0) {
           setError(`الصنف "${part.nameAr}" نافد من المخزون.`);
           return current;
         }
@@ -201,7 +217,7 @@ export function PosTerminal({
       setResults([]);
       searchRef.current?.focus();
     },
-    [isWholesale, allowNegativeStock],
+    [isWholesale, allowNegativeStock, isEditMode],
   );
 
   const updateLine = (partId: string, patch: Partial<Omit<CartLine, "part">>) => {
@@ -210,7 +226,7 @@ export function PosTerminal({
         if (line.part.id !== partId) return line;
         const next = { ...line, ...patch };
         const available = availableOf(line.part);
-        if (!allowNegativeStock && next.quantity > available) {
+        if (!isEditMode && !allowNegativeStock && next.quantity > available) {
           setError(`الرصيد المتاح للصنف "${line.part.nameAr}" هو ${available} فقط.`);
           next.quantity = Math.max(1, available);
         }
@@ -329,7 +345,7 @@ export function PosTerminal({
   const submit = () => {
     setError(null);
     startTransition(async () => {
-      const result = await createSaleInvoiceAction({
+      const payload = {
         accountId,
         treasuryId: payFull || appliedPaid > 0 ? treasuryId : "",
         vehicleId: vehicleId || "",
@@ -348,7 +364,8 @@ export function PosTerminal({
           unitPrice: l.unitPrice,
           lineDiscount: l.lineDiscount,
         })),
-      });
+      };
+      const result = initialDraft ? await updateSaleInvoiceAction({ ...payload, invoiceId: initialDraft.invoiceId }) : await createSaleInvoiceAction(payload);
 
       if (!result.success) {
         setError(result.error);
@@ -795,7 +812,7 @@ export function PosTerminal({
       <Modal
         open={!!receipt}
         onClose={() => setReceipt(null)}
-        title="تم حفظ الفاتورة بنجاح"
+        title={isEditMode ? "تم حفظ تعديلات الفاتورة بنجاح" : "تم حفظ الفاتورة بنجاح"}
         size="sm"
         footer={
           <>

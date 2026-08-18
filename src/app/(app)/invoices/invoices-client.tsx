@@ -207,7 +207,7 @@ export function InvoicesClient({
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
                     {formatDateTime(inv.createdAt)}
                   </TD>
-                  <TD><InvoiceActionMenu invoice={inv} canVoid={permissions.canVoid} canSettle={permissions.canSettle} onDetail={() => void openDetail(inv.id)} onEdit={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/edit/${inv.id}`)} onPrint={() => setPrintInvoiceId(inv.id)} onSettle={() => setSettlementTarget(inv)} onReturn={() => setReturnTarget(inv)} onVoid={() => setVoidTarget(inv)} /></TD>
+                  <TD><InvoiceActionMenu invoice={inv} canVoid={permissions.canVoid} canSettle={permissions.canSettle} onDetail={() => void openDetail(inv.id)} onEdit={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/${inv.id}/edit`)} onPrint={() => setPrintInvoiceId(inv.id)} onSettle={() => setSettlementTarget(inv)} onReturn={() => setReturnTarget(inv)} onVoid={() => setVoidTarget(inv)} /></TD>
                 </TR>
               ))
             )}

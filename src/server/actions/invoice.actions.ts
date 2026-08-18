@@ -10,14 +10,20 @@ import {
   createPurchaseInvoiceSchema,
   voidInvoiceSchema,
   createInvoiceReturnSchema,
+  updateSaleInvoiceSchema,
+  updatePurchaseInvoiceSchema,
   type CreateSaleInvoiceInput,
   type CreatePurchaseInvoiceInput,
   type CreateInvoiceReturnInput,
+  type UpdateSaleInvoiceInput,
+  type UpdatePurchaseInvoiceInput,
   type VoidInvoiceInput,
 } from "@/lib/validations/invoice";
 import {
   createPurchaseInvoice,
   createSaleInvoice,
+  updateSaleInvoice,
+  updatePurchaseInvoice,
   createInvoiceReturn,
   voidInvoice,
   type InvoiceResult,
@@ -76,6 +82,30 @@ export async function createPurchaseInvoiceAction(
     return ok(result);
   } catch (error) {
     return toActionError(error, "createPurchaseInvoiceAction");
+  }
+}
+
+export async function updateSaleInvoiceAction(raw: UpdateSaleInvoiceInput): Promise<ActionResult<InvoiceResult>> {
+  try {
+    const user = await requirePermission("invoice.sale");
+    const input = updateSaleInvoiceSchema.parse(raw);
+    const result = await updateSaleInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    await revalidateAfterInvoice(["/", "/pos", "/invoices", "/inventory", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "updateSaleInvoiceAction");
+  }
+}
+
+export async function updatePurchaseInvoiceAction(raw: UpdatePurchaseInvoiceInput): Promise<ActionResult<InvoiceResult>> {
+  try {
+    const user = await requirePermission("invoice.purchase");
+    const input = updatePurchaseInvoiceSchema.parse(raw);
+    const result = await updatePurchaseInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "updatePurchaseInvoiceAction");
   }
 }
 

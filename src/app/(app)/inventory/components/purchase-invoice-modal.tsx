@@ -12,7 +12,7 @@ import { CURRENCY, formatMoney, formatOemNumber } from "@/lib/utils";
 import { lineTotal as calcLineTotal, round2, sum as sumMoney, taxOf } from "@/lib/money";
 import type { PosPartRow } from "@/server/services/parts.service";
 import { searchPartsForPosAction } from "@/server/actions/search.actions";
-import { createPurchaseInvoiceAction } from "@/server/actions/invoice.actions";
+import { createPurchaseInvoiceAction, updatePurchaseInvoiceAction } from "@/server/actions/invoice.actions";
 import { createPartAction } from "@/server/actions/parts.actions";
 
 interface Line {
@@ -28,6 +28,7 @@ interface PurchaseInvoiceModalProps {
   suppliers: Array<{ id: string; name: string; accountNumber: string; currentBalance: number }>;
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   taxRatePercent: number;
+  initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; paymentMethod: "CASH" | "VISA" | "ON_ACCOUNT"; discountAmount: number; paidAmount: number; notes: string | null; lines: Line[] };
 }
 
 /**
@@ -49,6 +50,7 @@ export function PurchaseInvoiceModal({
   suppliers,
   treasuries,
   taxRatePercent,
+  initialDraft,
 }: PurchaseInvoiceModalProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -67,6 +69,22 @@ export function PurchaseInvoiceModal({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ invoiceNumber: string; grandTotal: number } | null>(null);
   const [quickPartOpen, setQuickPartOpen] = useState(false);
+  const isEditMode = Boolean(initialDraft);
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialDraft) {
+      setSupplierId(initialDraft.accountId);
+      setTreasuryId(initialDraft.treasuryId ?? "");
+      setPaymentMethod(initialDraft.paymentMethod);
+      setInvoiceDiscount(initialDraft.discountAmount);
+      setPaidInput(String(initialDraft.paidAmount));
+      setNotes(initialDraft.notes ?? "");
+      setLines(initialDraft.lines);
+      setError(null);
+      setDone(null);
+    }
+  }, [open, initialDraft]);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
@@ -158,7 +176,7 @@ export function PurchaseInvoiceModal({
   const submit = () => {
     setError(null);
     startTransition(async () => {
-      const res = await createPurchaseInvoiceAction({
+      const payload = {
         accountId: supplierId,
         treasuryId: appliedPaid > 0 || payFull ? treasuryId : "",
         vehicleId: "",
@@ -174,7 +192,8 @@ export function PurchaseInvoiceModal({
           unitPrice: l.unitPrice,
           lineDiscount: l.lineDiscount,
         })),
-      });
+      };
+      const res = initialDraft ? await updatePurchaseInvoiceAction({ ...payload, invoiceId: initialDraft.invoiceId }) : await createPurchaseInvoiceAction(payload);
       if (!res.success) {
         setError(res.error);
         return;
@@ -224,8 +243,8 @@ export function PurchaseInvoiceModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="فاتورة شراء — استلام شحنة واردة"
-      description="سعر الشراء المُدخَل هنا يحدّد متوسط تكلفة الصنف، وبالتالي هامش الربح في كل بيعة قادمة."
+        title={isEditMode ? "تعديل فاتورة شراء" : "فاتورة شراء — استلام شحنة واردة"}
+        description={isEditMode ? "سيتم عكس أثر المستند السابق ثم تطبيق التعديلات داخل معاملة مالية واحدة." : "سعر الشراء المُدخَل هنا يحدّد متوسط تكلفة الصنف، وبالتالي هامش الربح في كل بيعة قادمة."}
       size="xl"
       footer={
         <>
@@ -233,7 +252,7 @@ export function PurchaseInvoiceModal({
             إلغاء
           </Button>
           <Button onClick={submit} loading={pending} disabled={!canSubmit}>
-            <ShoppingBag size={16} /> حفظ فاتورة الشراء
+            <ShoppingBag size={16} /> {isEditMode ? "حفظ تعديلات الفاتورة" : "حفظ فاتورة الشراء"}
           </Button>
         </>
       }

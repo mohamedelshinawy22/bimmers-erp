@@ -99,6 +99,12 @@ export const createPurchaseInvoiceSchema = z
 
 export type CreatePurchaseInvoiceInput = z.infer<typeof createPurchaseInvoiceSchema>;
 
+export const updateSaleInvoiceSchema = createSaleInvoiceSchema.extend({ invoiceId: uuid });
+export type UpdateSaleInvoiceInput = z.infer<typeof updateSaleInvoiceSchema>;
+
+export const updatePurchaseInvoiceSchema = createPurchaseInvoiceSchema.extend({ invoiceId: uuid });
+export type UpdatePurchaseInvoiceInput = z.infer<typeof updatePurchaseInvoiceSchema>;
+
 export const voidInvoiceSchema = z.object({
   invoiceId: uuid,
   reason: z.string().trim().min(5, "يجب كتابة سبب الإلغاء بشكل واضح").max(500),

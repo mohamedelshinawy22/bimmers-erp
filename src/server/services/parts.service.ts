@@ -219,6 +219,17 @@ export async function quickSearchParts(query: string, limit = 12): Promise<PosPa
   }));
 }
 
+export async function getPosPartsByIds(ids: string[]): Promise<PosPartRow[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const rows = await prisma.partItem.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, oemNumber: true, nameAr: true, nameEn: true, brandPartNumber: true, category: true, sidePosition: true, sellPriceRetail: true, sellPriceWholesale: true, sellPriceMin: true, stockQuantity: true, stockReserved: true, minReorderLevel: true, brand: { select: { name: true, isOem: true } }, binLocation: { select: { fullCode: true } } },
+  });
+  const order = new Map(unique.map((id, index) => [id, index]));
+  return rows.map((p) => ({ id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel })).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
 export async function getPartById(id: string): Promise<PartRow | null> {
   const part = await prisma.partItem.findUnique({ where: { id }, include: partInclude });
   return part ? toRow(part) : null;

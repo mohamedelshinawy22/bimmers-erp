@@ -147,9 +147,10 @@ export async function getInvoiceDetail(invoiceId: string) {
       createdAt: true,
       account: { select: { id: true, name: true, accountNumber: true, phone: true, taxNumber: true } },
       user: { select: { fullName: true } },
-      treasury: { select: { name: true } },
+      treasury: { select: { id: true, name: true } },
       vehicle: {
         select: {
+          id: true,
           vin: true,
           plateNumber: true,
           modelYear: true,

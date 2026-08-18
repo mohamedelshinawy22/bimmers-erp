@@ -136,6 +136,18 @@ export async function lockPartsForUpdate(tx: TxClient, partIds: string[]): Promi
   );
 }
 
+export async function lockAccountsForUpdate(tx: TxClient, accountIds: string[]): Promise<Map<string, { id: string; name: string; type: AccountType; currentBalance: Prisma.Decimal; creditLimit: Prisma.Decimal; defaultPriceTier: string; isActive: boolean }>> {
+  const unique = [...new Set(accountIds)].sort();
+  if (unique.length === 0) return new Map();
+  const rows = await tx.$queryRaw<Array<{ id: string; name: string; type: AccountType; currentBalance: Prisma.Decimal; creditLimit: Prisma.Decimal; defaultPriceTier: string; isActive: boolean }>>(Prisma.sql`
+    SELECT "id", "name", "type", "currentBalance", "creditLimit", "defaultPriceTier", "isActive"
+    FROM "Account" WHERE "id" IN (${Prisma.join(unique)}) ORDER BY "id" FOR UPDATE
+  `);
+  if (rows.length !== unique.length) throw new BusinessRuleError("أحد الحسابات المحددة غير موجود.");
+  for (const row of rows) if (!row.isActive) throw new BusinessRuleError(`الحساب "${row.name}" موقوف.`);
+  return new Map(rows.map((row) => [row.id, { ...row, currentBalance: new Prisma.Decimal(row.currentBalance.toString()), creditLimit: new Prisma.Decimal(row.creditLimit.toString()) }]));
+}
+
 /** Lock a single treasury row so concurrent receipts can't clobber the balance. */
 export async function lockTreasuriesForUpdate(
   tx: TxClient,
