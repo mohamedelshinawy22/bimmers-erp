@@ -1,0 +1,7 @@
+import { formatDateTime, formatMoney } from "@/lib/utils";
+import type { InvoicePrintData } from "@/lib/invoice-print-types";
+import { InvoiceQrCode } from "../qr-code";
+
+export function SalesA5Template({ data }: { data: InvoicePrintData }) {
+  return <article className="invoice-print-page invoice-a5" dir="rtl"><header className="flex justify-between border-b pb-3"><div><h1>{data.company.name}</h1><p>{data.company.address}</p><p>{data.company.phone}</p></div><div><h2>فاتورة بيع</h2><p>رقم: {data.invoice.invoiceNumber}</p><p>{formatDateTime(data.invoice.createdAt)}</p></div></header><section className="my-3 grid grid-cols-2 gap-3 text-sm"><div><b>العميل:</b> {data.account.name}</div><div><b>الهاتف:</b> {data.account.phone || "—"}</div></section><table className="w-full text-sm"><thead><tr><th>#</th><th>الصنف</th><th>OEM</th><th>كمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>{data.lines.map((line, index) => <tr key={line.id}><td>{index + 1}</td><td>{line.nameAr}</td><td dir="ltr">{line.oemNumber}</td><td>{line.quantity}</td><td>{formatMoney(line.unitPrice)}</td><td>{formatMoney(line.totalPrice)}</td></tr>)}</tbody></table><footer className="mt-4 flex justify-between border-t pt-3"><div><p>الإجمالي: <b>{formatMoney(data.invoice.grandTotal)}</b></p><p>المدفوع: {formatMoney(data.invoice.paidAmount)}</p><p>المتبقي: {formatMoney(data.invoice.remainingAmount)}</p></div><InvoiceQrCode value={data.invoice.verificationUrl}/></footer></article>;
+}
