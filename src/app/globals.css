@@ -162,3 +162,32 @@
 }
 @page invoice-a5 { size: A5 portrait; margin: 8mm; }
 @page invoice-57mm { size: 57mm auto; margin: 2mm; }
+
+/* Safari/WebKit-safe print target isolation. Never let hidden app chrome cascade into print output. */
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body * { visibility: hidden !important; }
+  #printable-area, #printable-area *, .invoice-print-root, .invoice-print-root * {
+    visibility: visible !important;
+  }
+  #printable-area, .invoice-print-root {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 12mm !important;
+    display: block !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print, header, nav, aside, .modal-backdrop, button { display: none !important; }
+}
