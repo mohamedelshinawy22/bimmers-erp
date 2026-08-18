@@ -28,6 +28,7 @@ import { getAccountVehiclesAction, searchPartsForPosAction } from "@/server/acti
 import { createSaleInvoiceAction, type InvoiceResult } from "@/server/actions/invoice.actions";
 import { holdSaleAction } from "@/server/actions/held-sales.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
+import { QuickPartModal } from "@/components/pos/quick-part-modal";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -103,6 +104,7 @@ export function PosTerminal({
   const [terminalAccounts, setTerminalAccounts] = useState(accounts);
   const [accountId, setAccountId] = useState(defaultAccountId ?? "");
   const [quickAccountOpen, setQuickAccountOpen] = useState(false);
+  const [quickPartOpen, setQuickPartOpen] = useState(false);
   const [vehicleId, setVehicleId] = useState("");
   const [treasuryId, setTreasuryId] = useState(defaultTreasuryId ?? "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
@@ -297,6 +299,7 @@ export function PosTerminal({
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.altKey && event.key.toLowerCase() === "n") { event.preventDefault(); setQuickAccountOpen(true); }
+      if (event.altKey && event.key.toLowerCase() === "p") { event.preventDefault(); setQuickPartOpen(true); }
       if (event.key === "F9" && !checkoutOpen) {
         event.preventDefault();
         if (canCheckout) setCheckoutOpen(true);
@@ -425,6 +428,8 @@ export function PosTerminal({
                 ))}
               </ul>
             ) : null}
+            {query.trim().length >= 2 && !searching && results.length === 0 ? <Button type="button" variant="outline" className="w-full" onClick={() => setQuickPartOpen(true)}><Plus size={15}/> إضافة صنف جديد "{query.trim()}"</Button> : null}
+            <Button type="button" size="sm" variant="ghost" onClick={() => setQuickPartOpen(true)}><Plus size={14}/> صنف جديد (Alt+P)</Button>
           </CardContent>
         </Card>
 
@@ -527,6 +532,7 @@ export function PosTerminal({
       </div>
 
       {quickAccountOpen ? <QuickAccountModal onClose={() => setQuickAccountOpen(false)} onCreated={(created) => { setTerminalAccounts((current) => [...current, { ...created, vehicleCount: 0 }]); setAccountId(created.id); setVehicleId(""); setQuickAccountOpen(false); }} /> : null}
+      {quickPartOpen ? <QuickPartModal initialName={query} onClose={() => setQuickPartOpen(false)} onCreated={(part) => { addToCart(part); setQuickPartOpen(false); }} /> : null}
 
       {/* ══ Totals / customer ══ */}
       <div className="space-y-4">
