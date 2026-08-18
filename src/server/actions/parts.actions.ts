@@ -74,6 +74,10 @@ export async function createPartAction(
         if (count !== input.engineIds.length) throw new BusinessRuleError("أحد أكواد المحرك غير صالح.");
       }
 
+      const customChassisIds = await Promise.all(input.chassisCodes.map(async (code) => (await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id));
+      const customEngineIds = await Promise.all(input.engineCodes.map(async (code) => (await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id));
+      const allChassisIds = [...new Set([...input.chassisIds, ...customChassisIds])];
+      const allEngineIds = [...new Set([...input.engineIds, ...customEngineIds])];
       const buyPrice = money(input.buyPriceLast);
       const created = await tx.partItem.create({
         data: {
@@ -101,10 +105,10 @@ export async function createPartAction(
           minReorderLevel: input.minReorderLevel,
           isActive: input.isActive,
           compatibleChassis: {
-            createMany: { data: input.chassisIds.map((chassisId) => ({ chassisId })) },
+            createMany: { data: allChassisIds.map((chassisId) => ({ chassisId })) },
           },
           compatibleEngines: {
-            createMany: { data: input.engineIds.map((engineId) => ({ engineId })) },
+            createMany: { data: allEngineIds.map((engineId) => ({ engineId })) },
           },
         },
       });

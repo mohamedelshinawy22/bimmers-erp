@@ -30,6 +30,7 @@ const emptyForm = {
   nameAr: "",
   nameEn: "",
   brandId: "",
+  brandName: "",
   brandPartNumber: "",
   barcode: "",
   category: "",
@@ -75,6 +76,7 @@ export function AddPartModal({
           nameAr: part.nameAr,
           nameEn: part.nameEn ?? "",
           brandId: part.brandId,
+          brandName: part.brandName,
           brandPartNumber: part.brandPartNumber ?? "",
           barcode: part.barcode ?? "",
           category: part.category,
@@ -119,8 +121,8 @@ export function AddPartModal({
       const shared = {
         nameAr: form.nameAr,
         nameEn: form.nameEn,
-        brandId: form.brandId,
-        brandName: "",
+        brandId: form.brandName ? "" : form.brandId,
+        brandName: form.brandName,
         brandPartNumber: form.brandPartNumber,
         barcode: form.barcode,
         category: form.category,
@@ -220,16 +222,9 @@ export function AddPartModal({
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="الماركة" required error={err("brandId")}>
-                <Select value={form.brandId} onChange={set("brandId")}>
-                  <option value="">— اختر —</option>
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                      {b.isOem ? " ★" : ""}
-                    </option>
-                  ))}
-                </Select>
+              <Field label="الماركة" required error={err("brandId")} hint="اكتب ماركة جديدة أو اختر من الاقتراحات">
+                <Input list="part-brand-options" value={form.brandName} onChange={set("brandName")} placeholder="مثال: Valeo أو Febi" />
+                <datalist id="part-brand-options">{brands.map((b) => <option key={b.id} value={b.name}>{b.isOem ? "OEM" : ""}</option>)}</datalist>
               </Field>
               <Field label="رقم القطعة عند الماركة" error={err("brandPartNumber")}>
                 <Input
