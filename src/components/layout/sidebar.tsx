@@ -13,6 +13,7 @@ import {
   ScrollText,
   RotateCcw,
   ShieldCheck,
+  BarChart3,
 } from "lucide-react";
 import type { Role } from "@prisma/client";
 import { can, type Permission } from "@/lib/permissions";
@@ -39,6 +40,7 @@ const NAV: Array<{
   { href: "/purchases/returns", label: "مرتجع المشتريات", icon: RotateCcw, hotkey: null, permission: "invoice.purchase" },
   { href: "/accounts", label: "الحسابات والورش", icon: Users, hotkey: "F4", permission: "account.read" },
   { href: "/treasury", label: "الخزينة والسيولة", icon: Wallet, hotkey: "F5", permission: "treasury.read" },
+  { href: "/reports/daily-movement", label: "تقرير الحركة اليومية", icon: BarChart3, hotkey: null, permission: "reports.dailyMovement" },
   { href: "/audit", label: "سجل التدقيق", icon: ShieldCheck, hotkey: null, permission: "audit.read" },
   { href: "/users", label: "المستخدمون والصلاحيات", icon: ShieldCheck, hotkey: null, permission: "user.manage" },
   { href: "/settings", label: "الإعدادات", icon: SlidersHorizontal, hotkey: null, permission: "settings.read" },
