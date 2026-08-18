@@ -14,6 +14,7 @@ import {
   ShoppingBag,
   Printer,
   FileSpreadsheet,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { CURRENCY, formatInt, formatMoney, formatOemNumber } from "@/lib/utils";
 import type { PartRow } from "@/server/services/parts.service";
-import { adjustStockAction } from "@/server/actions/parts.actions";
+import { adjustStockAction, deletePartAction } from "@/server/actions/parts.actions";
 import { AddPartModal } from "./components/add-part-modal";
 import type { BinOption } from "./components/bin-locator";
 import type { ChassisOption, EngineOption } from "./components/fitment-matrix";
@@ -52,6 +53,7 @@ interface InventoryClientProps {
     canManageBins: boolean;
     canPurchase: boolean;
     canViewLedger: boolean;
+    canDelete: boolean;
   };
   purchaseOptions: {
     suppliers: Array<{ id: string; name: string; accountNumber: string; currentBalance: number }>;
@@ -85,6 +87,7 @@ export function InventoryClient({
   const [query, setQuery] = useState(filters.query);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PartRow[] | null>(null);
   const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
 
@@ -131,6 +134,17 @@ export function InventoryClient({
           ) : null}
         </div>
       </div>
+
+      {selectedParts.length > 0 ? (
+        <div className="fixed inset-x-4 bottom-5 z-40 mx-auto flex w-auto max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-bmw-blue/40 bg-bmw-black/95 px-4 py-3 shadow-2xl backdrop-blur">
+          <p className="text-sm font-bold text-white">تم تحديد <span className="tabular text-bmw-blue">{selectedParts.length}</span> صنف</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={15} /> طباعة الباركود</Button>
+            {permissions.canDelete ? <Button size="sm" variant="danger" onClick={() => setDeleteTarget(selectedParts)}><Trash2 size={15} /> حذف المحدد</Button> : null}
+            <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>إلغاء التحديد</Button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Filters */}
       <Card>
@@ -298,6 +312,16 @@ export function InventoryClient({
                           <Pencil size={14} />
                         </button>
                       ) : null}
+                      {permissions.canDelete ? (
+                        <button
+                          type="button"
+                          onClick={(event) => { event.stopPropagation(); setDeleteTarget([part]); }}
+                          title="حذف الصنف"
+                          className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-mRed/10 hover:text-bmw-mRed"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
                       {permissions.canAdjust ? (
                         <button
                           type="button"
@@ -404,6 +428,7 @@ export function InventoryClient({
       ) : null}
 
       {barcodePrintOpen ? <BatchBarcodePrintModal parts={selectedParts} onClose={() => setBarcodePrintOpen(false)} /> : null}
+      {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
 
       {permissions.canPurchase ? (
@@ -417,6 +442,21 @@ export function InventoryClient({
       ) : null}
     </div>
   );
+}
+
+function DeletePartsModal({ parts, onClose, onDeleted }: { parts: PartRow[]; onClose: () => void; onDeleted: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const submit = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await deletePartAction({ partIds: parts.map((part) => part.id) });
+      if (!result.success) { setError(result.error); return; }
+      onDeleted();
+    });
+  };
+  const title = parts.length === 1 ? `حذف الصنف: ${parts[0]?.nameAr ?? ""}` : `حذف ${parts.length} أصناف محددة`;
+  return <Modal open onClose={onClose} title={title} description="لا يمكن التراجع عن حذف صنف من الكتالوج." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> تأكيد الحذف</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">سيجري النظام فحص كل صنف قبل الحذف. أي فاتورة بيع أو شراء أو مرتجع أو حركة مخزون أو عملية بيع معلقة مرتبطة بالصنف ستمنع الحذف بالكامل لحماية السجل المحاسبي.</Alert><div className="max-h-36 space-y-1 overflow-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-xs">{parts.map((part) => <p key={part.id}><b className="text-white">{part.nameAr}</b> <span className="font-mono text-bmw-muted">{formatOemNumber(part.oemNumber)}</span></p>)}</div></div></Modal>;
 }
 
 function BatchBarcodePrintModal({ parts, onClose }: { parts: PartRow[]; onClose: () => void }) {

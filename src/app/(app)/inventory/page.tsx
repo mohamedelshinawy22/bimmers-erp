@@ -74,6 +74,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
         canManageBins: can(user.role, "part.write"),
         canPurchase,
         canViewLedger: can(user.role, "stock.viewLedger"),
+        canDelete: can(user.role, "part.deactivate"),
       }}
       purchaseOptions={{
         suppliers: purchaseOptions.suppliers,

@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
@@ -235,6 +236,55 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
     return ok({ id: input.id });
   } catch (error) {
     return toActionError(error, "updatePartAction");
+  }
+}
+
+const deletePartsSchema = z.object({ partIds: z.array(z.string().uuid()).min(1).max(200) });
+
+/**
+ * Removes only catalog-only parts. Any historical invoice, stock ledger, or
+ * held-sale reference blocks the whole selected set, preserving auditability.
+ */
+export async function deletePartAction(raw: { partIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
+  try {
+    const user = await requirePermission("part.deactivate");
+    const input = deletePartsSchema.parse(raw);
+    const partIds = [...new Set(input.partIds)];
+
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const parts = await tx.partItem.findMany({ where: { id: { in: partIds } }, select: { id: true, nameAr: true, oemNumber: true } });
+      if (parts.length !== partIds.length) throw new BusinessRuleError("أحد الأصناف المحددة لم يعد موجوداً.");
+
+      for (const part of parts) {
+        const [invoiceLines, movementInvoiceRefs, movementWithoutInvoiceCount, heldSaleCount] = await Promise.all([
+          tx.invoiceItem.findMany({ where: { partId: part.id }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
+          tx.stockMovement.findMany({ where: { partId: part.id, invoiceId: { not: null } }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
+          tx.stockMovement.count({ where: { partId: part.id, invoiceId: null } }),
+          tx.heldSaleItem.count({ where: { partId: part.id } }),
+        ]);
+        const linkedInvoiceIds = new Set([...invoiceLines.map((line) => line.invoiceId), ...movementInvoiceRefs.map((movement) => movement.invoiceId).filter((id): id is string => Boolean(id))]);
+        if (linkedInvoiceIds.size > 0 || movementWithoutInvoiceCount > 0 || heldSaleCount > 0) {
+          const historyText = [
+            linkedInvoiceIds.size > 0 ? `${linkedInvoiceIds.size} فاتورة مرتبطة` : "",
+            movementWithoutInvoiceCount > 0 ? `${movementWithoutInvoiceCount} حركة مخزون مسجلة` : "",
+            heldSaleCount > 0 ? `${heldSaleCount} عملية بيع معلقة` : "",
+          ].filter(Boolean).join(" و");
+          throw new BusinessRuleError(`لا يمكن حذف الصنف (${part.nameAr}) لوجود ${historyText}. يجب إلغاء الفواتير أو الحركات المرتبطة أولاً لإتمام الحذف.`);
+        }
+      }
+
+      for (const part of parts) {
+        await tx.partItem.delete({ where: { id: part.id } });
+        await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "DELETE", oldData: part, performedBy: user.id });
+      }
+      return { deleted: parts.length };
+    }, TX_OPTIONS));
+
+    revalidatePath("/inventory");
+    revalidatePath("/pos");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "deletePartAction");
   }
 }
 
