@@ -156,7 +156,7 @@ export function InvoicesClient({
               />
             ) : (
               rows.map((inv) => (
-                <TR key={inv.id} className={inv.isVoided ? "opacity-50" : undefined}>
+                <TR key={inv.id} tabIndex={0} onDoubleClick={() => void openDetail(inv.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void openDetail(inv.id); } }} className={`${inv.isVoided ? "opacity-50" : ""} cursor-pointer focus:outline-none focus:ring-1 focus:ring-bmw-blue`}>
                   <TD className="tabular whitespace-nowrap font-bold text-white">{inv.invoiceNumber}</TD>
                   <TD>
                     <Badge variant={inv.type === "SALE" ? "blue" : "purple"}>
