@@ -13,6 +13,7 @@ import { lineTotal as calcLineTotal, round2, sum as sumMoney, taxOf } from "@/li
 import type { PosPartRow } from "@/server/services/parts.service";
 import { searchPartsForPosAction } from "@/server/actions/search.actions";
 import { createPurchaseInvoiceAction } from "@/server/actions/invoice.actions";
+import { createPartAction } from "@/server/actions/parts.actions";
 
 interface Line {
   part: PosPartRow;
@@ -36,6 +37,12 @@ interface PurchaseInvoiceModalProps {
  * added through manual adjustment, which had no cost input — so received parts
  * were valued at zero and every subsequent sale reported ~100% margin.
  */
+function QuickPartModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (oem: string, cost: number) => Promise<void> }) {
+  const [nameAr, setNameAr] = useState(initialName); const [oemNumber, setOemNumber] = useState(""); const [brandName, setBrandName] = useState(""); const [category, setCategory] = useState("عام"); const [cost, setCost] = useState(""); const [price, setPrice] = useState(""); const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => { const buyPrice = Number(cost) || 0; const sellPrice = Number(price) || 0; const result = await createPartAction({ nameAr, oemNumber, brandId: undefined, brandName, categoryId: undefined, category, categoryName: category, chassisIds: [], engineIds: [], chassisCodes: [], engineCodes: [], nameEn: "", brandPartNumber: "", barcode: "", sidePosition: "", binLocationId: undefined, buyPriceLast: buyPrice, sellPriceRetail: sellPrice, sellPriceWholesale: sellPrice, sellPriceMin: sellPrice, openingQuantity: 0, minReorderLevel: 2, isActive: true }); if (!result.success) { setError(result.error); return; } await onCreated(result.data.oemNumber, buyPrice); });
+  return <Modal open onClose={onClose} title="إضافة صنف جديد للشحنة" description="سيضاف الصنف للكتالوج ثم لسطر فاتورة الشراء الحالية دون فقدان المسودة." size="md" footer={<><Button variant="ghost" onClick={onClose}>إلغاء</Button><Button loading={pending} onClick={submit} disabled={!nameAr.trim() || !oemNumber.trim() || !brandName.trim() || Number(cost) < 0 || Number(price) < 0}>إنشاء وإضافة</Button></>}><div className="grid gap-3 sm:grid-cols-2">{error ? <div className="sm:col-span-2"><Alert variant="error">{error}</Alert></div> : null}<Field label="اسم الصنف" required><Input value={nameAr} onChange={(e) => setNameAr(e.target.value)} autoFocus /></Field><Field label="OEM" required><Input value={oemNumber} onChange={(e) => setOemNumber(e.target.value)} /></Field><Field label="الماركة" required><Input value={brandName} onChange={(e) => setBrandName(e.target.value)} /></Field><Field label="التصنيف"><Input value={category} onChange={(e) => setCategory(e.target.value)} /></Field><Field label="سعر الشراء" required><Input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} /></Field><Field label="سعر البيع المقترح" required><Input type="number" min={0} value={price} onChange={(e) => setPrice(e.target.value)} /></Field></div></Modal>;
+}
+
 export function PurchaseInvoiceModal({
   open,
   onClose,
@@ -59,6 +66,7 @@ export function PurchaseInvoiceModal({
   const [lines, setLines] = useState<Line[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ invoiceNumber: string; grandTotal: number } | null>(null);
+  const [quickPartOpen, setQuickPartOpen] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
@@ -81,6 +89,8 @@ export function PurchaseInvoiceModal({
     }, 220);
     return () => clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => { const handler = (event: KeyboardEvent) => { if (event.altKey && event.key.toLowerCase() === "p") { event.preventDefault(); setQuickPartOpen(true); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
 
   const addLine = (part: PosPartRow) => {
     setError(null);
@@ -324,6 +334,9 @@ export function PurchaseInvoiceModal({
             ))}
           </ul>
         ) : null}
+        {query.trim().length >= 2 && !searching && results.length === 0 ? <Button type="button" variant="outline" className="w-full" onClick={() => setQuickPartOpen(true)}><Plus size={16}/> إضافة صنف جديد "{query.trim()}"</Button> : null}
+        <Button type="button" variant="ghost" size="sm" onClick={() => setQuickPartOpen(true)}><Plus size={14}/> صنف جديد (Alt+P)</Button>
+        {quickPartOpen ? <QuickPartModal initialName={query} onClose={() => setQuickPartOpen(false)} onCreated={async (oemNumber, cost) => { const result = await searchPartsForPosAction(oemNumber); if (result.success) { const part = result.data.find((item) => item.oemNumber === oemNumber); if (part) { addLine(part); setLines((current) => current.map((line) => line.part.id === part.id ? { ...line, unitPrice: cost } : line)); } } setQuickPartOpen(false); }} /> : null}
 
         {lines.length === 0 ? (
           <Card>
