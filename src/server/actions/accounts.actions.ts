@@ -157,7 +157,19 @@ export async function createQuickPosAccountAction(
   try {
     await requirePermission("account.quickCreate");
     const input = quickPosAccountSchema.parse(raw);
-    return createAccountAction(input);
+    return createAccountAction({
+      name: input.name,
+      type: input.type,
+      phone: input.phone ?? "",
+      defaultPriceTier: input.defaultPriceTier,
+      email: "",
+      address: "",
+      taxNumber: "",
+      category: "",
+      creditLimit: 0,
+      openingBalance: 0,
+      status: "ACTIVE",
+    });
   } catch (error) {
     return toActionError(error, "createQuickPosAccountAction");
   }

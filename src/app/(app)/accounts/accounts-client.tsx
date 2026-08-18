@@ -433,7 +433,7 @@ function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void
             </Select>
           </Field>
           <Field label="التليفون">
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} dir="ltr" className="text-left" />
+            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="رقم الهاتف (اختياري)" dir="ltr" className="text-left" />
           </Field>
           <Field label="البريد الإلكتروني">
             <Input
@@ -691,7 +691,7 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
             </Select>
           </Field>
           <Field label="التليفون">
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} dir="ltr" className="text-left" />
+            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="رقم الهاتف (اختياري)" dir="ltr" className="text-left" />
           </Field>
           <Field label="البريد الإلكتروني">
             <Input

@@ -25,10 +25,18 @@ export const accountStatusSchema = z.enum(["ACTIVE", "INACTIVE", "UNDER_REVIEW"]
 
 const openingBalance = z.number().min(-99_999_999.99).max(99_999_999.99).default(0);
 
+const optionalPhone = z
+  .string()
+  .trim()
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => (value && value.length > 0 ? value : null))
+  .refine((value) => value === null || /^[0-9+\-\s()]{7,20}$/.test(value), "رقم تليفون غير صالح");
+
 export const createAccountSchema = z.object({
   name: arabicName,
   type: accountTypeSchema,
-  phone,
+  phone: optionalPhone,
   email: z.string().trim().email("بريد إلكتروني غير صالح").optional().or(z.literal("")),
   address: optionalText(300),
   taxNumber: optionalText(50),
@@ -41,8 +49,11 @@ export const createAccountSchema = z.object({
 
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 
-export const quickPosAccountSchema = createAccountSchema.extend({
-  phone: z.string().trim().regex(/^[0-9+\-\s()]{7,20}$/, "رقم تليفون غير صالح"),
+export const quickPosAccountSchema = z.object({
+  name: arabicName,
+  type: z.enum(["CUSTOMER", "WORKSHOP_BMW"]).default("CUSTOMER"),
+  phone: optionalPhone,
+  defaultPriceTier: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL"),
   notes: optionalText(500),
 });
 
@@ -52,7 +63,7 @@ export const updateAccountSchema = z.object({
   id: uuid,
   name: arabicName,
   type: accountTypeSchema,
-  phone,
+  phone: optionalPhone,
   email: z.string().trim().email("بريد إلكتروني غير صالح").optional().or(z.literal("")),
   address: optionalText(300),
   taxNumber: optionalText(50),
