@@ -95,6 +95,8 @@ export function AddPartModal({
   const [binId, setBinId] = useState(part?.binLocationId ?? "");
   const [chassisIds, setChassisIds] = useState<string[]>(part?.chassisIds ?? []);
   const [engineIds, setEngineIds] = useState<string[]>(part?.engineIds ?? []);
+  const [chassisCodes, setChassisCodes] = useState<string[]>([]);
+  const [engineCodes, setEngineCodes] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(part?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -109,6 +111,8 @@ export function AddPartModal({
     setBinId("");
     setChassisIds([]);
     setEngineIds([]);
+    setChassisCodes([]);
+    setEngineCodes([]);
     setIsActive(true);
     setError(null);
     setFieldErrors({});
@@ -136,8 +140,8 @@ export function AddPartModal({
         minReorderLevel: Math.trunc(numeric(form.minReorderLevel)),
         chassisIds,
         engineIds,
-        chassisCodes: [],
-        engineCodes: [],
+        chassisCodes,
+        engineCodes,
         imageKey: "",
         imageUrl: "",
       };
@@ -334,6 +338,10 @@ export function AddPartModal({
             selectedEngineIds={engineIds}
             onChangeChassis={setChassisIds}
             onChangeEngines={setEngineIds}
+            selectedChassisCodes={chassisCodes}
+            selectedEngineCodes={engineCodes}
+            onChangeChassisCodes={setChassisCodes}
+            onChangeEngineCodes={setEngineCodes}
           />
         </div>
       </div>

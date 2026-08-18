@@ -1,181 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Search, X, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-export interface ChassisOption {
-  id: string;
-  code: string;
-  series: string;
+export interface ChassisOption { id: string; code: string; series: string; }
+export interface EngineOption { id: string; code: string; displacement: string | null; }
+interface FitmentMatrixProps { chassis: ChassisOption[]; engines: EngineOption[]; selectedChassisIds: string[]; selectedEngineIds: string[]; onChangeChassis: (ids: string[]) => void; onChangeEngines: (ids: string[]) => void; selectedChassisCodes: string[]; selectedEngineCodes: string[]; onChangeChassisCodes: (codes: string[]) => void; onChangeEngineCodes: (codes: string[]) => void; }
+
+export function FitmentMatrix({ chassis, engines, selectedChassisIds, selectedEngineIds, onChangeChassis, onChangeEngines, selectedChassisCodes, selectedEngineCodes, onChangeChassisCodes, onChangeEngineCodes }: FitmentMatrixProps) {
+  const [filter, setFilter] = useState(""); const term = filter.trim().toUpperCase();
+  const grouped = useMemo(() => { const map = new Map<string, ChassisOption[]>(); for (const c of chassis) { if (term && !c.code.includes(term) && !c.series.toUpperCase().includes(term)) continue; const bucket = map.get(c.series) ?? []; bucket.push(c); map.set(c.series, bucket); } return [...map.entries()]; }, [chassis, term]);
+  const filteredEngines = useMemo(() => term ? engines.filter((e) => e.code.includes(term)) : engines, [engines, term]);
+  const toggle = (ids: string[], id: string, change: (next: string[]) => void) => change(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+  const addCode = (kind: "chassis" | "engine") => { if (!term) return; const exists = kind === "chassis" ? chassis.some((item) => item.code === term) || selectedChassisCodes.includes(term) : engines.some((item) => item.code === term) || selectedEngineCodes.includes(term); if (exists) return; kind === "chassis" ? onChangeChassisCodes([...selectedChassisCodes, term]) : onChangeEngineCodes([...selectedEngineCodes, term]); setFilter(""); };
+  return <div className="space-y-4"><div className="relative"><Search size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-bmw-muted"/><Input value={filter} onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && term) { e.preventDefault(); addCode("chassis"); } }} placeholder="فلترة أو إضافة كود جديد… (G22, M274)" className="h-9 pr-9 text-xs"/>{filter ? <button type="button" onClick={() => setFilter("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-bmw-muted hover:text-white"><X size={14}/></button> : null}</div>
+    <div><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-bmw-silver">أكواد الشاسيه المتوافقة</p><Badge variant={(selectedChassisIds.length + selectedChassisCodes.length) ? "blue" : "muted"} mono>{selectedChassisIds.length + selectedChassisCodes.length}</Badge></div>{term && !chassis.some((item) => item.code === term) ? <ButtonAdd label={`إضافة كود شاسيه: ${term}`} onClick={() => addCode("chassis")}/> : null}<div className="mt-2 max-h-56 space-y-3 overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><div className="flex flex-wrap gap-1.5">{selectedChassisCodes.map((code) => <Tag key={code} code={code} onRemove={() => onChangeChassisCodes(selectedChassisCodes.filter((item) => item !== code))}/>)}</div>{grouped.map(([series, items]) => <div key={series}><p className="mb-1.5 text-[11px] font-bold text-bmw-blue">{series}</p><div className="flex flex-wrap gap-1.5">{items.map((c) => <button key={c.id} type="button" onClick={() => toggle(selectedChassisIds, c.id, onChangeChassis)} className={cn("rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold", selectedChassisIds.includes(c.id) ? "border-bmw-blue bg-bmw-blue text-white" : "border-bmw-cardBorder bg-bmw-card text-bmw-muted")}>{c.code}</button>)}</div></div>)}</div></div>
+    <div><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-bmw-silver">أكواد المحركات المتوافقة</p><Badge variant={(selectedEngineIds.length + selectedEngineCodes.length) ? "blue" : "muted"} mono>{selectedEngineIds.length + selectedEngineCodes.length}</Badge></div>{term && !engines.some((item) => item.code === term) ? <ButtonAdd label={`إضافة كود محرك: ${term}`} onClick={() => addCode("engine")}/> : null}<div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><div className="flex flex-wrap gap-1.5">{selectedEngineCodes.map((code) => <Tag key={code} code={code} onRemove={() => onChangeEngineCodes(selectedEngineCodes.filter((item) => item !== code))}/>)}</div><div className="mt-2 flex flex-wrap gap-1.5">{filteredEngines.map((e) => <button key={e.id} type="button" onClick={() => toggle(selectedEngineIds, e.id, onChangeEngines)} className={cn("rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold", selectedEngineIds.includes(e.id) ? "border-emerald-500 bg-emerald-600 text-white" : "border-bmw-cardBorder bg-bmw-card text-bmw-muted")}>{e.code}</button>)}</div></div></div>
+  </div>;
 }
-
-export interface EngineOption {
-  id: string;
-  code: string;
-  displacement: string | null;
-}
-
-interface FitmentMatrixProps {
-  chassis: ChassisOption[];
-  engines: EngineOption[];
-  selectedChassisIds: string[];
-  selectedEngineIds: string[];
-  onChangeChassis: (ids: string[]) => void;
-  onChangeEngines: (ids: string[]) => void;
-}
-
-/**
- * Fitment matrix: chassis grouped by series, engines as a flat grid.
- * This is the compatibility map a counter clerk needs to answer
- * "هل تركب على E46؟" without opening RealOEM.
- */
-export function FitmentMatrix({
-  chassis,
-  engines,
-  selectedChassisIds,
-  selectedEngineIds,
-  onChangeChassis,
-  onChangeEngines,
-}: FitmentMatrixProps) {
-  const [filter, setFilter] = useState("");
-
-  const grouped = useMemo(() => {
-    const term = filter.trim().toUpperCase();
-    const map = new Map<string, ChassisOption[]>();
-    for (const c of chassis) {
-      if (term && !c.code.includes(term) && !c.series.toUpperCase().includes(term)) continue;
-      const bucket = map.get(c.series) ?? [];
-      bucket.push(c);
-      map.set(c.series, bucket);
-    }
-    return [...map.entries()];
-  }, [chassis, filter]);
-
-  const filteredEngines = useMemo(() => {
-    const term = filter.trim().toUpperCase();
-    if (!term) return engines;
-    return engines.filter((e) => e.code.includes(term));
-  }, [engines, filter]);
-
-  const toggle = (ids: string[], id: string, onChange: (next: string[]) => void) => {
-    onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
-  };
-
-  const toggleSeries = (series: ChassisOption[]) => {
-    const ids = series.map((s) => s.id);
-    const allSelected = ids.every((id) => selectedChassisIds.includes(id));
-    onChangeChassis(
-      allSelected
-        ? selectedChassisIds.filter((id) => !ids.includes(id))
-        : [...new Set([...selectedChassisIds, ...ids])],
-    );
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="relative">
-        <Search size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-bmw-muted" />
-        <Input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="فلترة أكواد الشاسيه أو المحرك… (E46, B48, X5)"
-          className="h-9 pr-9 text-xs"
-        />
-        {filter ? (
-          <button
-            type="button"
-            onClick={() => setFilter("")}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-bmw-muted hover:text-white"
-          >
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-bold text-bmw-silver">أكواد الشاسيه المتوافقة</p>
-          <Badge variant={selectedChassisIds.length ? "blue" : "muted"} mono>
-            {selectedChassisIds.length}
-          </Badge>
-        </div>
-        <div className="max-h-56 space-y-3 overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3">
-          {grouped.length === 0 ? (
-            <p className="py-4 text-center text-xs text-bmw-muted">لا توجد نتائج مطابقة.</p>
-          ) : (
-            grouped.map(([series, items]) => (
-              <div key={series}>
-                <button
-                  type="button"
-                  onClick={() => toggleSeries(items)}
-                  className="mb-1.5 text-[11px] font-bold text-bmw-blue hover:underline"
-                >
-                  {series} ({items.length})
-                </button>
-                <div className="flex flex-wrap gap-1.5">
-                  {items.map((c) => {
-                    const active = selectedChassisIds.includes(c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => toggle(selectedChassisIds, c.id, onChangeChassis)}
-                        className={cn(
-                          "rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold transition-all",
-                          active
-                            ? "border-bmw-blue bg-bmw-blue text-white"
-                            : "border-bmw-cardBorder bg-bmw-card text-bmw-muted hover:border-bmw-blue hover:text-white",
-                        )}
-                      >
-                        {c.code}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-bold text-bmw-silver">أكواد المحركات المتوافقة</p>
-          <Badge variant={selectedEngineIds.length ? "blue" : "muted"} mono>
-            {selectedEngineIds.length}
-          </Badge>
-        </div>
-        <div className="max-h-40 overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3">
-          {filteredEngines.length === 0 ? (
-            <p className="py-4 text-center text-xs text-bmw-muted">لا توجد نتائج مطابقة.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {filteredEngines.map((e) => {
-                const active = selectedEngineIds.includes(e.id);
-                return (
-                  <button
-                    key={e.id}
-                    type="button"
-                    title={e.displacement ?? undefined}
-                    onClick={() => toggle(selectedEngineIds, e.id, onChangeEngines)}
-                    className={cn(
-                      "rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold transition-all",
-                      active
-                        ? "border-emerald-500 bg-emerald-600 text-white"
-                        : "border-bmw-cardBorder bg-bmw-card text-bmw-muted hover:border-emerald-500 hover:text-white",
-                    )}
-                  >
-                    {e.code}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+function Tag({ code, onRemove }: { code: string; onRemove: () => void }) { return <button type="button" onClick={onRemove} className="rounded-lg border border-bmw-blue bg-bmw-blue/15 px-2 py-1 font-mono text-[11px] text-bmw-blue">{code} <X size={11} className="inline"/></button>; }
+function ButtonAdd({ label, onClick }: { label: string; onClick: () => void }) { return <button type="button" onClick={onClick} className="flex items-center gap-1 text-xs font-bold text-bmw-blue hover:underline"><Plus size={13}/>{label} (اضغط Enter)</button>; }
