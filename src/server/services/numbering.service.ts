@@ -66,6 +66,14 @@ export async function nextShiftNumber(tx: TxClient): Promise<string> {
 }
 
 export async function nextAccountNumber(tx: TxClient, prefix = "ACC"): Promise<string> {
-  const seq = await nextValue(tx, `ACCOUNT-${prefix}`);
-  return `${prefix}-${String(seq).padStart(4, "0")}`;
+  // Counters can predate a restored database or manual legacy imports. Keep the
+  // atomic counter for concurrency, but skip any code already present until the
+  // counter catches up with legacy data. Every candidate is unique to this call.
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const seq = await nextValue(tx, `ACCOUNT-${prefix}`);
+    const accountNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
+    const existing = await tx.account.findUnique({ where: { accountNumber }, select: { id: true } });
+    if (!existing) return accountNumber;
+  }
+  throw new Error("Unable to allocate a unique account number after 10000 attempts.");
 }

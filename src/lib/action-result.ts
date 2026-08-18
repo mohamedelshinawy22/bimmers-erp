@@ -22,7 +22,9 @@ const PRISMA_MESSAGES: Record<string, (e: Prisma.PrismaClientKnownRequestError) 
     if (field.includes("oemNumber")) return "رقم القطعة الأصلي (OEM) مسجّل بالفعل لصنف آخر.";
     if (field.includes("barcode")) return "الباركود مستخدم بالفعل لصنف آخر.";
     if (field.includes("username")) return "اسم المستخدم مسجّل بالفعل.";
-    if (field.includes("accountNumber")) return "كود الحساب مستخدم بالفعل.";
+    if (field.includes("accountNumber") || field.includes("code")) return "كود الحساب مستخدم بالفعل";
+    if (field.includes("phone")) return "رقم الهاتف مسجل بالفعل لحساب آخر";
+    if (field.includes("name")) return "اسم الحساب موجود مسبقاً";
     if (field.includes("invoiceNumber")) return "رقم الفاتورة مستخدم بالفعل، أعد المحاولة.";
     if (field.includes("fullCode")) return "كود موقع التخزين مستخدم بالفعل.";
     return "هذه البيانات مسجّلة بالفعل ولا تقبل التكرار.";
