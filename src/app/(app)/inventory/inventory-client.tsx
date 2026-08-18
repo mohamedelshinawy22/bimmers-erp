@@ -13,6 +13,7 @@ import {
   History,
   ShoppingBag,
   Printer,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ import type { ChassisOption, EngineOption } from "./components/fitment-matrix";
 import { PurchaseInvoiceModal } from "./components/purchase-invoice-modal";
 import { StockLedgerModal } from "./components/stock-ledger-modal";
 import { BarcodeThermalLabel } from "@/components/print/templates/barcode-thermal-label";
+import { ExcelImportModal } from "@/components/inventory/excel-import-modal";
 
 interface InventoryClientProps {
   rows: PartRow[];
@@ -83,6 +85,7 @@ export function InventoryClient({
   const [query, setQuery] = useState(filters.query);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
+  const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -120,6 +123,7 @@ export function InventoryClient({
             </Button>
           ) : null}
           {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
+          {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
           {permissions.canWrite ? (
             <Button onClick={() => setAddOpen(true)}>
               <PackagePlus size={16} /> إدخال صنف جديد
@@ -391,6 +395,7 @@ export function InventoryClient({
       ) : null}
 
       {barcodePrintOpen ? <BatchBarcodePrintModal parts={selectedParts} onClose={() => setBarcodePrintOpen(false)} /> : null}
+      {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
 
       {permissions.canPurchase ? (
         <PurchaseInvoiceModal

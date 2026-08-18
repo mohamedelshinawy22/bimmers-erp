@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
 import { getSettingsGrouped } from "@/server/services/settings.service";
@@ -18,11 +19,14 @@ export default async function SettingsPage() {
   ]);
 
   return (
-    <SettingsForm
-      groups={groups}
-      canWrite={can(user.role, "settings.write")}
-      users={users}
-      currentUserId={user.id}
-    />
+    <div className="space-y-4">
+      <Link href="/inventory?import=1" className="flex items-center justify-between rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 px-4 py-3 text-sm font-bold text-bmw-blue hover:bg-bmw-blue/20">استيراد بيانات من إكسيل <span>←</span></Link>
+      <SettingsForm
+        groups={groups}
+        canWrite={can(user.role, "settings.write")}
+        users={users}
+        currentUserId={user.id}
+      />
+    </div>
   );
 }
