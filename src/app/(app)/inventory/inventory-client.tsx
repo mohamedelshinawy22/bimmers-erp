@@ -12,6 +12,7 @@ import {
   ArrowUpDown,
   History,
   ShoppingBag,
+  Printer,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -27,6 +28,7 @@ import type { BinOption } from "./components/bin-locator";
 import type { ChassisOption, EngineOption } from "./components/fitment-matrix";
 import { PurchaseInvoiceModal } from "./components/purchase-invoice-modal";
 import { StockLedgerModal } from "./components/stock-ledger-modal";
+import { BarcodeThermalLabel } from "@/components/print/templates/barcode-thermal-label";
 
 interface InventoryClientProps {
   rows: PartRow[];
@@ -79,6 +81,9 @@ export function InventoryClient({
   const [ledgerPart, setLedgerPart] = useState<PartRow | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(openPurchaseOnMount);
   const [query, setQuery] = useState(filters.query);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
+  const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -114,6 +119,7 @@ export function InventoryClient({
               <ShoppingBag size={16} /> فاتورة شراء
             </Button>
           ) : null}
+          {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
           {permissions.canWrite ? (
             <Button onClick={() => setAddOpen(true)}>
               <PackagePlus size={16} /> إدخال صنف جديد
@@ -188,6 +194,7 @@ export function InventoryClient({
         <Table>
           <THead>
             <TR>
+              <TH><input aria-label="تحديد الكل" type="checkbox" checked={rows.length > 0 && selectedIds.length === rows.length} onChange={(event) => setSelectedIds(event.target.checked ? rows.map((part) => part.id) : [])}/></TH>
               <TH>رقم OEM</TH>
               <TH>الصنف</TH>
               <TH>الماركة</TH>
@@ -204,7 +211,7 @@ export function InventoryClient({
           <TBody>
             {rows.length === 0 ? (
               <EmptyState
-                colSpan={permissions.canViewCost ? 11 : 10}
+                colSpan={permissions.canViewCost ? 12 : 11}
                 title="لا توجد أصناف مطابقة"
                 description="عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج."
                 icon={<Boxes size={32} />}
@@ -212,6 +219,7 @@ export function InventoryClient({
             ) : (
               rows.map((part) => (
                 <TR key={part.id} className={part.isActive ? undefined : "opacity-50"}>
+                  <TD><input aria-label={`تحديد ${part.nameAr}`} type="checkbox" checked={selectedIds.includes(part.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, part.id])] : current.filter((id) => id !== part.id))}/></TD>
                   <TD className="whitespace-nowrap font-mono text-xs text-bmw-blue">
                     {formatOemNumber(part.oemNumber)}
                   </TD>
@@ -382,6 +390,8 @@ export function InventoryClient({
         />
       ) : null}
 
+      {barcodePrintOpen ? <BatchBarcodePrintModal parts={selectedParts} onClose={() => setBarcodePrintOpen(false)} /> : null}
+
       {permissions.canPurchase ? (
         <PurchaseInvoiceModal
           open={purchaseOpen}
@@ -393,6 +403,12 @@ export function InventoryClient({
       ) : null}
     </div>
   );
+}
+
+function BatchBarcodePrintModal({ parts, onClose }: { parts: PartRow[]; onClose: () => void }) {
+  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(parts.map((part) => [part.id, 1])));
+  const labels = parts.flatMap((part) => Array.from({ length: Math.max(0, Math.min(100, counts[part.id] ?? 1)) }, (_, index) => ({ part, index })));
+  return <Modal open onClose={onClose} title="طباعة ملصقات الباركود" description="حدّد عدد الملصقات لكل صنف ثم استخدم نافذة الطباعة." size="lg" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button onClick={() => window.print()} disabled={!labels.length}><Printer size={16}/>طباعة {labels.length} ملصق</Button></>}><div className="space-y-3"><div className="space-y-2">{parts.map((part) => <label key={part.id} className="flex items-center justify-between rounded-lg border border-bmw-cardBorder p-2 text-sm"><span>{part.nameAr} <span className="font-mono text-bmw-muted">{part.barcode || part.oemNumber}</span></span><Input className="w-20" type="number" min={0} max={100} value={counts[part.id] ?? 1} onChange={(event) => setCounts({ ...counts, [part.id]: Math.trunc(Number(event.target.value) || 0) })}/></label>)}</div><div id="printable-barcode-labels" className="hidden print:block">{labels.map(({ part, index }) => <BarcodeThermalLabel key={`${part.id}-${index}`} storeName="الشافعي لقطع غيار BMW" partName={part.nameAr} code={part.barcode || part.oemNumber} price={formatMoney(part.sellPriceRetail)} />)}</div></div></Modal>;
 }
 
 function AdjustStockModal({
