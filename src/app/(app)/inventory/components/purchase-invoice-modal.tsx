@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { PackageCheck, Plus, Search, ShoppingBag, Trash2, X } from "lucide-react";
+import { PackageCheck, Plus, Printer, Search, ShoppingBag, Trash2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import { searchPartsForPosAction } from "@/server/actions/search.actions";
 import { createPurchaseInvoiceAction, updatePurchaseInvoiceAction } from "@/server/actions/invoice.actions";
 import { createPartAction } from "@/server/actions/parts.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
+import { useInvoicePrint } from "@/hooks/use-invoice-print";
+import { PrintContainer } from "@/components/print/print-container";
 
 interface Line {
   part: PosPartRow;
@@ -84,10 +86,11 @@ export function PurchaseInvoiceModal({
   const [searching, setSearching] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ invoiceNumber: string; grandTotal: number } | null>(null);
+  const [done, setDone] = useState<{ invoiceId: string; invoiceNumber: string; grandTotal: number } | null>(null);
   const [quickPartOpen, setQuickPartOpen] = useState(false);
   const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
   const isEditMode = Boolean(initialDraft);
+  const { data: printData, format, state: printState, print, onAfterPrint } = useInvoicePrint(done?.invoiceId);
 
   useEffect(() => { setSupplierOptions(suppliers); }, [suppliers]);
 
@@ -218,7 +221,7 @@ export function PurchaseInvoiceModal({
         setError(res.error);
         return;
       }
-      setDone({ invoiceNumber: res.data.invoiceNumber, grandTotal: res.data.grandTotal });
+      setDone({ invoiceId: res.data.invoiceId, invoiceNumber: res.data.invoiceNumber, grandTotal: res.data.grandTotal });
       reset();
       router.refresh();
     });
@@ -226,6 +229,7 @@ export function PurchaseInvoiceModal({
 
   if (done) {
     return (
+      <>
       <Modal
         open
         onClose={() => {
@@ -235,14 +239,10 @@ export function PurchaseInvoiceModal({
         title="تم استلام الشحنة"
         size="sm"
         footer={
-          <Button
-            onClick={() => {
-              setDone(null);
-              onClose();
-            }}
-          >
-            تم
-          </Button>
+          <>
+            <Button variant="outline" loading={printState === "loading"} onClick={() => void print()}><Printer size={16} /> طباعة فاتورة الشراء</Button>
+            <Button onClick={() => { setDone(null); onClose(); }}>تم</Button>
+          </>
         }
       >
         <div className="space-y-3 text-center">
@@ -256,6 +256,8 @@ export function PurchaseInvoiceModal({
           </Alert>
         </div>
       </Modal>
+      {printData && printState === "printing" ? <PrintContainer data={printData} format={format} autoPrint onAfterPrint={onAfterPrint} /> : null}
+    </>
     );
   }
 

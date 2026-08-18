@@ -464,6 +464,8 @@ export async function createPurchaseInvoice(
           remainingAmount,
           paymentStatus,
           paymentMethod: input.paymentMethod,
+          accountBalanceBefore: supplier.currentBalance,
+          accountBalanceAfter: supplier.currentBalance.add(remainingAmount),
           notes: input.notes || null,
         },
       });

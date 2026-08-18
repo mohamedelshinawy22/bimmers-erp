@@ -10,6 +10,8 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatMoney, formatOemNumber }
 import { getInvoiceDetailAction, getStockLedgerAction } from "@/server/actions/invoices.read.actions";
 import { voidInvoiceAction } from "@/server/actions/invoice.actions";
 import type { InvoiceDetail } from "@/server/services/invoices.service";
+import { useInvoicePrint } from "@/hooks/use-invoice-print";
+import { PrintContainer } from "@/components/print/print-container";
 
 interface LedgerRow {
   id: string;
@@ -153,8 +155,46 @@ export function StockLedgerModal({
 }
 
 function LedgerInvoiceOverlay({ invoiceId, onClose, onVoided }: { invoiceId: string; onClose: () => void; onVoided: () => void }) {
-  const [detail, setDetail] = useState<InvoiceDetail | null>(null); const [error, setError] = useState<string | null>(null); const [pending, startTransition] = useTransition();
-  useEffect(() => { let cancelled = false; void getInvoiceDetailAction(invoiceId).then((res) => { if (cancelled) return; if (res.success) setDetail(res.data); else setError(res.error); }); return () => { cancelled = true; }; }, [invoiceId]);
-  const voidInvoice = () => { const reason = window.prompt("سبب إلغاء الفاتورة (5 أحرف على الأقل):"); if (!reason || reason.trim().length < 5) return; startTransition(async () => { const result = await voidInvoiceAction({ invoiceId, reason }); if (!result.success) { setError(result.error); return; } onVoided(); }); };
-  return <Modal open onClose={onClose} title={detail ? `تفاصيل الفاتورة — ${detail.invoiceNumber}` : "تفاصيل الفاتورة"} size="lg" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button variant="outline" onClick={() => window.print()}>طباعة</Button>{detail ? <Button variant="outline" onClick={() => { window.location.href = `/invoices/${detail.type === "SALE" ? "sales" : "purchases"}/${detail.id}/edit`; }}>تعديل</Button> : null}{detail && !detail.isVoided ? <Button variant="danger" loading={pending} onClick={voidInvoice}>إلغاء الفاتورة</Button> : null}</>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}{!detail ? <p className="text-sm text-bmw-muted">جاري تحميل التفاصيل…</p> : <><div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><div>الحساب: <b>{detail.account.name}</b></div><div>المدفوع: <b>{formatMoney(detail.paidAmount)}</b></div><div>المتبقي: <b>{formatMoney(detail.remainingAmount)}</b></div><div>الدفع: <b>{detail.paymentMethod}</b></div></div><Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>الكمية</TH><TH>السعر</TH><TH>الإجمالي</TH></TR></THead><TBody>{detail.items.map((item) => <TR key={item.id}><TD>{item.nameAr}</TD><TD>{item.oemNumber}</TD><TD>{item.quantity}</TD><TD>{formatMoney(item.unitPrice)}</TD><TD>{formatMoney(item.totalPrice)}</TD></TR>)}</TBody></Table></>}</div></Modal>;
+  const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const { data: printData, format, state: printState, print, onAfterPrint } = useInvoicePrint(invoiceId);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getInvoiceDetailAction(invoiceId).then((res) => {
+      if (cancelled) return;
+      if (res.success) setDetail(res.data);
+      else setError(res.error);
+    });
+    return () => { cancelled = true; };
+  }, [invoiceId]);
+
+  const voidInvoice = () => {
+    const reason = window.prompt("سبب إلغاء الفاتورة (5 أحرف على الأقل):");
+    if (!reason || reason.trim().length < 5) return;
+    startTransition(async () => {
+      const result = await voidInvoiceAction({ invoiceId, reason });
+      if (!result.success) { setError(result.error); return; }
+      onVoided();
+    });
+  };
+
+  return <>
+    <Modal open onClose={onClose} title={detail ? `تفاصيل الفاتورة — ${detail.invoiceNumber}` : "تفاصيل الفاتورة"} size="lg" footer={<>
+      <Button variant="ghost" onClick={onClose}>إغلاق</Button>
+      <Button variant="outline" loading={printState === "loading"} onClick={() => void print()}>طباعة</Button>
+      {detail ? <Button variant="outline" onClick={() => { window.location.href = `/invoices/${detail.type === "SALE" ? "sales" : "purchases"}/${detail.id}/edit`; }}>تعديل</Button> : null}
+      {detail && !detail.isVoided ? <Button variant="danger" loading={pending} onClick={voidInvoice}>إلغاء الفاتورة</Button> : null}
+    </>}>
+      <div className="space-y-3">
+        {error ? <Alert variant="error">{error}</Alert> : null}
+        {!detail ? <p className="text-sm text-bmw-muted">جاري تحميل التفاصيل…</p> : <>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><div>الحساب: <b>{detail.account.name}</b></div><div>المدفوع: <b>{formatMoney(detail.paidAmount)}</b></div><div>المتبقي: <b>{formatMoney(detail.remainingAmount)}</b></div><div>الدفع: <b>{detail.paymentMethod}</b></div></div>
+          <Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>الكمية</TH><TH>السعر</TH><TH>الإجمالي</TH></TR></THead><TBody>{detail.items.map((item) => <TR key={item.id}><TD>{item.nameAr}</TD><TD>{item.oemNumber}</TD><TD>{item.quantity}</TD><TD>{formatMoney(item.unitPrice)}</TD><TD>{formatMoney(item.totalPrice)}</TD></TR>)}</TBody></Table>
+        </>}
+      </div>
+    </Modal>
+    {printData && printState === "printing" ? <PrintContainer data={printData} format={format} autoPrint onAfterPrint={onAfterPrint} /> : null}
+  </>;
 }

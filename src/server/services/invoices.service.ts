@@ -144,8 +144,10 @@ export async function getInvoiceDetail(invoiceId: string) {
       isVoided: true,
       voidedAt: true,
       voidReason: true,
+      accountBalanceBefore: true,
+      accountBalanceAfter: true,
       createdAt: true,
-      account: { select: { id: true, name: true, accountNumber: true, phone: true, taxNumber: true } },
+      account: { select: { id: true, name: true, accountNumber: true, phone: true, taxNumber: true, currentBalance: true } },
       user: { select: { fullName: true } },
       treasury: { select: { id: true, name: true } },
       vehicle: {
@@ -181,6 +183,9 @@ export async function getInvoiceDetail(invoiceId: string) {
     grandTotal: num(invoice.grandTotal),
     paidAmount: num(invoice.paidAmount),
     remainingAmount: num(invoice.remainingAmount),
+    accountBalanceBefore: invoice.accountBalanceBefore ? num(invoice.accountBalanceBefore) : null,
+    accountBalanceAfter: invoice.accountBalanceAfter ? num(invoice.accountBalanceAfter) : null,
+    account: { ...invoice.account, currentBalance: num(invoice.account.currentBalance) },
     createdAt: invoice.createdAt.toISOString(),
     voidedAt: invoice.voidedAt ? invoice.voidedAt.toISOString() : null,
     vehicleLabel: invoice.vehicle
