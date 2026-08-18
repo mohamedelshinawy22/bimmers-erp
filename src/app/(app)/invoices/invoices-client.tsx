@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Ban,
@@ -197,19 +198,7 @@ export function InvoicesClient({
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
                     {formatDateTime(inv.createdAt)}
                   </TD>
-                  <TD>
-                    <details className="relative" onClick={(event) => event.stopPropagation()}>
-                      <summary className="list-none rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-blue/10 hover:text-bmw-blue"><MoreHorizontal size={16}/></summary>
-                      <div className="absolute left-0 z-20 mt-1 grid min-w-44 gap-1 rounded-xl border border-bmw-cardBorder bg-bmw-card p-2 text-right shadow-xl">
-                        <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs hover:bg-bmw-carbon" onClick={() => void openDetail(inv.id)}><Eye className="ml-1 inline" size={13}/>عرض التفاصيل</button>
-                        <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs hover:bg-bmw-carbon" onClick={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/edit/${inv.id}`)}><Pencil className="ml-1 inline" size={13}/>تعديل الفاتورة</button>
-                        <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs hover:bg-bmw-carbon" onClick={() => void openDetail(inv.id)}><Printer className="ml-1 inline" size={13}/>طباعة</button>
-                        {inv.remainingAmount > 0 && !inv.isVoided ? <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs hover:bg-bmw-carbon" onClick={() => router.push(`/treasury?voucher=${inv.type === "SALE" ? "RECEIPT" : "PAYMENT"}`)}><HandCoins className="ml-1 inline" size={13}/>سداد / تحصيل</button> : null}
-                        {!inv.isVoided ? <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs hover:bg-bmw-carbon"><RotateCcw className="ml-1 inline" size={13}/>عمل مرتجع</button> : null}
-                        {permissions.canVoid && !inv.isVoided ? <button type="button" className="rounded-lg px-2 py-1.5 text-right text-xs text-bmw-mRed hover:bg-bmw-mRed/10" onClick={() => setVoidTarget(inv)}><Ban className="ml-1 inline" size={13}/>إلغاء الفاتورة</button> : null}
-                      </div>
-                    </details>
-                  </TD>
+                  <TD><InvoiceActionMenu invoice={inv} canVoid={permissions.canVoid} onDetail={() => void openDetail(inv.id)} onEdit={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/edit/${inv.id}`)} onSettle={() => router.push(`/treasury?voucher=${inv.type === "SALE" ? "RECEIPT" : "PAYMENT"}`)} onVoid={() => setVoidTarget(inv)} /></TD>
                 </TR>
               ))
             )}
@@ -461,3 +450,12 @@ function VoidInvoiceModal({
 }
 
 export { ShoppingBag };
+
+function InvoiceActionMenu({ invoice, canVoid, onDetail, onEdit, onSettle, onVoid }: { invoice: InvoiceListRow; canVoid: boolean; onDetail: () => void; onEdit: () => void; onSettle: () => void; onVoid: () => void }) {
+  const [open, setOpen] = useState(false); const [position, setPosition] = useState({ top: 0, left: 0 }); const triggerRef = useRef<HTMLButtonElement>(null); const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!open) return; const close = (event: MouseEvent) => { if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) setOpen(false); }; window.addEventListener("mousedown", close); return () => window.removeEventListener("mousedown", close); }, [open]);
+  const toggle = (event: React.MouseEvent) => { event.stopPropagation(); const rect = triggerRef.current?.getBoundingClientRect(); if (rect) setPosition({ top: rect.bottom + 6, left: Math.max(8, rect.right - 208) }); setOpen((value) => !value); };
+  const item = (label: string, icon: React.ReactNode, action: () => void, danger = false) => <button type="button" className={`rounded-lg px-3 py-2 text-right text-xs hover:bg-bmw-carbon ${danger ? "text-bmw-mRed" : "text-bmw-silver"}`} onClick={(event) => { event.stopPropagation(); setOpen(false); action(); }}>{icon}{label}</button>;
+  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid min-w-[200px] gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md">{item("عرض التفاصيل", <Eye className="ml-1 inline" size={14}/>, onDetail)}{item("تعديل الفاتورة", <Pencil className="ml-1 inline" size={14}/>, onEdit)}{item("طباعة الفاتورة", <Printer className="ml-1 inline" size={14}/>, onDetail)}{invoice.remainingAmount > 0 && !invoice.isVoided ? item("سداد / تحصيل", <HandCoins className="ml-1 inline" size={14}/>, onSettle) : null}{!invoice.isVoided ? item("عمل مرتجع", <RotateCcw className="ml-1 inline" size={14}/>, onDetail) : null}{canVoid && !invoice.isVoided ? item("إلغاء الفاتورة", <Ban className="ml-1 inline" size={14}/>, onVoid, true) : null}</div>, document.body) : null;
+  return <><button ref={triggerRef} type="button" aria-label="عمليات الفاتورة" onClick={toggle} className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-blue/10 hover:text-bmw-blue"><MoreHorizontal size={16}/></button>{menu}</>;
+}
