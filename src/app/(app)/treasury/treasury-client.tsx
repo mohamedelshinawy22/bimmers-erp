@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert, Modal } from "@/components/ui/modal";
+import { UniversalDateTimePicker, type DateRangeValue } from "@/components/ui/universal-date-time-picker";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatMoney } from "@/lib/utils";
 import type { TreasuryRow } from "@/server/services/treasury.service";
@@ -86,6 +87,8 @@ interface TreasuryClientProps {
   initialVoucher: "RECEIPT" | "PAYMENT" | null;
 }
 
+const initialTreasuryRange = (): DateRangeValue => { const now = new Date(); const from = new Date(now); from.setHours(0, 0, 0, 0); const iso = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); return { from: iso(from), to: iso(now), preset: "TODAY", pinned: false }; };
+
 const TYPE_ICON: Record<string, typeof Wallet> = {
   CASH_DRAWER: Banknote,
   BANK_ACCOUNT: Building2,
@@ -105,6 +108,7 @@ export function TreasuryClient({
   const [voucher, setVoucher] = useState<"RECEIPT" | "PAYMENT" | null>(initialVoucher);
   const [transferOpen, setTransferOpen] = useState(false);
   const [shiftAction, setShiftAction] = useState<{ mode: "open" | "close"; treasury: TreasuryRow } | null>(null);
+  const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
 
   useEffect(() => setVoucher(initialVoucher), [initialVoucher]);
 
@@ -112,6 +116,7 @@ export function TreasuryClient({
   const cashOnHand = treasuries.filter((t) => t.type === "CASH_DRAWER").reduce((s, t) => s + t.currentBalance, 0);
   const todayIn = treasuries.reduce((s, t) => s + t.todayIn, 0);
   const todayOut = treasuries.reduce((s, t) => s + t.todayOut, 0);
+  const filteredTransactions = transactions.filter((transaction) => { const at = new Date(transaction.createdAt).getTime(); return at >= new Date(range.from).getTime() && at <= new Date(range.to).getTime(); });
 
   return (
     <div className="space-y-4">
@@ -143,6 +148,8 @@ export function TreasuryClient({
           ) : null}
         </div>
       </div>
+
+      <UniversalDateTimePicker value={range} onChange={setRange} syncToUrl storageKey="bimmererp:treasury-range" />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="إجمالي السيولة" value={formatMoney(totalLiquidity)} unit={CURRENCY} accent="blue" />
@@ -327,10 +334,10 @@ export function TreasuryClient({
             </TR>
           </THead>
           <TBody>
-            {transactions.length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <EmptyState colSpan={8} title="لا توجد حركات مالية" icon={<Wallet size={32} />} />
             ) : (
-              transactions.map((t) => (
+              filteredTransactions.map((t) => (
                 <TR key={t.id}>
                   <TD className="tabular whitespace-nowrap text-xs font-bold text-white">{t.transactionNumber}</TD>
                   <TD>
