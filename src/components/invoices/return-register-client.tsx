@@ -19,6 +19,7 @@ import {
 import { createPurchaseReturnAction, createSalesReturnAction, purgePurchaseReturnAction, purgeSalesReturnAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
 import { useInvoicePrint } from "@/hooks/use-invoice-print";
 import { PrintContainer } from "@/components/print/print-container";
+import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 
 type ReturnDocumentType = "SALE_RETURN" | "PURCHASE_RETURN";
 type SourceType = "SALE" | "PURCHASE";
@@ -37,7 +38,8 @@ export function ReturnRegisterClient({ type, rows, treasuries, canVoid, canPurge
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
-  const [purgeTarget, setPurgeTarget] = useState<InvoiceListRow | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<InvoiceListRow[] | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [purgeSuccess, setPurgeSuccess] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const visibleRows = useMemo(() => {
@@ -45,6 +47,7 @@ export function ReturnRegisterClient({ type, rows, treasuries, canVoid, canPurge
     if (!query) return rows;
     return rows.filter((row) => `${row.invoiceNumber} ${row.sourceInvoiceNumber ?? ""} ${row.accountName}`.toLocaleLowerCase("ar-EG").includes(query));
   }, [filter, rows]);
+  const selectedRows = visibleRows.filter((row) => selectedIds.includes(row.id));
 
   return <div className="space-y-4" dir="rtl">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -55,13 +58,14 @@ export function ReturnRegisterClient({ type, rows, treasuries, canVoid, canPurge
     <Card><CardContent className="p-4"><div className="relative max-w-xl"><Search size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-bmw-muted" /><Input value={filter} onChange={(event) => setFilter(event.target.value)} className="pr-9" placeholder={isSaleReturn ? "ابحث برقم المرتجع أو فاتورة البيع أو العميل…" : "ابحث برقم المرتجع أو فاتورة الشراء أو المورد…"} /></div></CardContent></Card>
 
     {purgeSuccess ? <Alert variant="success">{purgeSuccess}</Alert> : null}
-    <Card><Table><THead><TR><TH>رقم المرتجع</TH><TH>الفاتورة الأصلية</TH><TH>{isSaleReturn ? "العميل" : "المورد"}</TH><TH>تاريخ المرتجع</TH><TH>إجمالي المرتجع</TH><TH>طريقة التسوية</TH><TH>المنشئ</TH><TH>الحالة</TH><TH /></TR></THead><TBody>{visibleRows.length === 0 ? <EmptyState colSpan={9} title="لا توجد مرتجعات مطابقة" description="استخدم زر الإنشاء لبدء مرتجع من فاتورة أصلية." icon={<RotateCcw size={30} />} /> : visibleRows.map((row) => <TR key={row.id} className={row.isVoided ? "opacity-50" : ""}><TD className="font-mono font-bold text-white">{row.invoiceNumber}</TD><TD className="font-mono text-bmw-blue">{row.sourceInvoiceNumber || "—"}</TD><TD>{row.accountName}</TD><TD className="text-xs text-bmw-muted">{formatDateTime(row.createdAt)}</TD><TD className="tabular font-bold">{formatMoney(row.grandTotal)}</TD><TD><Badge variant={row.paidAmount > 0 ? "success" : "purple"}>{row.paidAmount > 0 ? (isSaleReturn ? "رد نقدي" : "استلام نقدي") : (isSaleReturn ? "إضافة للحساب" : "خصم من المورد")}</Badge></TD><TD className="text-xs text-bmw-muted">{row.userName}</TD><TD>{row.isVoided ? <Badge variant="danger">ملغى</Badge> : <Badge variant="success">مُعتمد</Badge>}</TD><TD><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => setDetailId(row.id)} title="عرض التفاصيل"><Eye size={15} /></Button><Button size="sm" variant="ghost" onClick={() => setPrintInvoiceId(row.id)} title="طباعة الإشعار"><Printer size={15} /></Button>{canVoid && !row.isVoided ? <Button size="sm" variant="ghost" className="text-bmw-mRed" onClick={() => setVoidTarget(row)} title="إلغاء المرتجع"><Ban size={15} /></Button> : null}{canPurge ? <Button size="sm" variant="ghost" className="text-bmw-mRed" onClick={() => setPurgeTarget(row)} title="حذف نهائي"><Trash2 size={15} /></Button> : null}</div></TD></TR>)}</TBody></Table></Card>
+    <SelectionActionToolbar count={selectedRows.length} itemLabel="مرتجع" onDelete={canPurge ? () => setPurgeTarget(selectedRows) : undefined} deleteLabel="حذف نهائي وعكس القيود" onClear={() => setSelectedIds([])} />
+    <Card><Table><THead><TR><TH><input aria-label="تحديد كل المرتجعات الظاهرة" type="checkbox" checked={visibleRows.length > 0 && visibleRows.every((row) => selectedIds.includes(row.id))} onChange={(event) => setSelectedIds(event.target.checked ? visibleRows.map((row) => row.id) : [])} /></TH><TH>رقم المرتجع</TH><TH>الفاتورة الأصلية</TH><TH>{isSaleReturn ? "العميل" : "المورد"}</TH><TH>تاريخ المرتجع</TH><TH>إجمالي المرتجع</TH><TH>طريقة التسوية</TH><TH>المنشئ</TH><TH>الحالة</TH><TH /></TR></THead><TBody>{visibleRows.length === 0 ? <EmptyState colSpan={10} title="لا توجد مرتجعات مطابقة" description="استخدم زر الإنشاء لبدء مرتجع من فاتورة أصلية." icon={<RotateCcw size={30} />} /> : visibleRows.map((row) => <TR key={row.id} className={row.isVoided ? "opacity-50" : ""}><TD><input aria-label={`تحديد المرتجع ${row.invoiceNumber}`} type="checkbox" checked={selectedIds.includes(row.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))} /></TD><TD className="font-mono font-bold text-white">{row.invoiceNumber}</TD><TD className="font-mono text-bmw-blue">{row.sourceInvoiceNumber || "—"}</TD><TD>{row.accountName}</TD><TD className="text-xs text-bmw-muted">{formatDateTime(row.createdAt)}</TD><TD className="tabular font-bold">{formatMoney(row.grandTotal)}</TD><TD><Badge variant={row.paidAmount > 0 ? "success" : "purple"}>{row.paidAmount > 0 ? (isSaleReturn ? "رد نقدي" : "استلام نقدي") : (isSaleReturn ? "إضافة للحساب" : "خصم من المورد")}</Badge></TD><TD className="text-xs text-bmw-muted">{row.userName}</TD><TD>{row.isVoided ? <Badge variant="danger">ملغى</Badge> : <Badge variant="success">مُعتمد</Badge>}</TD><TD><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => setDetailId(row.id)} title="عرض التفاصيل"><Eye size={15} /></Button><Button size="sm" variant="ghost" onClick={() => setPrintInvoiceId(row.id)} title="طباعة الإشعار"><Printer size={15} /></Button>{canVoid && !row.isVoided ? <Button size="sm" variant="ghost" className="text-bmw-mRed" onClick={() => setVoidTarget(row)} title="إلغاء المرتجع"><Ban size={15} /></Button> : null}{canPurge ? <Button size="sm" variant="ghost" className="text-bmw-mRed" onClick={() => setPurgeTarget([row])} title="حذف نهائي"><Trash2 size={15} /></Button> : null}</div></TD></TR>)}</TBody></Table></Card>
 
     {createOpen ? <ReturnCreationModal type={type} treasuries={treasuries} onClose={() => setCreateOpen(false)} onCreated={(invoiceId) => { setCreateOpen(false); setPrintInvoiceId(invoiceId); router.refresh(); }} /> : null}
     {printInvoiceId ? <ReturnPrintDialog invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} /> : null}
     {detailId ? <ReturnDetailModal invoiceId={detailId} onClose={() => setDetailId(null)} /> : null}
     {voidTarget ? <VoidReturnModal invoice={voidTarget} onClose={() => setVoidTarget(null)} onDone={() => { setVoidTarget(null); router.refresh(); }} /> : null}
-    {purgeTarget ? <PurgeReturnModal invoice={purgeTarget} type={type} onClose={() => setPurgeTarget(null)} onDone={(invoiceNumber) => { setPurgeTarget(null); setPurgeSuccess(`تم الحذف النهائي للمستند ${invoiceNumber} بنجاح.`); router.refresh(); }} /> : null}
+    {purgeTarget ? <PurgeReturnModal invoices={purgeTarget} type={type} onClose={() => setPurgeTarget(null)} onDone={(count) => { setPurgeTarget(null); setSelectedIds([]); setPurgeSuccess(`تم الحذف النهائي لـ ${count} مرتجع بنجاح.`); router.refresh(); }} /> : null}
   </div>;
 }
 
@@ -119,17 +123,21 @@ function ReturnDetailModal({ invoiceId, onClose }: { invoiceId: string; onClose:
   return <Modal open onClose={onClose} title={detail ? `تفاصيل المرتجع — ${detail.invoiceNumber}` : "تفاصيل المرتجع"} size="lg" footer={<Button variant="ghost" onClick={onClose}>إغلاق</Button>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}{!detail && !error ? <Alert variant="info">جاري تحميل التفاصيل…</Alert> : null}{detail ? <><div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><div>الفاتورة الأصلية: <b className="font-mono">{detail.sourceInvoiceNumber || "—"}</b></div><div>الحساب: <b>{detail.account.name}</b></div><div>المدفوع: <b>{formatMoney(detail.paidAmount)}</b></div><div>المتبقي: <b>{formatMoney(detail.remainingAmount)}</b></div></div><Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>الكمية</TH><TH>سعر الوحدة</TH><TH>الإجمالي</TH></TR></THead><TBody>{detail.items.map((item) => <TR key={item.id}><TD>{item.nameAr}</TD><TD className="font-mono">{item.oemNumber}</TD><TD className="tabular">{item.quantity}</TD><TD className="tabular">{formatMoney(item.unitPrice)}</TD><TD className="tabular">{formatMoney(item.totalPrice)}</TD></TR>)}</TBody></Table></> : null}</div></Modal>;
 }
 
-function PurgeReturnModal({ invoice, type, onClose, onDone }: { invoice: InvoiceListRow; type: ReturnDocumentType; onClose: () => void; onDone: (invoiceNumber: string) => void }) {
+function PurgeReturnModal({ invoices, type, onClose, onDone }: { invoices: InvoiceListRow[]; type: ReturnDocumentType; onClose: () => void; onDone: (count: number) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const activeDocument = !invoice.isVoided;
+  const activeCount = invoices.filter((invoice) => !invoice.isVoided).length;
   const submit = () => startTransition(async () => {
     setError(null);
-    const result = type === "SALE_RETURN" ? await purgeSalesReturnAction({ invoiceId: invoice.id }) : await purgePurchaseReturnAction({ invoiceId: invoice.id });
-    if (!result.success) { setError(result.error); return; }
-    onDone(result.data.invoiceNumber);
+    let completed = 0;
+    for (const invoice of invoices) {
+      const result = type === "SALE_RETURN" ? await purgeSalesReturnAction({ invoiceId: invoice.id }) : await purgePurchaseReturnAction({ invoiceId: invoice.id });
+      if (!result.success) { setError(completed > 0 ? `تم حذف ${completed} مرتجع، ثم تعذر حذف ${invoice.invoiceNumber}: ${result.error}` : `تعذر حذف ${invoice.invoiceNumber}: ${result.error}`); return; }
+      completed += 1;
+    }
+    onDone(completed);
   });
-  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي للمستند" description={`المستند: ${invoice.invoiceNumber}`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">{activeDocument ? "المرتجع مُعتمد حالياً: سيعكس النظام كميات المخزون والأثر النقدي/الحسابي أولاً، ثم يحذف المستند وسجلاته التشغيلية نهائياً." : "المرتجع ملغى بالفعل: سيُحذف المستند وسجلاته التشغيلية من السجل دون تطبيق عكس جديد على مخزون أو خزينة أو حساب."}</Alert><p className="text-xs text-bmw-muted">لا يمكن التراجع عن الحذف النهائي. يتطلب هذا الإجراء صلاحية مدير النظام أو مدير تنفيذي.</p></div></Modal>;
+  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي للمستند" description={`سيُعالج ${invoices.length} مرتجعاً.`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">{activeCount > 0 ? `يوجد ${activeCount} مرتجع مُعتمد؛ سيعكس النظام كميات المخزون والأثر النقدي/الحسابي أولاً، ثم يحذف المستند وسجلاته التشغيلية.` : "كل المرتجعات المحددة ملغاة بالفعل؛ سيُحذف سجلها التشغيلي دون تطبيق عكس ثانٍ على مخزون أو خزينة أو حساب."}</Alert><p className="text-xs text-bmw-muted">لا يمكن التراجع عن الحذف النهائي. يتطلب هذا الإجراء صلاحية مدير النظام أو مدير تنفيذي.</p></div></Modal>;
 }
 
 function VoidReturnModal({ invoice, onClose, onDone }: { invoice: InvoiceListRow; onClose: () => void; onDone: () => void }) {

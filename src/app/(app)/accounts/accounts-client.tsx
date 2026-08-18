@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, ScrollText, Search, UserRound, Users, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, ScrollText, Search, Trash2, UserRound, Users, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,12 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
-import { createAccountAction, createVehicleAction, updateAccountAction } from "@/server/actions/accounts.actions";
+import { createAccountAction, createVehicleAction, deleteAccountsAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
 import { AccountStatementTemplate, type AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
+import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 
 interface AccountsClientProps {
   rows: AccountRow[];
@@ -65,6 +66,9 @@ export function AccountsClient({
   const [statementFor, setStatementFor] = useState<AccountRow | null>(null);
   const [voucherFor, setVoucherFor] = useState<{ account: AccountRow; type: "RECEIPT" | "PAYMENT" } | null>(null);
   const [pdcFor, setPdcFor] = useState<AccountRow | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<AccountRow[] | null>(null);
+  const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const displayedDebit = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
@@ -157,10 +161,12 @@ export function AccountsClient({
         </CardContent>
       </Card>
 
+      <SelectionActionToolbar count={selectedAccounts.length} itemLabel="حساب" onEdit={canWrite && selectedAccounts.length === 1 ? () => setEditAccount(selectedAccounts[0] ?? null) : undefined} onDelete={canWrite ? () => setDeleteTarget(selectedAccounts) : undefined} deleteLabel="حذف نهائي" onClear={() => setSelectedIds([])} />
       <Card>
         <Table>
           <THead>
             <TR>
+              <TH><input aria-label="تحديد كل الحسابات الظاهرة" type="checkbox" checked={rows.length > 0 && rows.every((account) => selectedIds.includes(account.id))} onChange={(event) => setSelectedIds(event.target.checked ? rows.map((account) => account.id) : [])} /></TH>
               <TH>كود الحساب</TH>
               <TH>الاسم</TH>
               <TH>النوع</TH>
@@ -176,7 +182,7 @@ export function AccountsClient({
           <TBody>
             {rows.length === 0 ? (
               <EmptyState
-                colSpan={10}
+                colSpan={11}
                 title="لا توجد حسابات مطابقة"
                 description="أضف ورشة أو عميلاً جديداً لبدء البيع الآجل."
                 icon={<Users size={32} />}
@@ -184,6 +190,7 @@ export function AccountsClient({
             ) : (
               rows.map((account) => (
                 <TR key={account.id} tabIndex={0} onDoubleClick={() => setStatementFor(account)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setStatementFor(account); } }} className={`${account.isActive ? "" : "opacity-50"} cursor-pointer focus:outline-none focus:ring-1 focus:ring-bmw-blue`}>
+                  <TD><input aria-label={`تحديد الحساب ${account.name}`} type="checkbox" checked={selectedIds.includes(account.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, account.id])] : current.filter((id) => id !== account.id))} /></TD>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-blue">{account.accountNumber}</TD>
                   <TD className="max-w-[220px]">
                     <p className="truncate font-bold text-white">{account.name}</p>
@@ -337,7 +344,7 @@ export function AccountsClient({
         <StatementModal key={statementFor.id} account={statementFor} companyName={companyName} onClose={() => setStatementFor(null)} />
       ) : null}
       {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
-      {pdcFor ? <AccountPdcModal account={pdcFor} onClose={() => setPdcFor(null)} /> : null}
+      {deleteTarget ? <DeleteAccountsModal accounts={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {vehicleFor ? (
         <AddVehicleModal
           key={vehicleFor.id}
@@ -822,7 +829,14 @@ function AccountVoucherModal({ account, type, treasuries, onClose }: { account: 
   </Modal>;
 }
 
-function AccountPdcModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {
+function DeleteAccountsModal({ accounts, onClose, onDone }: { accounts: AccountRow[]; onClose: () => void; onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => { const result = await deleteAccountsAction({ accountIds: accounts.map((account) => account.id) }); if (!result.success) { setError(result.error); return; } onDone(); });
+  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي للحسابات" description={`سيُفحص ${accounts.length} حساباً قبل الحذف.`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">لا يمكن حذف أي حساب له رصيد أو فواتير أو سندات أو شيكات أو بيانات تشغيلية. أزل أو سوِّ هذه الارتباطات أولاً.</Alert><div className="max-h-32 overflow-auto rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 text-xs">{accounts.map((account) => <p key={account.id}>{account.accountNumber} — {account.name}</p>)}</div></div></Modal>;
+}
+
+function AccountFormModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {
   const [data, setData] = useState<{ checks: Array<{ id: string; direction: string; checkNumber: string; bankName: string | null; amount: number; issueDate: string | null; dueDate: string; status: string; notes: string | null }>; installmentPlans: Array<{ id: string; totalAmount: number; startDate: string; status: string; notes: string | null; installments: Array<{ id: string; dueDate: string; amount: number; paidAmount: number; status: string }> }> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { let cancelled = false; void getAccountPdcInstallmentsAction(account.id).then((result) => { if (cancelled) return; if (result.success) setData(result.data); else setError(result.error); }); return () => { cancelled = true; }; }, [account.id]);

@@ -15,6 +15,7 @@ import {
   Pencil,
   RotateCcw,
   HandCoins,
+  Trash2,
 } from "lucide-react";
 import type { InvoiceType, PaymentStatus } from "@prisma/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,12 +28,13 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney, format
 import type { InvoiceListRow } from "@/server/services/invoices.service";
 import type { InvoiceDetail } from "@/server/services/invoices.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { createInvoiceReturnAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
+import { createInvoiceReturnAction, purgePurchaseInvoiceAction, purgeSalesInvoiceAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
 import { settleInvoiceAction } from "@/server/actions/treasury.actions";
 import { getInvoiceDetailAction } from "@/server/actions/invoices.read.actions";
 import { useInvoicePrint } from "@/hooks/use-invoice-print";
 import { PrintContainer } from "@/components/print/print-container";
 import { PRINT_FORMATS, type InvoicePrintFormat } from "@/lib/invoice-print-types";
+import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 
 interface InvoicesClientProps {
   rows: InvoiceListRow[];
@@ -40,7 +42,7 @@ interface InvoicesClientProps {
   page: number;
   pageSize: number;
   filters: { query: string; type: string; status: string; includeVoided: boolean };
-  permissions: { canVoid: boolean; canViewCost: boolean; canSettle: boolean };
+  permissions: { canVoid: boolean; canPurge: boolean; canViewCost: boolean; canSettle: boolean };
   company: CompanyProfile;
   treasuries: Array<{ id: string; name: string }>;
 }
@@ -64,6 +66,10 @@ export function InvoicesClient({
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
   const [settlementTarget, setSettlementTarget] = useState<InvoiceListRow | null>(null);
   const [returnTarget, setReturnTarget] = useState<InvoiceListRow | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [purgeTarget, setPurgeTarget] = useState<InvoiceListRow[] | null>(null);
+  const selectedInvoices = rows.filter((invoice) => selectedIds.includes(invoice.id) && (invoice.type === "SALE" || invoice.type === "PURCHASE"));
+  const selectableInvoices = rows.filter((invoice) => invoice.type === "SALE" || invoice.type === "PURCHASE");
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -143,10 +149,20 @@ export function InvoicesClient({
         </CardContent>
       </Card>
 
+      <SelectionActionToolbar
+        count={selectedInvoices.length}
+        itemLabel="فاتورة"
+        onEdit={selectedInvoices.length === 1 ? () => router.push(`/invoices/${selectedInvoices[0]?.type === "SALE" ? "sales" : "purchases"}/${selectedInvoices[0]?.id}/edit`) : undefined}
+        onDelete={permissions.canPurge ? () => setPurgeTarget(selectedInvoices) : undefined}
+        deleteLabel="حذف نهائي وعكس القيود"
+        onClear={() => setSelectedIds([])}
+      />
+
       <Card>
         <Table>
           <THead>
             <TR>
+              <TH><input aria-label="تحديد كل الفواتير القابلة للحذف" type="checkbox" checked={selectableInvoices.length > 0 && selectableInvoices.every((invoice) => selectedIds.includes(invoice.id))} onChange={(event) => setSelectedIds(event.target.checked ? selectableInvoices.map((invoice) => invoice.id) : [])} /></TH>
               <TH>رقم الفاتورة</TH>
               <TH>النوع</TH>
               <TH>الحساب</TH>
@@ -163,7 +179,7 @@ export function InvoicesClient({
           <TBody>
             {rows.length === 0 ? (
               <EmptyState
-                colSpan={11}
+                colSpan={12}
                 title="لا توجد فواتير مطابقة"
                 description="عدّل معايير البحث أو أصدر فاتورة جديدة من نقطة البيع."
                 icon={<Receipt size={32} />}
@@ -171,6 +187,7 @@ export function InvoicesClient({
             ) : (
               rows.map((inv) => (
                 <TR key={inv.id} tabIndex={0} onDoubleClick={() => void openDetail(inv.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void openDetail(inv.id); } }} className={`${inv.isVoided ? "opacity-50" : ""} cursor-pointer focus:outline-none focus:ring-1 focus:ring-bmw-blue`}>
+                  <TD><input aria-label={`تحديد الفاتورة ${inv.invoiceNumber}`} type="checkbox" disabled={inv.type !== "SALE" && inv.type !== "PURCHASE"} className={inv.type !== "SALE" && inv.type !== "PURCHASE" ? "cursor-not-allowed opacity-35" : undefined} checked={selectedIds.includes(inv.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, inv.id])] : current.filter((id) => id !== inv.id))} /></TD>
                   <TD className="tabular whitespace-nowrap font-bold text-white">{inv.invoiceNumber}</TD>
                   <TD>
                     <Badge variant={inv.type === "SALE" ? "blue" : "purple"}>
@@ -255,6 +272,8 @@ export function InvoicesClient({
 
       {returnTarget ? <InvoiceReturnModal invoice={returnTarget} treasuries={treasuries} onClose={() => setReturnTarget(null)} onDone={() => { setReturnTarget(null); setDetail(null); router.refresh(); }} /> : null}
 
+      {purgeTarget ? <PurgeInvoicesModal invoices={purgeTarget} onClose={() => setPurgeTarget(null)} onDone={() => { setPurgeTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
+
       {voidTarget ? (
         <VoidInvoiceModal
           invoice={voidTarget}
@@ -267,6 +286,25 @@ export function InvoicesClient({
       ) : null}
     </div>
   );
+}
+
+function PurgeInvoicesModal({ invoices, onClose, onDone }: { invoices: InvoiceListRow[]; onClose: () => void; onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const quantity = invoices.reduce((sum, invoice) => sum + invoice.itemCount, 0);
+  const cash = invoices.reduce((sum, invoice) => sum + invoice.paidAmount, 0);
+  const balance = invoices.reduce((sum, invoice) => sum + invoice.remainingAmount, 0);
+  const submit = () => startTransition(async () => {
+    setError(null);
+    let completed = 0;
+    for (const invoice of invoices) {
+      const result = invoice.type === "SALE" ? await purgeSalesInvoiceAction({ invoiceId: invoice.id }) : await purgePurchaseInvoiceAction({ invoiceId: invoice.id });
+      if (!result.success) { setError(completed > 0 ? `تم حذف ${completed} فاتورة، ثم تعذر حذف ${invoice.invoiceNumber}: ${result.error}` : `تعذر حذف ${invoice.invoiceNumber}: ${result.error}`); return; }
+      completed += 1;
+    }
+    onDone();
+  });
+  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي واسترجاع القيم" description={`سيُعالج ${invoices.length} مستنداً ضمن عمليات عكس ذرّية مستقلة.`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي وعكس القيود</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">سيعكس النظام أثر المخزون والخزينة والحساب لكل فاتورة نشطة قبل حذف سجلاتها التشغيلية. الفواتير الملغاة تُنظف دون عكس ثانٍ.</Alert><div className="grid grid-cols-3 gap-2 text-center text-xs"><div className="rounded-lg border border-bmw-cardBorder p-2">{quantity}<br/><span className="text-bmw-muted">بند</span></div><div className="rounded-lg border border-bmw-cardBorder p-2">{formatMoney(cash)}<br/><span className="text-bmw-muted">نقدي</span></div><div className="rounded-lg border border-bmw-cardBorder p-2">{formatMoney(balance)}<br/><span className="text-bmw-muted">آجل</span></div></div><div className="max-h-32 overflow-auto rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 font-mono text-xs">{invoices.map((invoice) => <p key={invoice.id}>{invoice.invoiceNumber}</p>)}</div></div></Modal>;
 }
 
 function InvoiceDetailModal({

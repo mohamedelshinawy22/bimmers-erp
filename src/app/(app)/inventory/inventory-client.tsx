@@ -140,6 +140,7 @@ export function InventoryClient({
           <p className="text-sm font-bold text-white">تم تحديد <span className="tabular text-bmw-blue">{selectedParts.length}</span> صنف</p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={15} /> طباعة الباركود</Button>
+            {permissions.canWrite && selectedParts.length === 1 ? <Button size="sm" variant="outline" onClick={() => setEditPart(selectedParts[0] ?? null)}><Pencil size={15} /> تعديل</Button> : null}
             {permissions.canDelete ? <Button size="sm" variant="danger" onClick={() => setDeleteTarget(selectedParts)}><Trash2 size={15} /> حذف المحدد</Button> : null}
             <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>إلغاء التحديد</Button>
           </div>

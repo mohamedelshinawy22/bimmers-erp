@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/redis";
@@ -20,13 +21,44 @@ import {
   type SettleInvoiceInput,
 } from "@/lib/validations/invoice";
 import { nextShiftNumber, nextTransactionNumber } from "@/server/services/numbering.service";
-import { lockAccountForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
+import { lockAccountForUpdate, lockAccountsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { treasuryReportSchema, treasurySchema, type TreasuryInput, type TreasuryReportInput } from "@/lib/validations/treasury";
 
 
 
 
+
+const deleteManualTreasuryTransactionsSchema = z.object({ transactionIds: z.array(z.string().uuid()).min(1).max(100) });
+
+/** Reverses and permanently removes manual vouchers only; invoice/transfer entries remain immutable in their source workflows. */
+export async function deleteManualTreasuryTransactionsAction(raw: { transactionIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    const input = deleteManualTreasuryTransactionsSchema.parse(raw);
+    const ids = [...new Set(input.transactionIds)];
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const transactions = await tx.treasuryTransaction.findMany({ where: { id: { in: ids } } });
+      if (transactions.length !== ids.length) throw new BusinessRuleError("إحدى الحركات المحددة لم تعد موجودة.");
+      if (transactions.some((transaction) => transaction.invoiceId || transaction.type === "TRANSFER")) throw new BusinessRuleError("لا يمكن حذف حركة مرتبطة بفاتورة أو تحويل داخلي. استخدم إلغاء الفاتورة أو التحويل من مساره الأصلي.");
+      const accountIds = transactions.map((transaction) => transaction.accountId).filter((id): id is string => Boolean(id));
+      if (accountIds.length) await lockAccountsForUpdate(tx, accountIds);
+      const treasuries = await lockTreasuriesForUpdate(tx, transactions.map((transaction) => transaction.treasuryId));
+      for (const transaction of transactions) {
+        const treasury = treasuries.get(transaction.treasuryId)!;
+        if (transaction.type === "RECEIPT" && treasury.currentBalance.lt(transaction.amount)) throw new BusinessRuleError(`لا يمكن حذف السند ${transaction.transactionNumber}: سيولة خزينة "${treasury.name}" لا تكفي لعكس القبض.`);
+        await tx.treasury.update({ where: { id: transaction.treasuryId }, data: transaction.type === "RECEIPT" ? { currentBalance: { decrement: transaction.amount } } : { currentBalance: { increment: transaction.amount } } });
+        if (transaction.accountId) await tx.account.update({ where: { id: transaction.accountId }, data: transaction.type === "RECEIPT" ? { currentBalance: { decrement: transaction.amount } } : { currentBalance: { increment: transaction.amount } } });
+        await tx.treasuryTransaction.delete({ where: { id: transaction.id } });
+        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "DELETE", oldData: transaction, newData: { reversed: true, source: "MANUAL_VOUCHER" }, performedBy: user.id });
+      }
+      return { deleted: transactions.length };
+    }, TX_OPTIONS));
+    await invalidateCache("dashboard");
+    for (const path of ["/", "/treasury", "/accounts"]) revalidatePath(path);
+    return ok(result);
+  } catch (error) { return toActionError(error, "deleteManualTreasuryTransactionsAction"); }
+}
 
 /**
  * Receipt (سند قبض) / Payment (سند صرف).

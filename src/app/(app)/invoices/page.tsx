@@ -47,6 +47,7 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
       }}
       permissions={{
         canVoid: can(user.role, "invoice.void"),
+        canPurge: can(user.role, "invoice.purge"),
         canViewCost: can(user.role, "part.viewCost"),
         canSettle: can(user.role, "treasury.transact"),
       }}

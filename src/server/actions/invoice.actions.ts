@@ -28,6 +28,7 @@ import {
   createInvoiceReturn,
   voidInvoice,
   purgeReturnInvoice,
+  purgeInvoice,
   type InvoiceResult,
 } from "@/server/services/invoice.service";
 
@@ -157,6 +158,30 @@ export async function createPurchaseReturnAction(raw: CreateInvoiceReturnInput):
 }
 
 const purgeReturnSchema = z.object({ invoiceId: z.string().uuid() });
+
+export async function purgeSalesInvoiceAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = purgeReturnSchema.parse(raw);
+    const result = await purgeInvoice(input.invoiceId, "SALE", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true });
+    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/pos", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "purgeSalesInvoiceAction");
+  }
+}
+
+export async function purgePurchaseInvoiceAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = purgeReturnSchema.parse(raw);
+    const result = await purgeInvoice(input.invoiceId, "PURCHASE", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true });
+    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/pos", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "purgePurchaseInvoiceAction");
+  }
+}
 
 export async function purgeSalesReturnAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string; wasVoided: boolean }>> {
   try {

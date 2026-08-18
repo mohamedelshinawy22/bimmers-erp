@@ -223,3 +223,31 @@ export async function createVehicleAction(
     return toActionError(error, "createVehicleAction");
   }
 }
+
+
+export async function deleteAccountsAction(raw: { accountIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
+  try {
+    const user = await requirePermission("account.write");
+    const ids = [...new Set(raw.accountIds)];
+    if (!ids.length || ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new BusinessRuleError("اختر حساباً صالحاً للحذف.");
+    const result = await prisma.$transaction(async (tx) => {
+      const accounts = await tx.account.findMany({
+        where: { id: { in: ids } },
+        include: { _count: { select: { invoices: true, transactions: true, heldSales: true, checks: true, installmentPlans: true, vehicles: true } } },
+      });
+      if (accounts.length !== ids.length) throw new BusinessRuleError("أحد الحسابات المحددة لم يعد موجوداً.");
+      for (const account of accounts) {
+        const history = Object.values(account._count).reduce((total, count) => total + count, 0);
+        if (!account.currentBalance.eq(0) || history > 0) throw new BusinessRuleError(`لا يمكن حذف الحساب "${account.name}" لوجود رصيد أو فواتير أو سندات أو بيانات تشغيلية مرتبطة به.`);
+      }
+      await tx.account.deleteMany({ where: { id: { in: ids } } });
+      for (const account of accounts) await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "DELETE", oldData: account, newData: { purged: true }, performedBy: user.id });
+      return { deleted: accounts.length };
+    }, TX_OPTIONS);
+    revalidatePath("/accounts");
+    revalidatePath("/pos");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "deleteAccountsAction");
+  }
+}

@@ -25,6 +25,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert, Modal } from "@/components/ui/modal";
 import { UniversalDateTimePicker, type DateRangeValue } from "@/components/ui/universal-date-time-picker";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatMoney } from "@/lib/utils";
 import type { TreasuryRow } from "@/server/services/treasury.service";
 import {
@@ -35,6 +36,7 @@ import {
   openShiftAction,
   transferBetweenTreasuriesAction,
   updateTreasuryAction,
+  deleteManualTreasuryTransactionsAction,
 } from "@/server/actions/treasury.actions";
 
 interface ZReport {
@@ -111,11 +113,14 @@ export function TreasuryClient({
   permissions,
   initialVoucher,
 }: TreasuryClientProps) {
+  const router = useRouter();
   const [voucher, setVoucher] = useState<"RECEIPT" | "PAYMENT" | null>(initialVoucher);
   const [transferOpen, setTransferOpen] = useState(false);
   const [shiftAction, setShiftAction] = useState<{ mode: "open" | "close"; treasury: TreasuryRow } | null>(null);
   const [manageTreasury, setManageTreasury] = useState<TreasuryRow | "NEW" | null>(null);
   const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<string[]>([]);
+  const [deleteTransactionsOpen, setDeleteTransactionsOpen] = useState(false);
 
   useEffect(() => setVoucher(initialVoucher), [initialVoucher]);
 
@@ -124,6 +129,8 @@ export function TreasuryClient({
   const todayIn = treasuries.reduce((s, t) => s + t.todayIn, 0);
   const todayOut = treasuries.reduce((s, t) => s + t.todayOut, 0);
   const filteredTransactions = transactions.filter((transaction) => { const at = new Date(transaction.createdAt).getTime(); return at >= new Date(range.from).getTime() && at <= new Date(range.to).getTime(); });
+  const selectableTransactions = filteredTransactions.filter((transaction) => !transaction.invoiceNumber && transaction.type !== "TRANSFER");
+  const selectedTransactions = selectableTransactions.filter((transaction) => selectedTransactionIds.includes(transaction.id));
 
   return (
     <div className="space-y-4">
@@ -326,6 +333,7 @@ export function TreasuryClient({
       ) : null}
 
       {/* Movements */}
+      <SelectionActionToolbar count={selectedTransactions.length} itemLabel="سند" onDelete={permissions.canManage ? () => setDeleteTransactionsOpen(true) : undefined} deleteLabel="حذف وعكس السندات" onClear={() => setSelectedTransactionIds([])} />
       <Card>
         <CardHeader>
           <CardTitle>آخر الحركات المالية</CardTitle>
@@ -333,6 +341,7 @@ export function TreasuryClient({
         <Table>
           <THead>
             <TR>
+              <TH><input aria-label="تحديد كل السندات اليدوية" type="checkbox" checked={selectableTransactions.length > 0 && selectableTransactions.every((transaction) => selectedTransactionIds.includes(transaction.id))} onChange={(event) => setSelectedTransactionIds(event.target.checked ? selectableTransactions.map((transaction) => transaction.id) : [])} /></TH>
               <TH>رقم السند</TH>
               <TH>النوع</TH>
               <TH>الخزينة</TH>
@@ -345,10 +354,10 @@ export function TreasuryClient({
           </THead>
           <TBody>
             {filteredTransactions.length === 0 ? (
-              <EmptyState colSpan={8} title="لا توجد حركات مالية" icon={<Wallet size={32} />} />
+              <EmptyState colSpan={9} title="لا توجد حركات مالية" icon={<Wallet size={32} />} />
             ) : (
               filteredTransactions.map((t) => (
-                <TR key={t.id}>
+                <TR key={t.id}><TD><input aria-label={`تحديد السند ${t.transactionNumber}`} type="checkbox" disabled={Boolean(t.invoiceNumber) || t.type === "TRANSFER"} className={t.invoiceNumber || t.type === "TRANSFER" ? "cursor-not-allowed opacity-35" : undefined} checked={selectedTransactionIds.includes(t.id)} onChange={(event) => setSelectedTransactionIds((current) => event.target.checked ? [...new Set([...current, t.id])] : current.filter((id) => id !== t.id))} /></TD>
                   <TD className="tabular whitespace-nowrap text-xs font-bold text-white">{t.transactionNumber}</TD>
                   <TD>
                     <Badge
@@ -375,6 +384,8 @@ export function TreasuryClient({
           </TBody>
         </Table>
       </Card>
+
+      {deleteTransactionsOpen ? <DeleteManualTreasuryTransactionsModal transactions={selectedTransactions} onClose={() => setDeleteTransactionsOpen(false)} onDone={() => { setDeleteTransactionsOpen(false); setSelectedTransactionIds([]); router.refresh(); }} /> : null}
 
       {/* Closed shifts */}
       {closedShifts.length > 0 ? (
@@ -449,6 +460,14 @@ export function TreasuryClient({
       ) : null}
     </div>
   );
+}
+
+function DeleteManualTreasuryTransactionsModal({ transactions, onClose, onDone }: { transactions: TransactionRow[]; onClose: () => void; onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const total = transactions.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  const submit = () => startTransition(async () => { const result = await deleteManualTreasuryTransactionsAction({ transactionIds: transactions.map((transaction) => transaction.id) }); if (!result.success) { setError(result.error); return; } onDone(); });
+  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي واسترجاع القيم" description={`سيُعكس ${transactions.length} سند يدوي بقيمة ${formatMoney(total)} ${CURRENCY}.`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف وعكس السندات</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">السندات المحددة ستُحذف بعد عكس أثرها على الخزينة والحساب. لا يمكن حذف سندات الفواتير أو التحويلات من هذه الشاشة.</Alert><div className="max-h-32 overflow-auto rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 font-mono text-xs">{transactions.map((transaction) => <p key={transaction.id}>{transaction.transactionNumber}</p>)}</div></div></Modal>;
 }
 
 function Row({ label, value, tone, bold }: { label: string; value: string; tone?: string; bold?: boolean }) {

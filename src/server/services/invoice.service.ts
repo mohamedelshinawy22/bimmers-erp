@@ -1063,3 +1063,74 @@ export async function purgeReturnInvoice(
     return { invoiceNumber: returned.invoiceNumber, wasVoided: returned.isVoided };
   }, TX_OPTIONS));
 }
+
+
+/**
+ * Permanently removes a sales or purchase invoice after reversing its active
+ * accounting and stock effects. Invoices with return history are intentionally
+ * blocked: the linked return register must be resolved/purged first so source
+ * references cannot become orphaned.
+ */
+export async function purgeInvoice(
+  invoiceId: string,
+  expectedType: "SALE" | "PURCHASE",
+  actor: InvoiceActor,
+): Promise<{ invoiceNumber: string }> {
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { items: true, returns: { select: { id: true } } },
+    });
+    if (!invoice) throw new BusinessRuleError("الفاتورة غير موجودة.");
+    if (invoice.type !== expectedType) throw new BusinessRuleError("نوع الفاتورة لا يطابق عملية الحذف المطلوبة.");
+    if (invoice.returns.length > 0) throw new BusinessRuleError("لا يمكن الحذف النهائي لفاتورة لها مرتجعات مرتبطة. احذف أو ألغِ المرتجعات أولاً.");
+
+    if (!invoice.isVoided) {
+      const partIds = [...new Set(invoice.items.map((item) => item.partId))];
+      const parts = await lockPartsForUpdate(tx, partIds);
+      await lockAccountForUpdate(tx, invoice.accountId);
+      const isSale = invoice.type === "SALE";
+      const runningStock = new Map<string, number>();
+      const runningAvg = new Map<string, Prisma.Decimal>();
+
+      for (const item of invoice.items) {
+        const part = parts.get(item.partId);
+        if (!part) throw new BusinessRuleError("أحد أصناف الفاتورة لم يعد موجوداً ولا يمكن عكسه.");
+        const priorQty = runningStock.get(item.partId) ?? part.stockQuantity;
+        const quantityDelta = isSale ? item.quantity : -item.quantity;
+        const balanceAfter = priorQty + quantityDelta;
+        if (balanceAfter < 0) throw new BusinessRuleError(`لا يمكن الحذف النهائي: رصيد الصنف "${part.nameAr}" سيصبح سالباً (${balanceAfter}).`);
+        runningStock.set(item.partId, balanceAfter);
+        const averageUpdate = invoice.type === "PURCHASE"
+          ? reverseAverageCost(balanceAfter, runningAvg.get(item.partId) ?? part.buyPriceAvg, item.quantity, item.unitCostSnapshot)
+          : undefined;
+        if (averageUpdate) runningAvg.set(item.partId, averageUpdate);
+        await tx.partItem.update({ where: { id: item.partId }, data: { stockQuantity: { increment: quantityDelta }, ...(averageUpdate ? { buyPriceAvg: averageUpdate } : {}) } });
+      }
+
+      if (invoice.paidAmount.gt(0) && invoice.treasuryId) {
+        const treasuries = await lockTreasuriesForUpdate(tx, [invoice.treasuryId]);
+        const treasury = treasuries.get(invoice.treasuryId)!;
+        if (isSale && treasury.currentBalance.lt(invoice.paidAmount)) throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}" لعكس قبض الفاتورة (${formatMoney(invoice.paidAmount)}).`);
+        await tx.treasury.update({ where: { id: invoice.treasuryId }, data: isSale ? { currentBalance: { decrement: invoice.paidAmount } } : { currentBalance: { increment: invoice.paidAmount } } });
+      }
+      if (invoice.remainingAmount.gt(0)) {
+        await tx.account.update({ where: { id: invoice.accountId }, data: isSale ? { currentBalance: { increment: invoice.remainingAmount } } : { currentBalance: { decrement: invoice.remainingAmount } } });
+      }
+    }
+
+    await tx.stockMovement.deleteMany({ where: { invoiceId: invoice.id } });
+    await tx.treasuryTransaction.deleteMany({ where: { invoiceId: invoice.id } });
+    await tx.heldSale.updateMany({ where: { invoiceId: invoice.id }, data: { invoiceId: null } });
+    await tx.invoice.delete({ where: { id: invoice.id } });
+    await writeAudit(tx, {
+      tableName: "Invoice",
+      recordId: invoice.id,
+      action: "DELETE",
+      oldData: { invoiceNumber: invoice.invoiceNumber, type: invoice.type, isVoided: invoice.isVoided, itemCount: invoice.items.length },
+      newData: { purged: true, stockAndBalanceReversed: !invoice.isVoided },
+      performedBy: actor.id,
+    });
+    return { invoiceNumber: invoice.invoiceNumber };
+  }, TX_OPTIONS));
+}
