@@ -1,6 +1,7 @@
 "use server";
 
-import { requirePermission, can } from "@/lib/auth";
+import { can, requirePermission } from "@/lib/auth";
+import { getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getInvoiceDetail, type InvoiceDetail } from "@/server/services/invoices.service";
 import { getStockLedger } from "@/server/services/parts.service";
@@ -21,8 +22,9 @@ export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionR
     const detail = await getInvoiceDetail(invoiceId);
     if (!detail) return { success: false, error: "الفاتورة غير موجودة." };
 
-    // Cost and margin are only for roles allowed to see cost.
-    if (!can(user.role, "part.viewCost")) {
+    // Cost and margin are only returned to sessions explicitly allowed to view cost.
+    const access = await getUserAccess(user.id);
+    if (!can(user.role, "part.viewCost") || !hasPermission(access, "canViewCostPrice")) {
       return ok({
         ...detail,
         items: detail.items.map((i) => ({ ...i, unitCostSnapshot: 0 })),
@@ -36,8 +38,10 @@ export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionR
 
 export async function getStockLedgerAction(partId: string) {
   try {
-    await requirePermission("stock.viewLedger");
-    return ok(await getStockLedger(partId, 100));
+    const user = await requirePermission("stock.viewLedger");
+    const rows = await getStockLedger(partId, 100);
+    const access = await getUserAccess(user.id);
+    return ok(hasPermission(access, "canViewCostPrice") ? rows : rows.map((row) => ({ ...row, unitCost: 0, invoiceUnitCost: 0, invoiceTotalCost: 0 })));
   } catch (error) {
     return toActionError(error, "getStockLedgerAction");
   }

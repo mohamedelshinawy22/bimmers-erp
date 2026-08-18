@@ -6,6 +6,7 @@ import { prisma } from "./prisma";
 import { SESSION_COOKIE } from "./auth-constants";
 import { AuthError, ConfigurationError, ForbiddenError } from "./errors";
 import { can, PERMISSIONS, type Permission } from "./permissions";
+import { getUserAccess, hasApplicationPermission } from "./user-permissions";
 
 // Re-exported so server code has one import site for auth + authorisation.
 export { SESSION_COOKIE, AuthError, ForbiddenError, can, PERMISSIONS };
@@ -114,9 +115,10 @@ export async function requireUser(): Promise<SessionUser> {
 /** Authenticate + authorise in one call. Throws on failure. */
 export async function requirePermission(permission: Permission): Promise<SessionUser> {
   const user = await requireUser();
-  if (!can(user.role, permission)) {
+  const access = await getUserAccess(user.id);
+  if (!hasApplicationPermission(access, permission)) {
     throw new ForbiddenError(
-      `ليس لديك صلاحية (${permission}) — دورك الحالي: ${user.role}`,
+      `ليس لديك صلاحية (${permission}) — دورك أو إعداداتك التفصيلية لا تسمح بهذا الإجراء.`,
     );
   }
   return user;

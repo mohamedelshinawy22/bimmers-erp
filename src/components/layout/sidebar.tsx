@@ -40,6 +40,7 @@ const NAV: Array<{
   { href: "/accounts", label: "الحسابات والورش", icon: Users, hotkey: "F4", permission: "account.read" },
   { href: "/treasury", label: "الخزينة والسيولة", icon: Wallet, hotkey: "F5", permission: "treasury.read" },
   { href: "/audit", label: "سجل التدقيق", icon: ShieldCheck, hotkey: null, permission: "audit.read" },
+  { href: "/users", label: "المستخدمون والصلاحيات", icon: ShieldCheck, hotkey: null, permission: "user.manage" },
   { href: "/settings", label: "الإعدادات", icon: SlidersHorizontal, hotkey: null, permission: "settings.read" },
 ];
 

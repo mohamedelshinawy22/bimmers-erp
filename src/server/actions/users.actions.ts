@@ -1,0 +1,128 @@
+"use server";
+
+import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { requirePermission } from "@/lib/auth";
+import { BusinessRuleError } from "@/lib/errors";
+import { ok, toActionError, type ActionResult } from "@/lib/action-result";
+import { toJsonSafe } from "@/lib/audit";
+import { createManagedUserSchema, updateManagedUserSchema, type CreateManagedUserInput, type UpdateManagedUserInput, type UserPermissionInput } from "@/lib/validations/users";
+import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+
+function permissionData(input: UserPermissionInput): Prisma.UserPermissionUncheckedCreateWithoutUserInput {
+  return {
+    ...input,
+    maxDiscountPercent: input.maxDiscountPercent,
+    maxDiscountValue: input.maxDiscountValue,
+  };
+}
+
+async function validateScopedResources(
+  tx: Prisma.TransactionClient,
+  input: Pick<CreateManagedUserInput, "allowedWarehouseIds" | "allowedTreasuryIds" | "transferToTreasuryId">,
+): Promise<void> {
+  const treasuryIds = [...new Set([...input.allowedTreasuryIds, ...(input.transferToTreasuryId ? [input.transferToTreasuryId] : [])])];
+  if (treasuryIds.length) {
+    const treasuries = await tx.treasury.findMany({ where: { id: { in: treasuryIds }, isActive: true }, select: { id: true } });
+    if (treasuries.length !== treasuryIds.length) throw new BusinessRuleError("تتضمن صلاحيات المستخدم خزينة غير موجودة أو معطلة.");
+  }
+  if (input.transferToTreasuryId && !input.allowedTreasuryIds.includes(input.transferToTreasuryId)) {
+    throw new BusinessRuleError("يجب أن تكون خزينة التحويل المقيّدة ضمن الخزائن المسموح بها للمستخدم.");
+  }
+  const warehouseNames = [...new Set(input.allowedWarehouseIds)];
+  if (warehouseNames.length) {
+    const bins = await tx.warehouseBin.findMany({ where: { warehouseName: { in: warehouseNames } }, distinct: ["warehouseName"], select: { warehouseName: true } });
+    if (bins.length !== warehouseNames.length) throw new BusinessRuleError("تتضمن صلاحيات المستخدم مخزناً غير موجود.");
+  }
+}
+
+function revalidateUserManagement(): void {
+  for (const path of ["/users", "/settings", "/pos", "/invoices", "/treasury"]) revalidatePath(path);
+}
+
+export async function createManagedUserAction(raw: CreateManagedUserInput): Promise<ActionResult<{ id: string; username: string }>> {
+  try {
+    const actor = await requirePermission("user.manage");
+    const input = createManagedUserSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      await validateScopedResources(tx, input);
+      const created = await tx.user.create({
+        data: {
+          username: input.username,
+          fullName: input.fullName,
+          passwordHash: await bcrypt.hash(input.password, 12),
+          role: input.role,
+          isActive: input.isActive,
+          allowedWarehouseIds: [...new Set(input.allowedWarehouseIds)],
+          allowedTreasuryIds: [...new Set(input.allowedTreasuryIds)],
+          transferToTreasuryId: input.transferToTreasuryId ?? null,
+          permissions: { create: permissionData(input.permissions) },
+        },
+        select: { id: true, username: true, fullName: true, role: true, isActive: true },
+      });
+      await tx.systemAuditTrail.create({
+        data: {
+          tableName: "User",
+          recordId: created.id,
+          action: "INSERT",
+          newData: toJsonSafe({ ...created, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions }),
+          performedBy: actor.id,
+        },
+      });
+      return created;
+    }, TX_OPTIONS));
+    revalidateUserManagement();
+    return ok({ id: result.id, username: result.username });
+  } catch (error) {
+    return toActionError(error, "createManagedUserAction");
+  }
+}
+
+export async function updateManagedUserAction(raw: UpdateManagedUserInput): Promise<ActionResult<{ id: string }>> {
+  try {
+    const actor = await requirePermission("user.manage");
+    const input = updateManagedUserSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const before = await tx.user.findUnique({ where: { id: input.id }, include: { permissions: true } });
+      if (!before) throw new BusinessRuleError("المستخدم غير موجود.");
+      if (actor.id === before.id && !input.isActive) throw new BusinessRuleError("لا يمكنك إيقاف حسابك الخاص.");
+      if (before.role === "SUPER_ADMIN" && before.isActive && (!input.isActive || input.role !== "SUPER_ADMIN")) {
+        const remaining = await tx.user.count({ where: { role: "SUPER_ADMIN", isActive: true, id: { not: before.id } } });
+        if (remaining === 0) throw new BusinessRuleError("لا يمكن إيقاف أو تخفيض آخر مدير نظام نشط.");
+      }
+      await validateScopedResources(tx, input);
+      const updated = await tx.user.update({
+        where: { id: before.id },
+        data: {
+          username: input.username,
+          fullName: input.fullName,
+          role: input.role,
+          isActive: input.isActive,
+          allowedWarehouseIds: [...new Set(input.allowedWarehouseIds)],
+          allowedTreasuryIds: [...new Set(input.allowedTreasuryIds)],
+          transferToTreasuryId: input.transferToTreasuryId ?? null,
+          ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
+          permissions: { upsert: { create: permissionData(input.permissions), update: permissionData(input.permissions) } },
+        },
+        select: { id: true, username: true, fullName: true, role: true, isActive: true },
+      });
+      await tx.systemAuditTrail.create({
+        data: {
+          tableName: "User",
+          recordId: before.id,
+          action: "UPDATE",
+          oldData: toJsonSafe({ username: before.username, fullName: before.fullName, role: before.role, isActive: before.isActive, allowedWarehouseIds: before.allowedWarehouseIds, allowedTreasuryIds: before.allowedTreasuryIds, transferToTreasuryId: before.transferToTreasuryId, permissions: before.permissions }),
+          newData: toJsonSafe({ ...updated, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions, passwordChanged: Boolean(input.password) }),
+          performedBy: actor.id,
+        },
+      });
+      return updated;
+    }, TX_OPTIONS));
+    revalidateUserManagement();
+    return ok({ id: result.id });
+  } catch (error) {
+    return toActionError(error, "updateManagedUserAction");
+  }
+}

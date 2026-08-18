@@ -91,12 +91,24 @@ export async function getAuditFilters() {
   };
 }
 
+export interface ManagedUserPermission {
+  canManageProgram: boolean; canBackup: boolean; canRestoreBackup: boolean; canEditInvoiceNumber: boolean; canEditDateTime: boolean; viewTodayInvoicesOnly: boolean; editTodayInvoicesOnly: boolean; canSendEInvoices: boolean;
+  canViewSalesInvoices: boolean; canCreateSalesInvoices: boolean; canEditSalesInvoices: boolean; canDeleteSalesInvoices: boolean; canEditSellingPrice: boolean; canCreditSale: boolean; canEditSaleVat: boolean; canAddDiscount: boolean; maxDiscountPercent: number; maxDiscountValue: number; canSellBelowMinPrice: boolean; canSellBelowCost: boolean; canSalesReturn: boolean; canViewInvoiceProfit: boolean; canViewQuotations: boolean; canManageQuotations: boolean; canViewPurchaseInvoices: boolean; canCreatePurchaseInvoices: boolean; canEditPurchaseInvoices: boolean; canDeletePurchaseInvoices: boolean; canCreditPurchase: boolean; canEditPurchaseVat: boolean; canPurchaseReturn: boolean; canManageInventoryAudit: boolean; canManageBranchTransfers: boolean; canManageAdjustments: boolean; canManageExpenses: boolean; canManageReceipts: boolean; canTransferTreasury: boolean; canBypassTreasuryImpact: boolean;
+  canViewParts: boolean; canCreateParts: boolean; canEditParts: boolean; canDeleteParts: boolean; canViewPartLedger: boolean; canViewStockReport: boolean; canViewCostPrice: boolean; canNegativeSell: boolean; canPrintBarcodes: boolean;
+  canViewAccounts: boolean; canCreateAccounts: boolean; canEditAccounts: boolean; canDeleteAccounts: boolean; allowedAccountTypes: string[]; canViewAccountBalance: boolean; canViewAccountStatement: boolean;
+  canViewTreasuryBalance: boolean; canAnalyzeReceipts: boolean; canAnalyzeExpenses: boolean; canAccessAdvancedReports: boolean; canViewDailyMovementReport: boolean; canViewSalesAnalysis: boolean; canViewPurchaseAnalysis: boolean;
+}
+
 export interface ManagedUser {
   id: string;
   username: string;
   fullName: string;
   role: string;
   isActive: boolean;
+  allowedWarehouseIds: string[];
+  allowedTreasuryIds: string[];
+  transferToTreasuryId: string | null;
+  permissions: ManagedUserPermission | null;
   lastLoginAt: string | null;
   createdAt: string;
   invoiceCount: number;
@@ -106,13 +118,8 @@ export async function listUsers(): Promise<ManagedUser[]> {
   const users = await prisma.user.findMany({
     orderBy: [{ isActive: "desc" }, { username: "asc" }],
     select: {
-      id: true,
-      username: true,
-      fullName: true,
-      role: true,
-      isActive: true,
-      lastLoginAt: true,
-      createdAt: true,
+      id: true, username: true, fullName: true, role: true, isActive: true, allowedWarehouseIds: true, allowedTreasuryIds: true, transferToTreasuryId: true, lastLoginAt: true, createdAt: true,
+      permissions: true,
       _count: { select: { invoices: true } },
     },
   });
@@ -122,6 +129,10 @@ export async function listUsers(): Promise<ManagedUser[]> {
     fullName: u.fullName,
     role: u.role,
     isActive: u.isActive,
+    allowedWarehouseIds: u.allowedWarehouseIds,
+    allowedTreasuryIds: u.allowedTreasuryIds,
+    transferToTreasuryId: u.transferToTreasuryId,
+    permissions: u.permissions ? { ...u.permissions, maxDiscountPercent: Number(u.permissions.maxDiscountPercent), maxDiscountValue: Number(u.permissions.maxDiscountValue) } : null,
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     createdAt: u.createdAt.toISOString(),
     invoiceCount: u._count.invoices,

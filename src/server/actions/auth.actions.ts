@@ -166,6 +166,7 @@ export async function toggleUserActiveAction(
     });
 
     revalidatePath("/settings");
+    revalidatePath("/users");
     return ok({ isActive: next });
   } catch (error) {
     return toActionError(error, "toggleUserActiveAction");

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { Receipt } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
+import { canUseTreasury, getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPosAccounts } from "@/server/services/accounts.service";
 import { getSetting } from "@/server/services/settings.service";
 import { PosTerminal } from "./pos-terminal";
@@ -11,9 +12,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PosPage() {
   const user = await requireUser();
-  if (!can(user.role, "invoice.sale")) redirect("/");
+  const access = await getUserAccess(user.id);
+  if (!hasApplicationPermission(access, "invoice.sale")) redirect("/");
 
-  const [accounts, treasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter] =
+  const [accounts, allTreasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter] =
     await Promise.all([
       getPosAccounts(),
       prisma.treasury.findMany({
@@ -28,6 +30,7 @@ export default async function PosPage() {
       getSetting("INVOICE_FOOTER", ""),
     ]);
 
+  const treasuries = allTreasuries.filter((treasury) => canUseTreasury(access, treasury.id));
   const walkIn = accounts.find((a) => a.accountNumber === "ACC-0001") ?? accounts[0] ?? null;
   const cashDrawer = treasuries.find((t) => t.type === "CASH_DRAWER") ?? treasuries[0] ?? null;
   const taxRatePercent = Math.min(100, Math.max(0, Number(taxRateRaw) || 0));
@@ -51,11 +54,11 @@ export default async function PosPage() {
         treasuries={treasuries}
         defaultAccountId={walkIn?.id ?? null}
         defaultTreasuryId={cashDrawer?.id ?? null}
-        canOverrideMinPrice={can(user.role, "invoice.belowMinPrice")}
+        canOverrideMinPrice={can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice")}
         taxRatePercent={taxRatePercent}
         companyName={companyName}
         enforceCreditLimit={enforceCredit === "true"}
-        allowNegativeStock={allowNegative === "true"}
+        allowNegativeStock={allowNegative === "true" && hasPermission(access, "canNegativeSell")}
         receiptFooter={receiptFooter}
       />
     </div>

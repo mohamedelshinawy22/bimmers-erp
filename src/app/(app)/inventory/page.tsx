@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
+import { getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPartFormOptions, searchParts } from "@/server/services/parts.service";
 import { getPurchaseFormOptions } from "@/server/services/invoices.service";
 import { getPartCategories, getSetting } from "@/server/services/settings.service";
@@ -23,7 +24,8 @@ interface PageProps {
 
 export default async function InventoryPage({ searchParams }: PageProps) {
   const user = await requireUser();
-  if (!can(user.role, "part.read")) redirect("/");
+  const access = await getUserAccess(user.id);
+  if (!hasApplicationPermission(access, "part.read")) redirect("/");
 
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
   const query = searchParams.q ?? "";
@@ -48,7 +50,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
     getSetting("TAX_RATE_PERCENT", "0"),
   ]);
 
-  const canViewCost = can(user.role, "part.viewCost");
+  const canViewCost = can(user.role, "part.viewCost") && hasPermission(access, "canViewCostPrice");
   // Redact cost server-side. Hiding the column in the DOM still shipped
   // buyPriceAvg in the RSC payload, readable in the network response.
   const rows = canViewCost ? result.rows : result.rows.map((r) => ({ ...r, buyPriceAvg: 0 }));

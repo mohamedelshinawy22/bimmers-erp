@@ -44,6 +44,14 @@ export interface InvoiceActor {
   canSellBelowMin: boolean;
   /** Manager-level override allowing a discount above the configured cap. */
   canOverrideDiscount: boolean;
+  /** Granular operator permission for discounting a sale at all. */
+  canAddDiscount?: boolean;
+  /** Per-user percentage cap; omitted for legacy role-only operators. */
+  maxDiscountPercent?: number;
+  /** Per-user absolute value cap; omitted for legacy role-only operators. */
+  maxDiscountValue?: number;
+  /** Resource scope checked before any cash movement is posted. */
+  canUseTreasury?: (treasuryId: string) => boolean;
 }
 
 export interface InvoiceResult {
@@ -197,11 +205,16 @@ export async function createSaleInvoice(
       // discount is capped by MAX_INVOICE_DISCOUNT_PERCENT unless a manager
       // explicitly authorises an override.
       const requestedDiscount = money(input.discountAmount);
-      const discountCap = money(subtotal.mul(maxDiscountPercent).div(100));
-      if (requestedDiscount.gt(discountCap) && !actor.canOverrideDiscount) {
+      if (requestedDiscount.gt(0) && actor.canAddDiscount === false && !actor.canOverrideDiscount) {
+        throw new BusinessRuleError("لا تملك صلاحية إضافة خصم على الفاتورة.");
+      }
+      const userDiscountPercent = actor.maxDiscountPercent === undefined ? maxDiscountPercent : safeRate(String(actor.maxDiscountPercent), 0);
+      const discountCap = money(subtotal.mul(Prisma.Decimal.min(maxDiscountPercent, userDiscountPercent)).div(100));
+      const userValueCap = actor.maxDiscountValue === undefined ? null : money(actor.maxDiscountValue);
+      if ((requestedDiscount.gt(discountCap) || (userValueCap && requestedDiscount.gt(userValueCap))) && !actor.canOverrideDiscount) {
         throw new BusinessRuleError(
           `الخصم (${formatMoney(requestedDiscount)}) يتجاوز الحد المسموح ` +
-            `(${maxDiscountPercent.toString()}% = ${formatMoney(discountCap)}). يلزم اعتماد المدير.`,
+            `(${Prisma.Decimal.min(maxDiscountPercent, userDiscountPercent).toString()}% = ${formatMoney(discountCap)}). يلزم اعتماد المدير.`,
         );
       }
       if (requestedDiscount.gt(subtotal)) {
@@ -255,6 +268,7 @@ export async function createSaleInvoice(
 
       if (paidAmount.gt(0)) {
         if (!input.treasuryId) throw new BusinessRuleError("يجب تحديد الخزينة لتحصيل المبلغ.");
+        if (actor.canUseTreasury && !actor.canUseTreasury(input.treasuryId)) throw new BusinessRuleError("الخزينة المحددة غير متاحة للمستخدم الحالي.");
         await lockTreasuriesForUpdate(tx, [input.treasuryId]);
       }
 
@@ -596,7 +610,11 @@ async function updateInvoiceDocument(input: EditableInvoiceInput, type: "SALE" |
     for (const item of input.items) subtotal = money(subtotal.add(money(item.unitPrice).mul(item.quantity).sub(money(item.lineDiscount))));
     const requestedDiscount = money(input.discountAmount);
     if (requestedDiscount.gt(subtotal)) throw new BusinessRuleError("الخصم أكبر من إجمالي الأصناف.");
-    if (requestedDiscount.gt(money(subtotal.mul(maxDiscountPercent).div(100))) && !actor.canOverrideDiscount) throw new BusinessRuleError("الخصم يتجاوز الحد المسموح ويلزم اعتماد المدير.");
+    if (requestedDiscount.gt(0) && actor.canAddDiscount === false && !actor.canOverrideDiscount) throw new BusinessRuleError("لا تملك صلاحية إضافة خصم على الفاتورة.");
+    const userDiscountPercent = actor.maxDiscountPercent === undefined ? maxDiscountPercent : safeRate(String(actor.maxDiscountPercent), 0);
+    const discountCap = money(subtotal.mul(Prisma.Decimal.min(maxDiscountPercent, userDiscountPercent)).div(100));
+    const userValueCap = actor.maxDiscountValue === undefined ? null : money(actor.maxDiscountValue);
+    if ((requestedDiscount.gt(discountCap) || (userValueCap && requestedDiscount.gt(userValueCap))) && !actor.canOverrideDiscount) throw new BusinessRuleError("الخصم يتجاوز الحد المسموح للمستخدم ويلزم اعتماد المدير.");
     const totals = computeTotals({ subtotal, requestedDiscount, taxRate, requestedPaid: money(input.paidAmount), payFull: input.payFull === true && input.paymentMethod !== "ON_ACCOUNT" });
     if (input.paymentMethod === "ON_ACCOUNT" && totals.paidAmount.gt(0)) throw new BusinessRuleError("لا يمكن تحصيل مبلغ نقدي في فاتورة على الحساب.");
     const paymentStatus = totals.remainingAmount.lte(0) ? "PAID" : totals.paidAmount.gt(0) ? "PARTIAL" : "CREDIT";
@@ -604,6 +622,7 @@ async function updateInvoiceDocument(input: EditableInvoiceInput, type: "SALE" |
       const vehicle = await tx.customerVehicle.findUnique({ where: { id: input.vehicleId }, select: { accountId: true } });
       if (!vehicle || vehicle.accountId !== input.accountId) throw new BusinessRuleError("السيارة المحددة لا تنتمي لهذا الحساب.");
     }
+    if (totals.paidAmount.gt(0) && input.treasuryId && actor.canUseTreasury && !actor.canUseTreasury(input.treasuryId)) throw new BusinessRuleError("الخزينة المحددة غير متاحة للمستخدم الحالي.");
     const treasuryIds = [original.treasuryId, totals.paidAmount.gt(0) ? input.treasuryId : null].filter((id): id is string => Boolean(id));
     const treasuries = await lockTreasuriesForUpdate(tx, treasuryIds);
 

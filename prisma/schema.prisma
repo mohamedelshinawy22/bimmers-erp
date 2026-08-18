@@ -157,15 +157,20 @@ enum StockMoveReason {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  username     String    @unique
-  fullName     String
-  passwordHash String
-  role         Role      @default(CASHIER)
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                    String    @id @default(uuid())
+  username              String    @unique
+  fullName              String
+  passwordHash          String
+  role                  Role      @default(CASHIER)
+  isActive              Boolean   @default(true)
+  allowedWarehouseIds   String[]  @default([])
+  allowedTreasuryIds    String[]  @default([])
+  transferToTreasuryId  String?
+  transferToTreasury    Treasury? @relation("UserTransferDestination", fields: [transferToTreasuryId], references: [id], onDelete: SetNull)
+  permissions           UserPermission?
+  lastLoginAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   invoices   Invoice[]
   stockMoves StockMovement[]
@@ -173,6 +178,86 @@ model User {
   heldSales  HeldSale[]
   transfers  TreasuryTransfer[]
   importJobs ImportJob[]
+}
+
+model UserPermission {
+  id                         String   @id @default(uuid())
+  userId                     String   @unique
+  user                       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // General programme controls.
+  canManageProgram           Boolean  @default(false)
+  canBackup                  Boolean  @default(false)
+  canRestoreBackup           Boolean  @default(false)
+  canEditInvoiceNumber       Boolean  @default(false)
+  canEditDateTime            Boolean  @default(false)
+  viewTodayInvoicesOnly      Boolean  @default(false)
+  editTodayInvoicesOnly      Boolean  @default(false)
+  canSendEInvoices           Boolean  @default(false)
+
+  // Sales, purchases, returns, quotations and financial operations.
+  canViewSalesInvoices       Boolean  @default(false)
+  canCreateSalesInvoices     Boolean  @default(false)
+  canEditSalesInvoices       Boolean  @default(false)
+  canDeleteSalesInvoices     Boolean  @default(false)
+  canEditSellingPrice        Boolean  @default(false)
+  canCreditSale              Boolean  @default(false)
+  canEditSaleVat             Boolean  @default(false)
+  canAddDiscount             Boolean  @default(false)
+  maxDiscountPercent         Decimal  @default(0.0) @db.Decimal(5, 2)
+  maxDiscountValue           Decimal  @default(0.0) @db.Decimal(12, 2)
+  canSellBelowMinPrice       Boolean  @default(false)
+  canSellBelowCost           Boolean  @default(false)
+  canSalesReturn             Boolean  @default(false)
+  canViewInvoiceProfit       Boolean  @default(false)
+  canViewQuotations          Boolean  @default(false)
+  canManageQuotations        Boolean  @default(false)
+  canViewPurchaseInvoices    Boolean  @default(false)
+  canCreatePurchaseInvoices  Boolean  @default(false)
+  canEditPurchaseInvoices    Boolean  @default(false)
+  canDeletePurchaseInvoices  Boolean  @default(false)
+  canCreditPurchase          Boolean  @default(false)
+  canEditPurchaseVat         Boolean  @default(false)
+  canPurchaseReturn          Boolean  @default(false)
+  canManageInventoryAudit    Boolean  @default(false)
+  canManageBranchTransfers   Boolean  @default(false)
+  canManageAdjustments       Boolean  @default(false)
+  canManageExpenses          Boolean  @default(false)
+  canManageReceipts          Boolean  @default(false)
+  canTransferTreasury        Boolean  @default(false)
+  canBypassTreasuryImpact    Boolean  @default(false)
+
+  // Inventory and cost visibility.
+  canViewParts               Boolean  @default(false)
+  canCreateParts             Boolean  @default(false)
+  canEditParts               Boolean  @default(false)
+  canDeleteParts             Boolean  @default(false)
+  canViewPartLedger          Boolean  @default(false)
+  canViewStockReport         Boolean  @default(false)
+  canViewCostPrice           Boolean  @default(false)
+  canNegativeSell            Boolean  @default(false)
+  canPrintBarcodes           Boolean  @default(false)
+
+  // Accounts.
+  canViewAccounts            Boolean  @default(false)
+  canCreateAccounts          Boolean  @default(false)
+  canEditAccounts            Boolean  @default(false)
+  canDeleteAccounts          Boolean  @default(false)
+  allowedAccountTypes        String[] @default(["CUSTOMER", "SUPPLIER"])
+  canViewAccountBalance      Boolean  @default(false)
+  canViewAccountStatement    Boolean  @default(false)
+
+  // Treasury and advanced reports.
+  canViewTreasuryBalance     Boolean  @default(false)
+  canAnalyzeReceipts         Boolean  @default(false)
+  canAnalyzeExpenses         Boolean  @default(false)
+  canAccessAdvancedReports   Boolean  @default(false)
+  canViewDailyMovementReport Boolean  @default(false)
+  canViewSalesAnalysis       Boolean  @default(false)
+  canViewPurchaseAnalysis    Boolean  @default(false)
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 model Brand {
@@ -385,8 +470,9 @@ model Treasury {
   transactions      TreasuryTransaction[]
   shifts            TreasuryShift[]
   heldSales         HeldSale[]
-  transfersSent     TreasuryTransfer[]    @relation("TransferFrom")
-  transfersReceived TreasuryTransfer[]    @relation("TransferTo")
+  transfersSent              TreasuryTransfer[]    @relation("TransferFrom")
+  transfersReceived          TreasuryTransfer[]    @relation("TransferTo")
+  usersWithTransferDestination User[]              @relation("UserTransferDestination")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

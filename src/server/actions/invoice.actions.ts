@@ -5,6 +5,7 @@ import { z } from "zod";
 import { invalidateCache } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
 import { can, requirePermission } from "@/lib/auth";
+import { canUseTreasury, getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import {
   createSaleInvoiceSchema,
@@ -52,13 +53,18 @@ export async function createSaleInvoiceAction(
   try {
     const user = await requirePermission("invoice.sale");
     const input = createSaleInvoiceSchema.parse(raw);
+    const access = await getUserAccess(user.id);
 
     const result = await createSaleInvoice(input, {
       id: user.id,
       // Client-sent override flags are only honoured if the role actually holds
       // the permission — the server never trusts the request alone.
-      canSellBelowMin: can(user.role, "invoice.belowMinPrice"),
+      canSellBelowMin: can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice"),
       canOverrideDiscount: input.allowDiscountOverride && can(user.role, "invoice.overrideDiscount"),
+      canAddDiscount: hasPermission(access, "canAddDiscount"),
+      maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100),
+      maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999),
+      canUseTreasury: (treasuryId) => canUseTreasury(access, treasuryId),
     });
 
     await revalidateAfterInvoice(["/", "/pos", "/inventory", "/treasury", "/accounts"]);
@@ -92,7 +98,8 @@ export async function updateSaleInvoiceAction(raw: UpdateSaleInvoiceInput): Prom
   try {
     const user = await requirePermission("invoice.sale");
     const input = updateSaleInvoiceSchema.parse(raw);
-    const result = await updateSaleInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    const access = await getUserAccess(user.id);
+    const result = await updateSaleInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount"), canAddDiscount: hasPermission(access, "canAddDiscount"), maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100), maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999), canUseTreasury: (treasuryId) => canUseTreasury(access, treasuryId) });
     await revalidateAfterInvoice(["/", "/pos", "/invoices", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {

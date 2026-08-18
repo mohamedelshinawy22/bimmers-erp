@@ -1,0 +1,82 @@
+-- Granular user permissions and resource scopes. All additions are additive and retain existing role-based access.
+ALTER TABLE "User"
+  ADD COLUMN IF NOT EXISTS "allowedWarehouseIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  ADD COLUMN IF NOT EXISTS "allowedTreasuryIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  ADD COLUMN IF NOT EXISTS "transferToTreasuryId" TEXT;
+
+CREATE INDEX IF NOT EXISTS "User_transferToTreasuryId_idx" ON "User"("transferToTreasuryId");
+ALTER TABLE "User" ADD CONSTRAINT "User_transferToTreasuryId_fkey"
+  FOREIGN KEY ("transferToTreasuryId") REFERENCES "Treasury"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+CREATE TABLE "UserPermission" (
+  "id" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "canManageProgram" BOOLEAN NOT NULL DEFAULT false,
+  "canBackup" BOOLEAN NOT NULL DEFAULT false,
+  "canRestoreBackup" BOOLEAN NOT NULL DEFAULT false,
+  "canEditInvoiceNumber" BOOLEAN NOT NULL DEFAULT false,
+  "canEditDateTime" BOOLEAN NOT NULL DEFAULT false,
+  "viewTodayInvoicesOnly" BOOLEAN NOT NULL DEFAULT false,
+  "editTodayInvoicesOnly" BOOLEAN NOT NULL DEFAULT false,
+  "canSendEInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canViewSalesInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canCreateSalesInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canEditSalesInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canDeleteSalesInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canEditSellingPrice" BOOLEAN NOT NULL DEFAULT false,
+  "canCreditSale" BOOLEAN NOT NULL DEFAULT false,
+  "canEditSaleVat" BOOLEAN NOT NULL DEFAULT false,
+  "canAddDiscount" BOOLEAN NOT NULL DEFAULT false,
+  "maxDiscountPercent" DECIMAL(5,2) NOT NULL DEFAULT 0.0,
+  "maxDiscountValue" DECIMAL(12,2) NOT NULL DEFAULT 0.0,
+  "canSellBelowMinPrice" BOOLEAN NOT NULL DEFAULT false,
+  "canSellBelowCost" BOOLEAN NOT NULL DEFAULT false,
+  "canSalesReturn" BOOLEAN NOT NULL DEFAULT false,
+  "canViewInvoiceProfit" BOOLEAN NOT NULL DEFAULT false,
+  "canViewQuotations" BOOLEAN NOT NULL DEFAULT false,
+  "canManageQuotations" BOOLEAN NOT NULL DEFAULT false,
+  "canViewPurchaseInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canCreatePurchaseInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canEditPurchaseInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canDeletePurchaseInvoices" BOOLEAN NOT NULL DEFAULT false,
+  "canCreditPurchase" BOOLEAN NOT NULL DEFAULT false,
+  "canEditPurchaseVat" BOOLEAN NOT NULL DEFAULT false,
+  "canPurchaseReturn" BOOLEAN NOT NULL DEFAULT false,
+  "canManageInventoryAudit" BOOLEAN NOT NULL DEFAULT false,
+  "canManageBranchTransfers" BOOLEAN NOT NULL DEFAULT false,
+  "canManageAdjustments" BOOLEAN NOT NULL DEFAULT false,
+  "canManageExpenses" BOOLEAN NOT NULL DEFAULT false,
+  "canManageReceipts" BOOLEAN NOT NULL DEFAULT false,
+  "canTransferTreasury" BOOLEAN NOT NULL DEFAULT false,
+  "canBypassTreasuryImpact" BOOLEAN NOT NULL DEFAULT false,
+  "canViewParts" BOOLEAN NOT NULL DEFAULT false,
+  "canCreateParts" BOOLEAN NOT NULL DEFAULT false,
+  "canEditParts" BOOLEAN NOT NULL DEFAULT false,
+  "canDeleteParts" BOOLEAN NOT NULL DEFAULT false,
+  "canViewPartLedger" BOOLEAN NOT NULL DEFAULT false,
+  "canViewStockReport" BOOLEAN NOT NULL DEFAULT false,
+  "canViewCostPrice" BOOLEAN NOT NULL DEFAULT false,
+  "canNegativeSell" BOOLEAN NOT NULL DEFAULT false,
+  "canPrintBarcodes" BOOLEAN NOT NULL DEFAULT false,
+  "canViewAccounts" BOOLEAN NOT NULL DEFAULT false,
+  "canCreateAccounts" BOOLEAN NOT NULL DEFAULT false,
+  "canEditAccounts" BOOLEAN NOT NULL DEFAULT false,
+  "canDeleteAccounts" BOOLEAN NOT NULL DEFAULT false,
+  "allowedAccountTypes" TEXT[] NOT NULL DEFAULT ARRAY['CUSTOMER', 'SUPPLIER']::TEXT[],
+  "canViewAccountBalance" BOOLEAN NOT NULL DEFAULT false,
+  "canViewAccountStatement" BOOLEAN NOT NULL DEFAULT false,
+  "canViewTreasuryBalance" BOOLEAN NOT NULL DEFAULT false,
+  "canAnalyzeReceipts" BOOLEAN NOT NULL DEFAULT false,
+  "canAnalyzeExpenses" BOOLEAN NOT NULL DEFAULT false,
+  "canAccessAdvancedReports" BOOLEAN NOT NULL DEFAULT false,
+  "canViewDailyMovementReport" BOOLEAN NOT NULL DEFAULT false,
+  "canViewSalesAnalysis" BOOLEAN NOT NULL DEFAULT false,
+  "canViewPurchaseAnalysis" BOOLEAN NOT NULL DEFAULT false,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "UserPermission_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "UserPermission_userId_key" ON "UserPermission"("userId");
+ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_userId_fkey"
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
