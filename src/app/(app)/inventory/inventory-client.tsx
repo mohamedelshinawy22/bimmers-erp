@@ -221,9 +221,17 @@ export function InventoryClient({
                 icon={<Boxes size={32} />}
               />
             ) : (
-              rows.map((part) => (
-                <TR key={part.id} className={part.isActive ? undefined : "opacity-50"}>
-                  <TD><input aria-label={`تحديد ${part.nameAr}`} type="checkbox" checked={selectedIds.includes(part.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, part.id])] : current.filter((id) => id !== part.id))}/></TD>
+              rows.map((part) => {
+                const canOpenLedger = permissions.canViewLedger;
+                return (
+                <TR
+                  key={part.id}
+                  tabIndex={canOpenLedger ? 0 : undefined}
+                  onDoubleClick={canOpenLedger ? () => router.push(`/inventory/part-ledger/${part.id}`) : undefined}
+                  onKeyDown={canOpenLedger ? (event) => { if (event.key === "Enter") { event.preventDefault(); router.push(`/inventory/part-ledger/${part.id}`); } } : undefined}
+                  className={`${part.isActive ? "" : "opacity-50 "}${canOpenLedger ? "cursor-pointer transition-colors hover:bg-slate-800/60 focus:outline-none focus:ring-1 focus:ring-bmw-blue" : ""}`}
+                >
+                  <TD><input aria-label={`تحديد ${part.nameAr}`} type="checkbox" checked={selectedIds.includes(part.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, part.id])] : current.filter((id) => id !== part.id))}/></TD>
                   <TD className="whitespace-nowrap font-mono text-xs text-bmw-blue">
                     {formatOemNumber(part.oemNumber)}
                   </TD>
@@ -283,7 +291,7 @@ export function InventoryClient({
                       {permissions.canWrite ? (
                         <button
                           type="button"
-                          onClick={() => setEditPart(part)}
+                          onClick={(event) => { event.stopPropagation(); setEditPart(part); }}
                           title="تعديل"
                           className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-blue/10 hover:text-bmw-blue"
                         >
@@ -293,7 +301,7 @@ export function InventoryClient({
                       {permissions.canAdjust ? (
                         <button
                           type="button"
-                          onClick={() => setAdjustPart(part)}
+                          onClick={(event) => { event.stopPropagation(); setAdjustPart(part); }}
                           title="تسوية رصيد"
                           className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-amber-500/10 hover:text-amber-400"
                         >
@@ -303,7 +311,7 @@ export function InventoryClient({
                       {permissions.canViewLedger ? (
                         <button
                           type="button"
-                          onClick={() => setLedgerPart(part)}
+                          onClick={(event) => { event.stopPropagation(); router.push(`/inventory/part-ledger/${part.id}`); }}
                           title="دفتر حركة المخزون"
                           className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-purple-500/10 hover:text-purple-400"
                         >
@@ -313,7 +321,8 @@ export function InventoryClient({
                     </div>
                   </TD>
                 </TR>
-              ))
+                );
+              })
             )}
           </TBody>
         </Table>
