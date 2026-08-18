@@ -954,3 +954,112 @@ export async function voidInvoice(input: VoidInvoiceInput, actor: InvoiceActor):
 
   return { invoiceNumber };
 }
+
+
+/**
+ * Permanently removes a return document only after reversing any still-active
+ * return effects. Voided returns are already reconciled by `voidInvoice`, so
+ * their purge path only removes the return's own operational records.
+ */
+export async function purgeReturnInvoice(
+  invoiceId: string,
+  expectedType: "SALE_RETURN" | "PURCHASE_RETURN",
+  actor: InvoiceActor,
+): Promise<{ invoiceNumber: string; wasVoided: boolean }> {
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const returned = await tx.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { items: true },
+    });
+    if (!returned) throw new BusinessRuleError("مستند المرتجع غير موجود.");
+    if (returned.type !== expectedType) throw new BusinessRuleError("نوع المستند لا يطابق عملية الحذف المطلوبة.");
+    if (!returned.returnOfId) throw new BusinessRuleError("المرتجع غير مرتبط بفاتورة أصلية.");
+
+    const source = await tx.invoice.findUnique({
+      where: { id: returned.returnOfId },
+      include: {
+        items: true,
+        returns: {
+          where: { id: { not: returned.id }, isVoided: false },
+          include: { items: true },
+        },
+      },
+    });
+    if (!source) throw new BusinessRuleError("الفاتورة الأصلية للمرتجع غير موجودة.");
+
+    if (!returned.isVoided) {
+      const partIds = [...new Set(returned.items.map((item) => item.partId))];
+      const parts = await lockPartsForUpdate(tx, partIds);
+      await lockAccountForUpdate(tx, returned.accountId);
+      const isSaleReturn = returned.type === "SALE_RETURN";
+      const runningStock = new Map<string, number>();
+      const runningAvg = new Map<string, Prisma.Decimal>();
+
+      for (const item of returned.items) {
+        const part = parts.get(item.partId);
+        if (!part) throw new BusinessRuleError("أحد أصناف المرتجع لم يعد موجوداً ولا يمكن عكسه.");
+        const priorQty = runningStock.get(item.partId) ?? part.stockQuantity;
+        const quantityDelta = isSaleReturn ? -item.quantity : item.quantity;
+        const balanceAfter = priorQty + quantityDelta;
+        if (balanceAfter < 0) {
+          throw new BusinessRuleError(`لا يمكن الحذف النهائي: رصيد الصنف "${part.nameAr}" سيصبح سالباً (${balanceAfter}).`);
+        }
+        runningStock.set(item.partId, balanceAfter);
+        const priorAvg = runningAvg.get(item.partId) ?? part.buyPriceAvg;
+        const buyPriceAvg = isSaleReturn
+          ? reverseAverageCost(balanceAfter, priorAvg, item.quantity, item.unitCostSnapshot)
+          : weightedAverageCost(priorQty, priorAvg, item.quantity, item.unitCostSnapshot);
+        runningAvg.set(item.partId, buyPriceAvg);
+        await tx.partItem.update({ where: { id: item.partId }, data: { stockQuantity: { increment: quantityDelta }, buyPriceAvg } });
+      }
+
+      if (returned.paidAmount.gt(0) && returned.treasuryId) {
+        const treasuries = await lockTreasuriesForUpdate(tx, [returned.treasuryId]);
+        const treasury = treasuries.get(returned.treasuryId)!;
+        if (!isSaleReturn && treasury.currentBalance.lt(returned.paidAmount)) {
+          throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}" لعكس استلام مرتجع الشراء (${formatMoney(returned.paidAmount)}).`);
+        }
+        await tx.treasury.update({
+          where: { id: returned.treasuryId },
+          data: isSaleReturn
+            ? { currentBalance: { increment: returned.paidAmount } }
+            : { currentBalance: { decrement: returned.paidAmount } },
+        });
+      }
+      if (returned.remainingAmount.gt(0)) {
+        await tx.account.update({
+          where: { id: returned.accountId },
+          data: isSaleReturn
+            ? { currentBalance: { decrement: returned.remainingAmount } }
+            : { currentBalance: { increment: returned.remainingAmount } },
+        });
+      }
+    }
+
+    // Retain all original movement/account state for voided documents: it was
+    // already reconciled by the void engine. In every purge case the return's
+    // own operational rows must disappear before deleting the parent invoice.
+    await tx.stockMovement.deleteMany({ where: { invoiceId: returned.id } });
+    await tx.treasuryTransaction.deleteMany({ where: { invoiceId: returned.id } });
+
+    const sourceByPart = new Map<string, number>();
+    const remainingReturnedByPart = new Map<string, number>();
+    for (const item of source.items) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
+    for (const priorReturn of source.returns) for (const item of priorReturn.items) remainingReturnedByPart.set(item.partId, (remainingReturnedByPart.get(item.partId) ?? 0) + item.quantity);
+    const hasAnyReturn = [...remainingReturnedByPart.values()].some((quantity) => quantity > 0);
+    const isFullyReturned = sourceByPart.size > 0 && [...sourceByPart.entries()].every(([partId, quantity]) => (remainingReturnedByPart.get(partId) ?? 0) >= quantity);
+    await tx.invoice.update({ where: { id: source.id }, data: { returnStatus: isFullyReturned ? "FULLY_RETURNED" : hasAnyReturn ? "PARTIALLY_RETURNED" : "NONE" } });
+
+    await tx.invoice.delete({ where: { id: returned.id } });
+    await writeAudit(tx, {
+      tableName: "Invoice",
+      recordId: returned.id,
+      action: "DELETE",
+      oldData: { invoiceNumber: returned.invoiceNumber, type: returned.type, isVoided: returned.isVoided, itemCount: returned.items.length, sourceInvoiceId: source.id },
+      newData: { purged: true, stockAndBalanceReversed: !returned.isVoided },
+      performedBy: actor.id,
+    });
+
+    return { invoiceNumber: returned.invoiceNumber, wasVoided: returned.isVoided };
+  }, TX_OPTIONS));
+}

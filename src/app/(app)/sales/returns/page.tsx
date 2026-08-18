@@ -14,5 +14,5 @@ export default async function SalesReturnsPage() {
     listInvoices({ type: "SALE_RETURN", includeVoided: true, pageSize: 100 }),
     prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
-  return <ReturnRegisterClient type="SALE_RETURN" rows={result.rows} treasuries={treasuries} canVoid={can(user.role, "invoice.void")} />;
+  return <ReturnRegisterClient type="SALE_RETURN" rows={result.rows} treasuries={treasuries} canVoid={can(user.role, "invoice.void")} canPurge={can(user.role, "invoice.purge")} />;
 }

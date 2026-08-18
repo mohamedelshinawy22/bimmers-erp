@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { invalidateCache } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
 import { can, requirePermission } from "@/lib/auth";
@@ -26,6 +27,7 @@ import {
   updatePurchaseInvoice,
   createInvoiceReturn,
   voidInvoice,
+  purgeReturnInvoice,
   type InvoiceResult,
 } from "@/server/services/invoice.service";
 
@@ -151,6 +153,32 @@ export async function createPurchaseReturnAction(raw: CreateInvoiceReturnInput):
     return ok(result);
   } catch (error) {
     return toActionError(error, "createPurchaseReturnAction");
+  }
+}
+
+const purgeReturnSchema = z.object({ invoiceId: z.string().uuid() });
+
+export async function purgeSalesReturnAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string; wasVoided: boolean }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = purgeReturnSchema.parse(raw);
+    const result = await purgeReturnInvoice(input.invoiceId, "SALE_RETURN", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true });
+    await revalidateAfterInvoice(["/", "/sales/returns", "/purchases/returns", "/invoices", "/inventory", "/pos", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "purgeSalesReturnAction");
+  }
+}
+
+export async function purgePurchaseReturnAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string; wasVoided: boolean }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = purgeReturnSchema.parse(raw);
+    const result = await purgeReturnInvoice(input.invoiceId, "PURCHASE_RETURN", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true });
+    await revalidateAfterInvoice(["/", "/sales/returns", "/purchases/returns", "/invoices", "/inventory", "/pos", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "purgePurchaseReturnAction");
   }
 }
 
