@@ -171,7 +171,7 @@ export function AccountsClient({
               />
             ) : (
               rows.map((account) => (
-                <TR key={account.id} className={account.isActive ? undefined : "opacity-50"}>
+                <TR key={account.id} tabIndex={0} onDoubleClick={() => setStatementFor(account)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setStatementFor(account); } }} className={`${account.isActive ? "" : "opacity-50"} cursor-pointer focus:outline-none focus:ring-1 focus:ring-bmw-blue`}>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-blue">{account.accountNumber}</TD>
                   <TD className="max-w-[220px]">
                     <p className="truncate font-bold text-white">{account.name}</p>
