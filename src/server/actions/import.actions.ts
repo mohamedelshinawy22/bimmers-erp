@@ -10,9 +10,9 @@ import { writeAudit } from "@/lib/audit";
 import { ok, toActionError } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { formatOemNumber, money } from "@/lib/utils";
+import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
-import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 
 const nonNegativeSpreadsheetNumber = z.preprocess(
   (value) => parseSpreadsheetNumber(value),
@@ -24,6 +24,7 @@ const nonNegativeSpreadsheetQuantity = z.preprocess(
 );
 
 const importRowSchema = z.object({
+  sourceRowNumber: z.coerce.number().int().positive().optional(),
   nameAr: z.string().trim().min(1, "اسم الصنف مطلوب.").max(240),
   // Shared and paired part numbers such as 51117111741/742 are valid catalog identifiers.
   oemNumber: z.string().trim().min(1, "كود OEM مطلوب.").max(120).regex(/^[A-Za-z0-9\s\-/]+$/, "كود OEM يسمح بالحروف والأرقام والمسافات والشرطة والشرطة المائلة فقط."),
@@ -37,60 +38,104 @@ const importRowSchema = z.object({
   quantity: nonNegativeSpreadsheetQuantity,
   bin: z.string().trim().max(120).optional().or(z.literal("")),
 });
-const importSchema = z.object({ mapping: z.record(z.string(), z.string()), rows: z.array(importRowSchema).min(1).max(10_000) });
-type ImportInput = z.infer<typeof importSchema>;
+const importSchema = z.object({
+  mapping: z.record(z.string(), z.string()),
+  skipInvalidRows: z.boolean().default(false),
+  rows: z.array(z.unknown()).min(1).max(10_000),
+});
+type ImportInput = z.input<typeof importSchema>;
+
+type ValidImportRow = z.infer<typeof importRowSchema>;
 
 function key(value: string) { return value.trim().toLocaleLowerCase("ar-EG"); }
 function codes(value?: string) { return (value ?? "").split(/[,/|;\n]+/).map((part) => part.trim().toUpperCase()).filter(Boolean).slice(0, 30); }
+function invalidRowMessage(error: z.ZodError): string { return error.issues.map((issue) => issue.message).join(" • "); }
 
 export async function executeInventoryImportAction(raw: ImportInput) {
   try {
     const user = await requirePermission("inventory.import");
     const input = importSchema.parse(raw);
-    const rows = input.rows.map((row) => ({
-      ...row,
-      oemNumber: row.oemNumber.replace(/\s+/g, "").toUpperCase(),
-      brand: row.brand?.trim() || "عام",
-      category: row.category?.trim() || "بدون تصنيف",
-    }));
+    const validation = input.rows.map((row, index) => ({ sourceRowNumber: index + 1, result: importRowSchema.safeParse(row) }));
+    const invalidRows = validation
+      .filter((entry) => !entry.result.success)
+      .map((entry) => ({ sourceRowNumber: entry.sourceRowNumber, reason: invalidRowMessage((entry.result as { success: false; error: z.ZodError }).error) }));
+
+    if (invalidRows.length > 0 && !input.skipInvalidRows) {
+      throw new BusinessRuleError(`يوجد ${invalidRows.length} صف غير صالح. صحح الأخطاء أو فعّل خيار تخطي الصفوف غير الصالحة.`);
+    }
+
+    const rows = validation
+      .filter((entry): entry is { sourceRowNumber: number; result: { success: true; data: ValidImportRow } } => entry.result.success)
+      .map(({ sourceRowNumber, result }) => ({
+        ...result.data,
+        sourceRowNumber: result.data.sourceRowNumber ?? sourceRowNumber,
+        oemNumber: result.data.oemNumber.replace(/\s+/g, "").toUpperCase(),
+        brand: result.data.brand?.trim() || "عام",
+        category: result.data.category?.trim() || "بدون تصنيف",
+      }));
+
+    if (rows.length === 0) throw new BusinessRuleError("لا توجد أصناف سليمة قابلة للاستيراد بعد استبعاد الصفوف غير الصالحة.");
+
     const seen = new Set<string>();
-    for (const row of rows) { if (seen.has(row.oemNumber)) throw new BusinessRuleError(`رقم OEM ${row.oemNumber} مكرر داخل ملف الاستيراد.`); seen.add(row.oemNumber); }
+    for (const row of rows) {
+      if (seen.has(row.oemNumber)) throw new BusinessRuleError(`رقم OEM ${row.oemNumber} مكرر داخل الصفوف السليمة في ملف الاستيراد.`);
+      seen.add(row.oemNumber);
+    }
+
     const checksum = createHash("sha256").update(JSON.stringify(rows.map((row) => ({ ...row, barcode: row.barcode || null })))).digest("hex");
     const previous = await prisma.importJob.findFirst({ where: { checksum, type: "INVENTORY", status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
-    if (previous) return ok({ jobId: previous.id, duplicate: true, created: 0, skipped: rows.length, summary: previous.summary });
+    if (previous) return ok({ jobId: previous.id, duplicate: true, total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created: 0, skipped: rows.length, summary: previous.summary });
+
     const job = await prisma.importJob.create({ data: { type: "INVENTORY", status: "PROCESSING", checksum, mapping: input.mapping, createdById: user.id } });
-    let created = 0; let skipped = 0;
+    let created = 0;
+    let skipped = 0;
+
     try {
       for (let start = 0; start < rows.length; start += 100) {
         const chunk = rows.slice(start, start + 100);
         const chunkResult = await withTxRetry(() => prisma.$transaction(async (tx) => {
-          let chunkCreated = 0; let chunkSkipped = 0;
+          let chunkCreated = 0;
+          let chunkSkipped = 0;
           for (const row of chunk) {
             const exists = await tx.partItem.findUnique({ where: { oemNumber: row.oemNumber }, select: { id: true } });
             if (exists) { chunkSkipped += 1; continue; }
-            const brandName = row.brand; const categoryName = row.category;
-            const brand = await tx.brand.upsert({ where: { normalizedName: key(brandName) }, update: {}, create: { name: brandName, normalizedName: key(brandName) }, select: { id: true } });
-            const category = await tx.category.upsert({ where: { normalizedName: key(categoryName) }, update: {}, create: { name: categoryName, normalizedName: key(categoryName) }, select: { id: true } });
-            const chassisIds: string[] = []; for (const code of codes(row.chassis)) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);
-            const engineIds: string[] = []; for (const code of codes(row.engine)) engineIds.push((await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id);
+
+            const brand = await tx.brand.upsert({ where: { normalizedName: key(row.brand) }, update: {}, create: { name: row.brand, normalizedName: key(row.brand) }, select: { id: true } });
+            const category = await tx.category.upsert({ where: { normalizedName: key(row.category) }, update: {}, create: { name: row.category, normalizedName: key(row.category) }, select: { id: true } });
+            const chassisIds: string[] = [];
+            for (const code of codes(row.chassis)) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);
+            const engineIds: string[] = [];
+            for (const code of codes(row.engine)) engineIds.push((await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id);
+
             const buyPrice = money(row.cost);
-            const createdPart = await tx.partItem.create({ data: { oemNumber: row.oemNumber, partNumberFormatted: formatOemNumber(row.oemNumber), nameAr: row.nameAr, barcode: row.barcode || null, brandId: brand.id, category: categoryName, categoryId: category.id, buyPriceLast: buyPrice, buyPriceAvg: row.quantity > 0 ? buyPrice : money(0), sellPriceRetail: money(row.price), sellPriceWholesale: money(row.price), sellPriceMin: money(row.price), stockQuantity: row.quantity, compatibleChassis: { createMany: { data: chassisIds.map((chassisId) => ({ chassisId })) } }, compatibleEngines: { createMany: { data: engineIds.map((engineId) => ({ engineId })) } } } });
+            const createdPart = await tx.partItem.create({ data: {
+              oemNumber: row.oemNumber, partNumberFormatted: formatOemNumber(row.oemNumber), nameAr: row.nameAr, barcode: row.barcode || null,
+              brandId: brand.id, category: row.category, categoryId: category.id, buyPriceLast: buyPrice, buyPriceAvg: row.quantity > 0 ? buyPrice : money(0),
+              sellPriceRetail: money(row.price), sellPriceWholesale: money(row.price), sellPriceMin: money(row.price), stockQuantity: row.quantity,
+              compatibleChassis: { createMany: { data: chassisIds.map((chassisId) => ({ chassisId })) } },
+              compatibleEngines: { createMany: { data: engineIds.map((engineId) => ({ engineId })) } },
+            } });
             if (row.quantity > 0) await recordStockMovement(tx, { partId: createdPart.id, reason: "OPENING_BALANCE", quantityDelta: row.quantity, balanceAfter: row.quantity, unitCost: buyPrice, performedById: user.id, note: `رصيد افتتاحي عبر استيراد ${job.id}` });
-            await writeAudit(tx, { tableName: "PartItem", recordId: createdPart.id, action: "INSERT", newData: { ...createdPart, importJobId: job.id }, performedBy: user.id });
+            await writeAudit(tx, { tableName: "PartItem", recordId: createdPart.id, action: "INSERT", newData: { ...createdPart, importJobId: job.id, sourceRowNumber: row.sourceRowNumber }, performedBy: user.id });
             chunkCreated += 1;
           }
           return { chunkCreated, chunkSkipped };
         }, TX_OPTIONS));
-        created += chunkResult.chunkCreated; skipped += chunkResult.chunkSkipped;
+        created += chunkResult.chunkCreated;
+        skipped += chunkResult.chunkSkipped;
       }
-      const summary = { total: rows.length, created, skipped, chunkSize: 100 };
+
+      const summary = { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, chunkSize: 100 };
       await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
       await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
-      revalidatePath("/inventory"); revalidatePath("/pos");
+      revalidatePath("/inventory");
+      revalidatePath("/pos");
       return ok({ jobId: job.id, duplicate: false, ...summary });
     } catch (error) {
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: rows.length, created, skipped } } });
+      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped } } });
       throw error;
     }
-  } catch (error) { return toActionError(error, "executeInventoryImportAction"); }
+  } catch (error) {
+    return toActionError(error, "executeInventoryImportAction");
+  }
 }
