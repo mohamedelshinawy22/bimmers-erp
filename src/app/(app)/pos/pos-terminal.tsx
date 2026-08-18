@@ -13,6 +13,7 @@ import {
   Trash2,
   UserRound,
   X,
+  Plus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -26,12 +27,19 @@ import type { AccountVehicle, PosAccount } from "@/server/services/accounts.serv
 import { getAccountVehiclesAction, searchPartsForPosAction } from "@/server/actions/search.actions";
 import { createSaleInvoiceAction, type InvoiceResult } from "@/server/actions/invoice.actions";
 import { holdSaleAction } from "@/server/actions/held-sales.actions";
+import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 
 /**
  * Available = on hand − reserved, matching the server's check in
  * `invoice.service.ts`. The client previously ignored `stockReserved`, so once
  * anything reserved stock the cart would accept quantities checkout rejects.
  */
+function QuickAccountModal({ onClose, onCreated }: { onClose: () => void; onCreated: (account: PosAccount) => void }) {
+  const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [type, setType] = useState<"CUSTOMER" | "WORKSHOP_BMW">("CUSTOMER"); const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => { const result = await createQuickPosAccountAction({ name, phone, type, notes: "إنشاء سريع من نقطة البيع", email: "", address: "", taxNumber: "", category: "", creditLimit: 0, defaultPriceTier: "RETAIL", openingBalance: 0, status: "ACTIVE" }); if (!result.success) { setError(result.error); return; } onCreated({ ...result.data, vehicleCount: 0 }); });
+  return <Modal open onClose={onClose} title="حساب عميل سريع" description="يتم اختيار الحساب الجديد فوراً مع الاحتفاظ بسلة البيع." size="sm" footer={<><Button variant="ghost" onClick={onClose}>إلغاء</Button><Button loading={pending} disabled={!name.trim() || !phone.trim()} onClick={submit}>إنشاء واختيار</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Field label="الاسم" required><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></Field><Field label="الهاتف" required><Input value={phone} onChange={(event) => setPhone(event.target.value)} /></Field><Field label="النوع"><Select value={type} onChange={(event) => setType(event.target.value as "CUSTOMER" | "WORKSHOP_BMW")}><option value="CUSTOMER">عميل</option><option value="WORKSHOP_BMW">مركز صيانة BMW</option></Select></Field></div></Modal>;
+}
+
 function availableOf(part: PosPartRow): number {
   return part.stockQuantity - part.stockReserved;
 }
@@ -92,7 +100,9 @@ export function PosTerminal({
   const [searching, setSearching] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
 
+  const [terminalAccounts, setTerminalAccounts] = useState(accounts);
   const [accountId, setAccountId] = useState(defaultAccountId ?? "");
+  const [quickAccountOpen, setQuickAccountOpen] = useState(false);
   const [vehicleId, setVehicleId] = useState("");
   const [treasuryId, setTreasuryId] = useState(defaultTreasuryId ?? "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
@@ -109,7 +119,7 @@ export function PosTerminal({
   const searchRef = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
 
-  const account = useMemo(() => accounts.find((a) => a.id === accountId), [accounts, accountId]);
+  const account = useMemo(() => terminalAccounts.find((a) => a.id === accountId), [terminalAccounts, accountId]);
   const isWholesale = account?.defaultPriceTier === "WHOLESALE";
 
   // Vehicles are fetched per selected account rather than embedded in the page
@@ -286,6 +296,7 @@ export function PosTerminal({
   /* ── Hotkeys local to the POS ───────────────────────────────────────────── */
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.altKey && event.key.toLowerCase() === "n") { event.preventDefault(); setQuickAccountOpen(true); }
       if (event.key === "F9" && !checkoutOpen) {
         event.preventDefault();
         if (canCheckout) setCheckoutOpen(true);
@@ -515,6 +526,8 @@ export function PosTerminal({
         </Card>
       </div>
 
+      {quickAccountOpen ? <QuickAccountModal onClose={() => setQuickAccountOpen(false)} onCreated={(created) => { setTerminalAccounts((current) => [...current, { ...created, vehicleCount: 0 }]); setAccountId(created.id); setVehicleId(""); setQuickAccountOpen(false); }} /> : null}
+
       {/* ══ Totals / customer ══ */}
       <div className="space-y-4">
         <Card>
@@ -533,12 +546,13 @@ export function PosTerminal({
                 }}
               >
                 <option value="">— اختر الحساب —</option>
-                {accounts.map((a) => (
+                {terminalAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({a.accountNumber})
                   </option>
                 ))}
               </Select>
+              <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => setQuickAccountOpen(true)}><Plus size={14}/> حساب سريع</Button>
             </Field>
 
             {account ? (
