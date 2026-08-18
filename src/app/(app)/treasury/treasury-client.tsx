@@ -12,6 +12,9 @@ import {
   FileText,
   Lock,
   Printer,
+  Plus,
+  Settings2,
+  Trash2,
   Unlock,
   Wallet,
 } from "lucide-react";
@@ -26,9 +29,12 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatMoney } from "@/lib/util
 import type { TreasuryRow } from "@/server/services/treasury.service";
 import {
   closeShiftAction,
+  createTreasuryAction,
   createTreasuryTransactionAction,
+  deactivateTreasuryAction,
   openShiftAction,
   transferBetweenTreasuriesAction,
+  updateTreasuryAction,
 } from "@/server/actions/treasury.actions";
 
 interface ZReport {
@@ -83,7 +89,7 @@ interface TreasuryClientProps {
   closedShifts: ClosedShift[];
   zReport: ZReport | null;
   accounts: Array<{ id: string; name: string; accountNumber: string; type: string }>;
-  permissions: { canTransact: boolean; canTransfer: boolean; canCloseShift: boolean };
+  permissions: { canTransact: boolean; canTransfer: boolean; canCloseShift: boolean; canManage: boolean };
   initialVoucher: "RECEIPT" | "PAYMENT" | null;
 }
 
@@ -108,6 +114,7 @@ export function TreasuryClient({
   const [voucher, setVoucher] = useState<"RECEIPT" | "PAYMENT" | null>(initialVoucher);
   const [transferOpen, setTransferOpen] = useState(false);
   const [shiftAction, setShiftAction] = useState<{ mode: "open" | "close"; treasury: TreasuryRow } | null>(null);
+  const [manageTreasury, setManageTreasury] = useState<TreasuryRow | "NEW" | null>(null);
   const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
 
   useEffect(() => setVoucher(initialVoucher), [initialVoucher]);
@@ -146,6 +153,7 @@ export function TreasuryClient({
               <ArrowLeftRight size={16} /> تحويل داخلي
             </Button>
           ) : null}
+          {permissions.canManage ? <Button variant="outline" onClick={() => setManageTreasury("NEW")}><Plus size={16} /> خزينة جديدة</Button> : null}
         </div>
       </div>
 
@@ -195,6 +203,8 @@ export function TreasuryClient({
                   <span className="tabular text-emerald-400">▲ {formatMoney(treasury.todayIn)}</span>
                   <span className="tabular text-bmw-mRed">▼ {formatMoney(treasury.todayOut)}</span>
                 </div>
+
+                {permissions.canManage ? <div className="flex gap-2 border-t border-bmw-cardBorder pt-3"><Button size="sm" variant="ghost" className="flex-1" onClick={() => setManageTreasury(treasury)}><Settings2 size={14} /> تعديل</Button>{treasury.isActive ? <Button size="sm" variant="ghost" className="text-bmw-mRed hover:bg-bmw-mRed/10 hover:text-bmw-mRed" onClick={() => setManageTreasury(treasury)} title="تعطيل أو حذف الخزينة"><Trash2 size={14} /></Button> : null}</div> : null}
 
                 {permissions.canCloseShift ? (
                   <div className="border-t border-bmw-cardBorder pt-3">
@@ -427,6 +437,8 @@ export function TreasuryClient({
       {transferOpen ? (
         <TransferModal treasuries={treasuries.filter((t) => t.isActive)} onClose={() => setTransferOpen(false)} />
       ) : null}
+
+      {manageTreasury ? <TreasuryManageModal treasury={manageTreasury === "NEW" ? null : manageTreasury} onClose={() => setManageTreasury(null)} /> : null}
 
       {shiftAction ? (
         <ShiftModal
@@ -775,4 +787,44 @@ function ShiftModal({
       )}
     </Modal>
   );
+}
+
+function TreasuryManageModal({ treasury, onClose }: { treasury: TreasuryRow | null; onClose: () => void }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [name, setName] = useState(treasury?.name ?? "");
+  const [type, setType] = useState(treasury?.type ?? "CASH_DRAWER");
+  const [isDefault, setIsDefault] = useState(treasury?.isDefault ?? false);
+  const [isActive, setIsActive] = useState(treasury?.isActive ?? true);
+  const submit = () => {
+    setError(null);
+    startTransition(async () => {
+      const payload = { name, type: type as "CASH_DRAWER" | "BANK_ACCOUNT" | "POS_TERMINAL" | "WALLET" | "INSTAPAY" | "OTHER", isDefault, isActive };
+      const result = treasury ? await updateTreasuryAction(treasury.id, payload) : await createTreasuryAction(payload);
+      if (!result.success) { setError(result.error); return; }
+      onClose(); router.refresh();
+    });
+  };
+  const deactivate = () => {
+    if (!treasury) return;
+    if (!confirmDeactivate) { setConfirmDeactivate(true); return; }
+    setError(null);
+    startTransition(async () => {
+      const result = await deactivateTreasuryAction(treasury.id);
+      if (!result.success) { setError(result.error); return; }
+      onClose(); router.refresh();
+    });
+  };
+  return <Modal open onClose={onClose} title={treasury ? `إدارة خزينة — ${treasury.name}` : "إضافة خزينة جديدة"} description={treasury ? "تُسجّل كل التعديلات في سجل التدقيق، ولا تُحذف الخزائن ذات التاريخ المالي." : "أدخل بيانات الخزينة الجديدة ثم احفظها."} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button onClick={submit} loading={pending} disabled={name.trim().length < 2}><Settings2 size={15} /> حفظ</Button></>}>
+    <div className="space-y-3">
+      {error ? <Alert variant="error">{error}</Alert> : null}
+      <Field label="اسم الخزينة" required><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></Field>
+      <Field label="النوع" required><Select value={type} onChange={(event) => setType(event.target.value as typeof type)}><option value="CASH_DRAWER">درج نقدية</option><option value="BANK_ACCOUNT">حساب بنكي</option><option value="POS_TERMINAL">نقطة بيع</option><option value="WALLET">محفظة إلكترونية</option><option value="INSTAPAY">إنستاباي</option><option value="OTHER">أخرى</option></Select></Field>
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-bmw-silver"><input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} className="accent-bmw-blue" />الخزينة الافتراضية</label>
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-bmw-silver"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="accent-bmw-blue" />الخزينة نشطة</label>
+      {treasury ? <div className="border-t border-bmw-cardBorder pt-3"><p className="mb-2 text-xs text-bmw-muted">تعطيل الخزينة يمنع استخدامها مستقبلاً ويحافظ على حركاتها التاريخية.</p><Button type="button" variant="danger" className="w-full" onClick={deactivate} disabled={pending}>{confirmDeactivate ? "اضغط مرة أخرى لتأكيد التعطيل / الحذف" : <><Trash2 size={15} /> تعطيل أو حذف الخزينة</>}</Button></div> : null}
+    </div>
+  </Modal>;
 }

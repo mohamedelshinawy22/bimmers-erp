@@ -9,6 +9,7 @@ export interface TreasuryRow {
   type: TreasuryType;
   currentBalance: number;
   isActive: boolean;
+  isDefault: boolean;
   todayIn: number;
   todayOut: number;
   openShift: { id: string; shiftNumber: string; openingBalance: number; openedAt: string; openedBy: string } | null;
@@ -63,6 +64,7 @@ export async function listTreasuries(): Promise<TreasuryRow[]> {
       type: t.type,
       currentBalance: num(t.currentBalance),
       isActive: t.isActive,
+      isDefault: t.isDefault,
       todayIn: inMap.get(t.id) ?? 0,
       todayOut: outMap.get(t.id) ?? 0,
       openShift: shift

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
 import { num } from "@/lib/utils";
 import { getVehicleFormOptions, listAccounts } from "@/server/services/accounts.service";
+import { getCompanyProfile } from "@/server/services/settings.service";
 import { AccountsClient } from "./accounts-client";
 
 export const metadata = { title: "الحسابات والورش" };
@@ -24,7 +25,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
   const debtorsOnly = searchParams.debtors === "1";
 
-  const [result, options, receivablesAgg, payablesAgg, workshops] = await Promise.all([
+  const [result, options, receivablesAgg, payablesAgg, workshops, company, treasuries] = await Promise.all([
     listAccounts({ query: searchParams.q, type, debtorsOnly, page, pageSize: 25 }),
     getVehicleFormOptions(),
     prisma.account.aggregate({
@@ -36,6 +37,8 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       _sum: { currentBalance: true },
     }),
     prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }),
+    getCompanyProfile(),
+    prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
   ]);
 
   return (
@@ -48,6 +51,9 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       options={options}
       canWrite={can(user.role, "account.write")}
       canViewStatement={can(user.role, "account.viewStatement")}
+      companyName={company.name}
+      canTransact={can(user.role, "treasury.transact")}
+      treasuries={treasuries.map((treasury) => ({ ...treasury, currentBalance: num(treasury.currentBalance) }))}
       totals={{
         receivables: Math.abs(num(receivablesAgg._sum.currentBalance)),
         payables: num(payablesAgg._sum.currentBalance),

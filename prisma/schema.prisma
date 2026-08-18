@@ -441,6 +441,9 @@ model Invoice {
   accountBalanceBefore Decimal?  @db.Decimal(12, 2)
   accountBalanceAfter  Decimal?  @db.Decimal(12, 2)
   verificationToken    String?   @unique
+  returnOfId           String?
+  returnOf             Invoice?  @relation("InvoiceReturns", fields: [returnOfId], references: [id])
+  returns              Invoice[] @relation("InvoiceReturns")
 
   items        InvoiceItem[]
   heldSale     HeldSale?
@@ -454,6 +457,7 @@ model Invoice {
   @@index([createdAt])
   @@index([accountId, paymentStatus])
   @@index([type, createdAt])
+  @@index([returnOfId])
 }
 
 model InvoiceItem {

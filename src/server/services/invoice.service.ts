@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
 
 import { formatMoney, money, ZERO } from "@/lib/utils";
-import type { CreateSaleInvoiceInput, CreatePurchaseInvoiceInput, VoidInvoiceInput } from "@/lib/validations/invoice";
+import type { CreateSaleInvoiceInput, CreatePurchaseInvoiceInput, CreateInvoiceReturnInput, VoidInvoiceInput } from "@/lib/validations/invoice";
 import { nextInvoiceNumber, nextTransactionNumber } from "./numbering.service";
 import {
   applyStockDeltas,
@@ -550,6 +550,105 @@ export async function createPurchaseInvoice(
       } satisfies InvoiceResult;
     }, TX_OPTIONS),
   );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RETURNS — linked counter-documents, never destructive edits to the source
+   ═══════════════════════════════════════════════════════════════════════════ */
+export async function createInvoiceReturn(input: CreateInvoiceReturnInput, actor: InvoiceActor): Promise<InvoiceResult> {
+  const original = await prisma.invoice.findUnique({
+    where: { id: input.originalInvoiceId },
+    select: { id: true, items: { select: { partId: true } } },
+  });
+  if (!original) throw new BusinessRuleError("الفاتورة الأصلية غير موجودة.");
+  const partIds = [...new Set(original.items.map((item) => item.partId))];
+
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const source = await tx.invoice.findUnique({
+      where: { id: input.originalInvoiceId },
+      include: { items: true, returns: { where: { isVoided: false }, include: { items: true } } },
+    });
+    if (!source || source.isVoided) throw new BusinessRuleError("لا يمكن إنشاء مرتجع لفاتورة ملغاة أو غير موجودة.");
+    if (source.type !== "SALE" && source.type !== "PURCHASE") throw new BusinessRuleError("المرتجع متاح لفواتير البيع والشراء فقط.");
+
+    const parts = await lockPartsForUpdate(tx, partIds);
+    await lockAccountForUpdate(tx, source.accountId);
+    const isSaleReturn = source.type === "SALE";
+    const returnType = isSaleReturn ? "SALE_RETURN" : "PURCHASE_RETURN";
+    const requestedByItem = new Map<string, number>();
+    for (const line of input.items) requestedByItem.set(line.invoiceItemId, (requestedByItem.get(line.invoiceItemId) ?? 0) + line.quantity);
+    const priorReturned = new Map<string, number>();
+    for (const prior of source.returns) for (const line of prior.items) priorReturned.set(line.partId, (priorReturned.get(line.partId) ?? 0) + line.quantity);
+    const sourceByPart = new Map<string, number>();
+    for (const line of source.items) sourceByPart.set(line.partId, (sourceByPart.get(line.partId) ?? 0) + line.quantity);
+    const requestedByPart = new Map<string, number>();
+    for (const [invoiceItemId, quantity] of requestedByItem) {
+      const sourceLine = source.items.find((line) => line.id === invoiceItemId);
+      if (!sourceLine) throw new BusinessRuleError("أحد أصناف المرتجع لا ينتمي إلى الفاتورة الأصلية.");
+      requestedByPart.set(sourceLine.partId, (requestedByPart.get(sourceLine.partId) ?? 0) + quantity);
+    }
+    for (const [partId, quantity] of requestedByPart) {
+      if (quantity > (sourceByPart.get(partId) ?? 0) - (priorReturned.get(partId) ?? 0)) throw new BusinessRuleError(`كمية مرتجع الصنف تجاوزت الكمية المتاحة في الفاتورة: ${partId}`);
+    }
+
+    let subtotal = ZERO;
+    const lines: Array<{ partId: string; quantity: number; unitPrice: Prisma.Decimal; unitCostSnapshot: Prisma.Decimal; totalPrice: Prisma.Decimal; binLocationSnapshot: string | null }> = [];
+    for (const [invoiceItemId, quantity] of requestedByItem) {
+      const sourceLine = source.items.find((line) => line.id === invoiceItemId)!;
+      const unitPrice = money(sourceLine.totalPrice.div(sourceLine.quantity));
+      const totalPrice = money(unitPrice.mul(quantity));
+      subtotal = money(subtotal.add(totalPrice));
+      lines.push({ partId: sourceLine.partId, quantity, unitPrice, unitCostSnapshot: sourceLine.unitCostSnapshot, totalPrice, binLocationSnapshot: sourceLine.binLocationSnapshot });
+    }
+
+    const ratio = source.subtotal.gt(0) ? subtotal.div(source.subtotal) : ZERO;
+    const discountAmount = money(source.discountAmount.mul(ratio));
+    const taxAmount = money(source.taxAmount.mul(ratio));
+    const grandTotal = money(subtotal.sub(discountAmount).add(taxAmount));
+    const paidAmount = money(input.paidAmount);
+    if (paidAmount.gt(grandTotal)) throw new BusinessRuleError("المبلغ النقدي للمرتجع أكبر من قيمة المرتجع.");
+    if (paidAmount.gt(0) && !input.treasuryId) throw new BusinessRuleError("يجب تحديد الخزينة لرد أو استلام المبلغ.");
+    const remainingAmount = money(grandTotal.sub(paidAmount));
+    const paymentStatus = remainingAmount.eq(0) ? "PAID" : paidAmount.gt(0) ? "PARTIAL" : "CREDIT";
+    if (paidAmount.gt(0) && input.treasuryId) {
+      const treasuries = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
+      const treasury = treasuries.get(input.treasuryId)!;
+      if (isSaleReturn && treasury.currentBalance.lt(paidAmount)) throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}" لرد مبلغ ${formatMoney(paidAmount)}.`);
+    }
+
+    const invoiceNumber = await nextInvoiceNumber(tx, returnType);
+    const returned = await tx.invoice.create({ data: {
+      invoiceNumber, type: returnType, returnOfId: source.id, accountId: source.accountId, treasuryId: paidAmount.gt(0) ? input.treasuryId : null, vehicleId: source.vehicleId, userId: actor.id,
+      subtotal, discountAmount, taxAmount, grandTotal, paidAmount, remainingAmount, paymentStatus, paymentMethod: paidAmount.gt(0) ? "CASH" : "ON_ACCOUNT",
+      notes: input.notes ? `مرتجع عن ${source.invoiceNumber} — ${input.notes}` : `مرتجع عن الفاتورة ${source.invoiceNumber}`,
+    } });
+    await tx.invoiceItem.createMany({ data: lines.map((line) => ({ invoiceId: returned.id, ...line })) });
+
+    const runningStock = new Map<string, number>();
+    const runningAvg = new Map<string, Prisma.Decimal>();
+    for (const line of lines) {
+      const part = parts.get(line.partId)!;
+      const priorQty = runningStock.get(line.partId) ?? part.stockQuantity;
+      const delta = isSaleReturn ? line.quantity : -line.quantity;
+      const balanceAfter = priorQty + delta;
+      if (balanceAfter < 0) throw new BusinessRuleError(`رصيد الصنف "${part.nameAr}" لا يكفي لمرتجع الشراء.`);
+      runningStock.set(line.partId, balanceAfter);
+      const priorAvg = runningAvg.get(line.partId) ?? part.buyPriceAvg;
+      const buyPriceAvg = isSaleReturn ? weightedAverageCost(priorQty, priorAvg, line.quantity, line.unitCostSnapshot) : reverseAverageCost(balanceAfter, priorAvg, line.quantity, line.unitCostSnapshot);
+      runningAvg.set(line.partId, buyPriceAvg);
+      await tx.partItem.update({ where: { id: line.partId }, data: { stockQuantity: { increment: delta }, buyPriceAvg } });
+      await recordStockMovement(tx, { partId: line.partId, invoiceId: returned.id, reason: isSaleReturn ? "SALE_RETURN" : "PURCHASE_RETURN", quantityDelta: delta, balanceAfter, unitCost: line.unitCostSnapshot, performedById: actor.id, note: `مرتجع ${isSaleReturn ? "بيع" : "شراء"} ${invoiceNumber} عن ${source.invoiceNumber}` });
+    }
+
+    if (paidAmount.gt(0) && input.treasuryId) {
+      const transactionType = isSaleReturn ? "PAYMENT" : "RECEIPT";
+      await tx.treasury.update({ where: { id: input.treasuryId }, data: isSaleReturn ? { currentBalance: { decrement: paidAmount } } : { currentBalance: { increment: paidAmount } } });
+      await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId: input.treasuryId, accountId: source.accountId, invoiceId: returned.id, type: transactionType, amount: paidAmount, description: `${isSaleReturn ? "رد قيمة مرتجع بيع" : "استلام قيمة مرتجع شراء"} ${invoiceNumber}`, createdByUser: actor.id } });
+    }
+    if (remainingAmount.gt(0)) await tx.account.update({ where: { id: source.accountId }, data: isSaleReturn ? { currentBalance: { increment: remainingAmount } } : { currentBalance: { decrement: remainingAmount } } });
+    await writeAudit(tx, { tableName: "Invoice", recordId: returned.id, action: "INSERT", newData: { ...returned, sourceInvoiceId: source.id, itemCount: lines.length }, performedBy: actor.id });
+    return { invoiceId: returned.id, invoiceNumber, subtotal: Number(subtotal), discountAmount: Number(discountAmount), taxAmount: Number(taxAmount), grandTotal: Number(grandTotal), paidAmount: Number(paidAmount), remainingAmount: Number(remainingAmount), changeDue: 0 } satisfies InvoiceResult;
+  }, TX_OPTIONS));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

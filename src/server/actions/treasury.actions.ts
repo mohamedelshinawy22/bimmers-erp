@@ -16,6 +16,8 @@ import {
   treasuryTransferSchema,
   type TreasuryTransactionInput,
   type TreasuryTransferInput,
+  settleInvoiceSchema,
+  type SettleInvoiceInput,
 } from "@/lib/validations/invoice";
 import { nextShiftNumber, nextTransactionNumber } from "@/server/services/numbering.service";
 import { lockAccountForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
@@ -109,6 +111,42 @@ export async function createTreasuryTransactionAction(
   } catch (error) {
     return toActionError(error, "createTreasuryTransactionAction");
   }
+}
+
+export async function settleInvoiceAction(raw: SettleInvoiceInput): Promise<ActionResult<{ transactionNumber: string; remainingAmount: number }>> {
+  try {
+    const user = await requirePermission("treasury.transact");
+    const input = settleInvoiceSchema.parse(raw);
+    const amount = money(input.amount);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const initial = await tx.invoice.findUnique({ where: { id: input.invoiceId }, select: { accountId: true } });
+      if (!initial) throw new BusinessRuleError("الفاتورة غير موجودة.");
+      await lockAccountForUpdate(tx, initial.accountId);
+      const treasuries = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
+      const treasury = treasuries.get(input.treasuryId)!;
+      const invoice = await tx.invoice.findUnique({ where: { id: input.invoiceId } });
+      if (!invoice || invoice.isVoided) throw new BusinessRuleError("لا يمكن سداد فاتورة ملغاة أو غير موجودة.");
+      if (invoice.type !== "SALE" && invoice.type !== "PURCHASE") throw new BusinessRuleError("السداد متاح لفواتير البيع والشراء فقط.");
+      if (invoice.remainingAmount.lte(0)) throw new BusinessRuleError("هذه الفاتورة مسددة بالكامل.");
+      if (amount.gt(invoice.remainingAmount)) throw new BusinessRuleError(`المبلغ أكبر من المتبقي على الفاتورة (${formatMoney(invoice.remainingAmount)}).`);
+      const type = invoice.type === "SALE" ? "RECEIPT" : "PAYMENT";
+      if (type === "PAYMENT" && treasury.currentBalance.lt(amount)) throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}". الرصيد الحالي: ${formatMoney(treasury.currentBalance)}`);
+      const remainingAmount = money(invoice.remainingAmount.sub(amount));
+      const updatedInvoice = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { paidAmount: { increment: amount }, remainingAmount, paymentStatus: remainingAmount.eq(0) ? "PAID" : "PARTIAL", treasuryId: invoice.treasuryId ?? input.treasuryId },
+      });
+      await tx.treasury.update({ where: { id: input.treasuryId }, data: type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } } });
+      await tx.account.update({ where: { id: invoice.accountId }, data: type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } } });
+      const transaction = await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId: input.treasuryId, accountId: invoice.accountId, invoiceId: invoice.id, type, amount, description: input.description || `${type === "RECEIPT" ? "تحصيل" : "سداد"} فاتورة ${invoice.invoiceNumber}`, createdByUser: user.id } });
+      await writeAudit(tx, { tableName: "Invoice", recordId: invoice.id, action: "UPDATE", oldData: invoice, newData: updatedInvoice, performedBy: user.id });
+      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: transaction, performedBy: user.id });
+      return { transactionNumber: transaction.transactionNumber, remainingAmount: Number(remainingAmount) };
+    }, TX_OPTIONS));
+    await invalidateCache("dashboard");
+    for (const path of ["/", "/invoices", "/treasury", "/accounts"]) revalidatePath(path);
+    return ok(result);
+  } catch (error) { return toActionError(error, "settleInvoiceAction"); }
 }
 
 export async function createTreasuryAction(raw: TreasuryInput): Promise<ActionResult<{ id: string; name: string }>> {

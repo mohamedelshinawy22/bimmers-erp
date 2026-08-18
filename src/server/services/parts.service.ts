@@ -280,7 +280,8 @@ export async function getStockLedger(partId: string, limit = 100) {
     take: limit,
     include: {
       performedBy: { select: { fullName: true } },
-      invoice: { select: { id: true, invoiceNumber: true, type: true, account: { select: { name: true } } } },
+      part: { select: { binLocation: { select: { fullCode: true } } } },
+      invoice: { select: { id: true, invoiceNumber: true, type: true, account: { select: { name: true } }, items: { where: { partId }, select: { unitPrice: true, unitCostSnapshot: true, totalPrice: true, quantity: true, binLocationSnapshot: true } } } },
     },
   });
   return moves.map((m) => ({
@@ -290,6 +291,11 @@ export async function getStockLedger(partId: string, limit = 100) {
     quantityDelta: m.quantityDelta,
     balanceAfter: m.balanceAfter,
     unitCost: num(m.unitCost),
+    unitSalePrice: m.invoice?.items[0] ? num(m.invoice.items[0].unitPrice) : null,
+    totalSalePrice: m.invoice?.items[0] ? num(m.invoice.items[0].totalPrice) : null,
+    invoiceUnitCost: m.invoice?.items[0] ? num(m.invoice.items[0].unitCostSnapshot) : null,
+    invoiceTotalCost: m.invoice?.items[0] ? num(m.invoice.items[0].unitCostSnapshot) * m.invoice.items[0].quantity : null,
+    binCode: m.invoice?.items[0]?.binLocationSnapshot ?? m.part.binLocation?.fullCode ?? null,
     performedBy: m.performedBy.fullName,
     invoiceId: m.invoice?.id ?? null,
     invoiceNumber: m.invoice?.invoiceNumber ?? null,

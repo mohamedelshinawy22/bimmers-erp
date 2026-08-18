@@ -2,19 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { invalidateCache } from "@/lib/redis";
+import { prisma } from "@/lib/prisma";
 import { can, requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import {
   createSaleInvoiceSchema,
   createPurchaseInvoiceSchema,
   voidInvoiceSchema,
+  createInvoiceReturnSchema,
   type CreateSaleInvoiceInput,
   type CreatePurchaseInvoiceInput,
+  type CreateInvoiceReturnInput,
   type VoidInvoiceInput,
 } from "@/lib/validations/invoice";
 import {
   createPurchaseInvoice,
   createSaleInvoice,
+  createInvoiceReturn,
   voidInvoice,
   type InvoiceResult,
 } from "@/server/services/invoice.service";
@@ -72,6 +76,23 @@ export async function createPurchaseInvoiceAction(
     return ok(result);
   } catch (error) {
     return toActionError(error, "createPurchaseInvoiceAction");
+  }
+}
+
+export async function createInvoiceReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
+  try {
+    const input = createInvoiceReturnSchema.parse(raw);
+    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    const user = await requirePermission(original?.type === "PURCHASE" ? "invoice.purchase" : "invoice.sale");
+    const result = await createInvoiceReturn(input, {
+      id: user.id,
+      canSellBelowMin: can(user.role, "invoice.belowMinPrice"),
+      canOverrideDiscount: can(user.role, "invoice.overrideDiscount"),
+    });
+    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "createInvoiceReturnAction");
   }
 }
 

@@ -27,8 +27,12 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney, format
 import type { InvoiceListRow } from "@/server/services/invoices.service";
 import type { InvoiceDetail } from "@/server/services/invoices.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { voidInvoiceAction } from "@/server/actions/invoice.actions";
+import { createInvoiceReturnAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
+import { settleInvoiceAction } from "@/server/actions/treasury.actions";
 import { getInvoiceDetailAction } from "@/server/actions/invoices.read.actions";
+import { useInvoicePrint } from "@/hooks/use-invoice-print";
+import { PrintContainer } from "@/components/print/print-container";
+import { PRINT_FORMATS, type InvoicePrintFormat } from "@/lib/invoice-print-types";
 
 interface InvoicesClientProps {
   rows: InvoiceListRow[];
@@ -36,8 +40,9 @@ interface InvoicesClientProps {
   page: number;
   pageSize: number;
   filters: { query: string; type: string; status: string; includeVoided: boolean };
-  permissions: { canVoid: boolean; canViewCost: boolean };
+  permissions: { canVoid: boolean; canViewCost: boolean; canSettle: boolean };
   company: CompanyProfile;
+  treasuries: Array<{ id: string; name: string }>;
 }
 
 export function InvoicesClient({
@@ -48,13 +53,17 @@ export function InvoicesClient({
   filters,
   permissions,
   company,
+  treasuries,
 }: InvoicesClientProps) {
   const router = useRouter();
   const params = useSearchParams();
   const [query, setQuery] = useState(filters.query);
   const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+  const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
+  const [settlementTarget, setSettlementTarget] = useState<InvoiceListRow | null>(null);
+  const [returnTarget, setReturnTarget] = useState<InvoiceListRow | null>(null);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -198,7 +207,7 @@ export function InvoicesClient({
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
                     {formatDateTime(inv.createdAt)}
                   </TD>
-                  <TD><InvoiceActionMenu invoice={inv} canVoid={permissions.canVoid} onDetail={() => void openDetail(inv.id)} onEdit={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/edit/${inv.id}`)} onSettle={() => router.push(`/treasury?voucher=${inv.type === "SALE" ? "RECEIPT" : "PAYMENT"}`)} onVoid={() => setVoidTarget(inv)} /></TD>
+                  <TD><InvoiceActionMenu invoice={inv} canVoid={permissions.canVoid} canSettle={permissions.canSettle} onDetail={() => void openDetail(inv.id)} onEdit={() => router.push(`/invoices/${inv.type === "SALE" ? "sales" : "purchases"}/edit/${inv.id}`)} onPrint={() => setPrintInvoiceId(inv.id)} onSettle={() => setSettlementTarget(inv)} onReturn={() => setReturnTarget(inv)} onVoid={() => setVoidTarget(inv)} /></TD>
                 </TR>
               ))
             )}
@@ -236,8 +245,15 @@ export function InvoicesClient({
           onClose={() => setDetail(null)}
           canViewCost={permissions.canViewCost}
           company={company}
+          onPrint={() => setPrintInvoiceId(detail.id)}
         />
       ) : null}
+
+      {printInvoiceId ? <InvoicePrintDialog invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} /> : null}
+
+      {settlementTarget ? <InvoiceSettlementModal invoice={settlementTarget} treasuries={treasuries} onClose={() => setSettlementTarget(null)} onDone={() => { setSettlementTarget(null); setDetail(null); router.refresh(); }} /> : null}
+
+      {returnTarget ? <InvoiceReturnModal invoice={returnTarget} treasuries={treasuries} onClose={() => setReturnTarget(null)} onDone={() => { setReturnTarget(null); setDetail(null); router.refresh(); }} /> : null}
 
       {voidTarget ? (
         <VoidInvoiceModal
@@ -258,11 +274,13 @@ function InvoiceDetailModal({
   onClose,
   canViewCost,
   company,
+  onPrint,
 }: {
   detail: InvoiceDetail;
   onClose: () => void;
   canViewCost: boolean;
   company: CompanyProfile;
+  onPrint: () => void;
 }) {
   const margin = detail.items.reduce(
     (sum, it) => sum + (it.totalPrice - it.unitCostSnapshot * it.quantity),
@@ -281,8 +299,8 @@ function InvoiceDetailModal({
           <Button variant="ghost" onClick={onClose}>
             إغلاق
           </Button>
-          <Button variant="outline" onClick={() => window.print()}>
-            <Printer size={15} /> طباعة
+          <Button variant="outline" onClick={onPrint}>
+            <Printer size={15} /> اختيار الطباعة
           </Button>
         </>
       }
@@ -451,11 +469,92 @@ function VoidInvoiceModal({
 
 export { ShoppingBag };
 
-function InvoiceActionMenu({ invoice, canVoid, onDetail, onEdit, onSettle, onVoid }: { invoice: InvoiceListRow; canVoid: boolean; onDetail: () => void; onEdit: () => void; onSettle: () => void; onVoid: () => void }) {
+function InvoiceActionMenu({ invoice, canVoid, canSettle, onDetail, onEdit, onPrint, onSettle, onReturn, onVoid }: { invoice: InvoiceListRow; canVoid: boolean; canSettle: boolean; onDetail: () => void; onEdit: () => void; onPrint: () => void; onSettle: () => void; onReturn: () => void; onVoid: () => void }) {
   const [open, setOpen] = useState(false); const [position, setPosition] = useState({ top: 0, left: 0 }); const triggerRef = useRef<HTMLButtonElement>(null); const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!open) return; const close = (event: MouseEvent) => { if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) setOpen(false); }; window.addEventListener("mousedown", close); return () => window.removeEventListener("mousedown", close); }, [open]);
   const toggle = (event: React.MouseEvent) => { event.stopPropagation(); const rect = triggerRef.current?.getBoundingClientRect(); if (rect) setPosition({ top: rect.bottom + 6, left: Math.max(8, rect.right - 208) }); setOpen((value) => !value); };
   const item = (label: string, icon: React.ReactNode, action: () => void, danger = false) => <button type="button" className={`rounded-lg px-3 py-2 text-right text-xs hover:bg-bmw-carbon ${danger ? "text-bmw-mRed" : "text-bmw-silver"}`} onClick={(event) => { event.stopPropagation(); setOpen(false); action(); }}>{icon}{label}</button>;
-  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid min-w-[200px] gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md">{item("عرض التفاصيل", <Eye className="ml-1 inline" size={14}/>, onDetail)}{item("تعديل الفاتورة", <Pencil className="ml-1 inline" size={14}/>, onEdit)}{item("طباعة الفاتورة", <Printer className="ml-1 inline" size={14}/>, onDetail)}{invoice.remainingAmount > 0 && !invoice.isVoided ? item("سداد / تحصيل", <HandCoins className="ml-1 inline" size={14}/>, onSettle) : null}{!invoice.isVoided ? item("عمل مرتجع", <RotateCcw className="ml-1 inline" size={14}/>, onDetail) : null}{canVoid && !invoice.isVoided ? item("إلغاء الفاتورة", <Ban className="ml-1 inline" size={14}/>, onVoid, true) : null}</div>, document.body) : null;
+  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid min-w-[200px] gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md">{item("عرض التفاصيل", <Eye className="ml-1 inline" size={14}/>, onDetail)}{item("تعديل الفاتورة", <Pencil className="ml-1 inline" size={14}/>, onEdit)}{item("طباعة الفاتورة", <Printer className="ml-1 inline" size={14}/>, onPrint)}{canSettle && invoice.remainingAmount > 0 && !invoice.isVoided ? item("سداد / تحصيل", <HandCoins className="ml-1 inline" size={14}/>, onSettle) : null}{!invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE") ? item("عمل مرتجع", <RotateCcw className="ml-1 inline" size={14}/>, onReturn) : null}{canVoid && !invoice.isVoided ? item("إلغاء الفاتورة", <Ban className="ml-1 inline" size={14}/>, onVoid, true) : null}</div>, document.body) : null;
   return <><button ref={triggerRef} type="button" aria-label="عمليات الفاتورة" onClick={toggle} className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-blue/10 hover:text-bmw-blue"><MoreHorizontal size={16}/></button>{menu}</>;
+}
+
+function InvoicePrintDialog({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
+  const { data, error, format, setFormat, state, prepare, print, onAfterPrint } = useInvoicePrint(invoiceId);
+  useEffect(() => { void prepare(); }, [prepare]);
+  const loading = state === "loading" || state === "printing";
+
+  return <>
+    <Modal
+      open
+      onClose={onClose}
+      title="اختيار تنسيق الطباعة"
+      description="اختر مقاس المستند قبل فتح معاينة الطباعة."
+      size="sm"
+      footer={<><Button variant="ghost" onClick={onClose} disabled={loading}>إغلاق</Button><Button onClick={() => void print()} loading={loading} disabled={!data}><Printer size={15} /> طباعة الآن</Button></>}
+    >
+      <div className="space-y-4">
+        {state === "loading" ? <Alert variant="info">جاري تجهيز بيانات الطباعة…</Alert> : null}
+        {error ? <Alert variant="error">{error}</Alert> : null}
+        {data ? <>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {PRINT_FORMATS.map((option) => <button key={option.value} type="button" onClick={() => setFormat(option.value as InvoicePrintFormat)} className={`rounded-xl border px-3 py-3 text-right text-sm transition-colors ${format === option.value ? "border-bmw-blue bg-bmw-blue/15 text-white" : "border-bmw-cardBorder bg-bmw-carbon text-bmw-silver hover:border-bmw-blue/60"}`}>{option.label}</button>)}
+          </div>
+          <Alert variant="info">الفاتورة: <span className="font-mono font-bold">{data.invoice.invoiceNumber}</span> — {data.account.name}</Alert>
+        </> : null}
+      </div>
+    </Modal>
+    {data && state === "printing" ? <PrintContainer data={data} format={format} autoPrint onAfterPrint={onAfterPrint} /> : null}
+  </>;
+}
+
+function InvoiceSettlementModal({ invoice, treasuries, onClose, onDone }: { invoice: InvoiceListRow; treasuries: Array<{ id: string; name: string }>; onClose: () => void; onDone: () => void }) {
+  const [treasuryId, setTreasuryId] = useState("");
+  const [amount, setAmount] = useState(String(invoice.remainingAmount));
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const isSale = invoice.type === "SALE";
+  const submit = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await settleInvoiceAction({ invoiceId: invoice.id, treasuryId, amount: Number(amount), description });
+      if (!result.success) { setError(result.error); return; }
+      onDone();
+    });
+  };
+  return <Modal open onClose={onClose} title={`${isSale ? "تحصيل" : "سداد"} فاتورة ${invoice.invoiceNumber}`} description={`${isSale ? "تحصيل من" : "سداد إلى"} ${invoice.accountName} — المتبقي: ${formatMoney(invoice.remainingAmount)} ${CURRENCY}`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button onClick={submit} loading={pending} disabled={!treasuryId || !Number.isFinite(Number(amount)) || Number(amount) <= 0}><HandCoins size={15} /> تأكيد {isSale ? "التحصيل" : "السداد"}</Button></>}>
+    <div className="space-y-3">
+      {error ? <Alert variant="error">{error}</Alert> : null}
+      {treasuries.length === 0 ? <Alert variant="warning">لا توجد خزينة نشطة لاستلام أو صرف المبلغ.</Alert> : null}
+      <Field label="الخزينة" required><Select value={treasuryId} onChange={(event) => setTreasuryId(event.target.value)}><option value="">اختر الخزينة</option>{treasuries.map((treasury) => <option key={treasury.id} value={treasury.id}>{treasury.name}</option>)}</Select></Field>
+      <Field label="المبلغ" required hint={`الحد الأقصى ${formatMoney(invoice.remainingAmount)} ${CURRENCY}`}><Input type="number" min="0.01" max={invoice.remainingAmount} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} dir="ltr" /></Field>
+      <Field label="بيان السند"><Textarea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`${isSale ? "تحصيل" : "سداد"} فاتورة ${invoice.invoiceNumber}`} /></Field>
+    </div>
+  </Modal>;
+}
+
+function InvoiceReturnModal({ invoice, treasuries, onClose, onDone }: { invoice: InvoiceListRow; treasuries: Array<{ id: string; name: string }>; onClose: () => void; onDone: () => void }) {
+  const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [treasuryId, setTreasuryId] = useState("");
+  const [paidAmount, setPaidAmount] = useState("0");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pending, startTransition] = useTransition();
+  const isSale = invoice.type === "SALE";
+  useEffect(() => { let active = true; void (async () => { setLoading(true); const result = await getInvoiceDetailAction(invoice.id); if (!active) return; if (result.success) { setDetail(result.data); setQuantities(Object.fromEntries(result.data.items.map((item) => [item.id, "0"]))); } else setError(result.error); setLoading(false); })(); return () => { active = false; }; }, [invoice.id]);
+  const selected = detail?.items.map((item) => ({ invoiceItemId: item.id, quantity: Number(quantities[item.id] ?? 0) })).filter((line) => Number.isInteger(line.quantity) && line.quantity > 0) ?? [];
+  const returnedSubtotal = detail?.items.reduce((sum, item) => sum + (Number(quantities[item.id] ?? 0) > 0 ? item.totalPrice / item.quantity * Number(quantities[item.id]) : 0), 0) ?? 0;
+  const submit = () => { setError(null); startTransition(async () => { const result = await createInvoiceReturnAction({ originalInvoiceId: invoice.id, treasuryId: treasuryId || undefined, paidAmount: Number(paidAmount), notes, items: selected }); if (!result.success) { setError(result.error); return; } onDone(); }); };
+  return <Modal open onClose={onClose} title={`عمل مرتجع ${isSale ? "بيع" : "شراء"} — ${invoice.invoiceNumber}`} description="اختر الكميات المرتجعة من أصناف الفاتورة الأصلية. لا يتم تعديل الفاتورة الأصلية." size="lg" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button onClick={submit} loading={pending} disabled={loading || selected.length === 0 || Number(paidAmount) < 0 || (Number(paidAmount) > 0 && !treasuryId)}><RotateCcw size={15} /> حفظ المرتجع</Button></>}>
+    <div className="space-y-4">
+      {loading ? <Alert variant="info">جاري تحميل أصناف الفاتورة…</Alert> : null}
+      {error ? <Alert variant="error">{error}</Alert> : null}
+      {detail ? <><Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>المباع / المستلم</TH><TH>الكمية المرتجعة</TH><TH>القيمة التقديرية</TH></TR></THead><TBody>{detail.items.map((item) => { const quantity = quantities[item.id] ?? "0"; const numeric = Number(quantity) || 0; return <TR key={item.id}><TD className="font-bold text-white">{item.nameAr}</TD><TD className="font-mono text-xs text-bmw-blue">{formatOemNumber(item.oemNumber)}</TD><TD className="tabular">{item.quantity}</TD><TD><Input type="number" min="0" max={item.quantity} step="1" value={quantity} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="w-24" dir="ltr" /></TD><TD className="tabular">{formatMoney(item.totalPrice / item.quantity * numeric)}</TD></TR>; })}</TBody></Table>
+        <div className="grid gap-3 sm:grid-cols-3"><Field label={isSale ? "مبلغ نقدي يُرد للعميل" : "مبلغ نقدي يُستلم من المورد"} hint={`حد أقصى تقريبي ${formatMoney(returnedSubtotal)} ${CURRENCY}`}><Input type="number" min="0" max={returnedSubtotal} step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} dir="ltr" /></Field><Field label="الخزينة النقدية"><Select value={treasuryId} onChange={(event) => setTreasuryId(event.target.value)}><option value="">لا يوجد سداد نقدي</option>{treasuries.map((treasury) => <option key={treasury.id} value={treasury.id}>{treasury.name}</option>)}</Select></Field><Field label="بيان / سبب المرتجع"><Input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="مثال: عيب تصنيع" /></Field></div>
+        <Alert variant="info">القيمة التقديرية للأصناف المحددة: <strong>{formatMoney(returnedSubtotal)} {CURRENCY}</strong>. أي رصيد غير نقدي يُرحّل تلقائياً إلى حساب {invoice.accountName}.</Alert>
+      </> : null}
+    </div>
+  </Modal>;
 }

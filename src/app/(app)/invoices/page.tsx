@@ -3,6 +3,7 @@ import type { InvoiceType, PaymentStatus } from "@prisma/client";
 import { can, requireUser } from "@/lib/auth";
 import { listInvoices } from "@/server/services/invoices.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
+import { prisma } from "@/lib/prisma";
 import { InvoicesClient } from "./invoices-client";
 
 export const metadata = { title: "الفواتير" };
@@ -26,9 +27,10 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
   const includeVoided = searchParams.voided === "1";
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
 
-  const [result, company] = await Promise.all([
+  const [result, company, treasuries] = await Promise.all([
     listInvoices({ query: searchParams.q, type, status, includeVoided, page, pageSize: 25 }),
     getCompanyProfile(),
+    prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (
@@ -46,8 +48,10 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
       permissions={{
         canVoid: can(user.role, "invoice.void"),
         canViewCost: can(user.role, "part.viewCost"),
+        canSettle: can(user.role, "treasury.transact"),
       }}
       company={company}
+      treasuries={treasuries}
     />
   );
 }

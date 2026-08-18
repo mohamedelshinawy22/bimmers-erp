@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Car, FileText, Pencil, Plus, Search, UserRound, Users, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, Search, UserRound, Users, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,9 @@ import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/tab
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
 import { createAccountAction, createVehicleAction, updateAccountAction } from "@/server/actions/accounts.actions";
-import { getAccountStatementAction } from "@/server/actions/invoices.read.actions";
+import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
+import { getAccountDetailedLedgerAction } from "@/server/actions/invoices.read.actions";
+import { AccountStatementTemplate, type AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
 
 interface AccountsClientProps {
@@ -27,6 +29,9 @@ interface AccountsClientProps {
   };
   canWrite: boolean;
   canViewStatement: boolean;
+  companyName: string;
+  canTransact: boolean;
+  treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   totals: { receivables: number; payables: number; workshops: number };
 }
 
@@ -47,6 +52,9 @@ export function AccountsClient({
   options,
   canWrite,
   canViewStatement,
+  companyName,
+  canTransact,
+  treasuries,
   totals,
 }: AccountsClientProps) {
   const router = useRouter();
@@ -55,8 +63,11 @@ export function AccountsClient({
   const [vehicleFor, setVehicleFor] = useState<AccountRow | null>(null);
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [statementFor, setStatementFor] = useState<AccountRow | null>(null);
+  const [voucherFor, setVoucherFor] = useState<{ account: AccountRow; type: "RECEIPT" | "PAYMENT" } | null>(null);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const displayedDebit = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  const displayedCredit = rows.filter((account) => account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
 
   const push = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams();
@@ -261,6 +272,8 @@ export function AccountsClient({
                           <Pencil size={15} />
                         </button>
                       ) : null}
+                      {canTransact && account.type !== "EXPENSE" ? <button type="button" onClick={() => setVoucherFor({ account, type: "RECEIPT" })} title="سند قبض" className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-emerald-500/10 hover:text-emerald-400"><ArrowDownLeft size={15} /></button> : null}
+                      {canTransact && account.type !== "EXPENSE" ? <button type="button" onClick={() => setVoucherFor({ account, type: "PAYMENT" })} title="سند صرف" className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-mRed/10 hover:text-bmw-mRed"><ArrowUpRight size={15} /></button> : null}
                       {canViewStatement ? (
                         <button
                           type="button"
@@ -288,6 +301,8 @@ export function AccountsClient({
             )}
           </TBody>
         </Table>
+
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-card/95 px-4 py-3 text-xs backdrop-blur"><span className="text-bmw-muted">إجمالي الأرصدة المعروضة</span><div className="flex gap-4"><span className="tabular text-bmw-mRed">مدين / عليه: <b>{formatMoney(displayedDebit)} {CURRENCY}</b></span><span className="tabular text-emerald-400">دائن / له: <b>{formatMoney(displayedCredit)} {CURRENCY}</b></span></div></div>
 
         {pageCount > 1 ? (
           <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3">
@@ -317,8 +332,9 @@ export function AccountsClient({
         <EditAccountModal key={editAccount.id} account={editAccount} onClose={() => setEditAccount(null)} />
       ) : null}
       {statementFor ? (
-        <StatementModal key={statementFor.id} account={statementFor} onClose={() => setStatementFor(null)} />
+        <StatementModal key={statementFor.id} account={statementFor} companyName={companyName} onClose={() => setStatementFor(null)} />
       ) : null}
+      {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
       {vehicleFor ? (
         <AddVehicleModal
           key={vehicleFor.id}
@@ -716,153 +732,89 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
   );
 }
 
-interface StatementData {
-  account: { id: string; name: string; accountNumber: string; currentBalance: number; creditLimit: number };
-  invoices: Array<{
-    id: string;
-    invoiceNumber: string;
-    type: keyof typeof LABELS.invoiceType;
-    grandTotal: number;
-    paidAmount: number;
-    remainingAmount: number;
-    paymentStatus: keyof typeof LABELS.paymentStatus;
-    isVoided: boolean;
-    createdAt: string;
-  }>;
-  transactions: Array<{
-    id: string;
-    transactionNumber: string;
-    type: keyof typeof LABELS.transactionType;
-    amount: number;
-    description: string;
-    treasuryName: string;
-    createdAt: string;
-  }>;
+interface DetailedLedgerData {
+  account: { id: string; name: string; accountNumber: string; phone: string | null; currentBalance: number; creditLimit: number };
+  filters: { from: string | null; to: string | null };
+  openingBalance: number;
+  totalDebit: number;
+  totalCredit: number;
+  closingBalance: number;
+  rows: Array<{ id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null }>;
 }
 
-/** Account statement — the drill-down behind a receivable balance. */
-function StatementModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {
-  const [data, setData] = useState<StatementData | null>(null);
+function StatementModal({ account, companyName, onClose }: { account: AccountRow; companyName: string; onClose: () => void }) {
+  const router = useRouter();
+  const [data, setData] = useState<DetailedLedgerData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [movementType, setMovementType] = useState("ALL");
+  const [query, setQuery] = useState("");
+  const [printRequested, setPrintRequested] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void getAccountStatementAction(account.id).then((res) => {
+    setError(null);
+    void getAccountDetailedLedgerAction(account.id, { from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, movementTypes: movementType === "ALL" ? undefined : [movementType], query: query || undefined }).then((result) => {
       if (cancelled) return;
-      if (res.success) setData(res.data as StatementData);
-      else setError(res.error);
+      if (result.success) setData(result.data as DetailedLedgerData);
+      else setError(result.error);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [account.id]);
+    return () => { cancelled = true; };
+  }, [account.id, from, to, movementType, query]);
 
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={`كشف حساب — ${account.name}`}
-      description={`${account.accountNumber} • الرصيد ${formatMoney(account.currentBalance)} ${CURRENCY} ${
-        account.currentBalance < 0 ? "(عليه)" : account.currentBalance > 0 ? "(له)" : ""
-      }`}
-      size="lg"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            إغلاق
-          </Button>
-          <Button variant="outline" onClick={() => window.print()}>
-            طباعة
-          </Button>
-        </>
-      }
-    >
+  useEffect(() => {
+    if (!printRequested) return;
+    const done = () => setPrintRequested(false);
+    window.addEventListener("afterprint", done);
+    const timer = window.setTimeout(() => window.print(), 60);
+    return () => { window.clearTimeout(timer); window.removeEventListener("afterprint", done); };
+  }, [printRequested]);
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [["التاريخ", "المرجع", "النوع", "مدين", "دائن", "الرصيد", "الخزينة", "البيان"], ...data.rows.map((row) => [formatDateTime(row.createdAt), row.reference, row.typeLabel, String(row.debit), String(row.credit), String(row.runningBalance), row.treasuryName ?? "", row.note ?? ""])];
+    const csv = `\uFEFF${rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",")).join("\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `كشف-حساب-${data.account.accountNumber}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+  const printData: AccountStatementPrintData | null = data ? { companyName, accountName: data.account.name, accountNumber: data.account.accountNumber, phone: data.account.phone, from: data.filters.from ?? undefined, to: data.filters.to ?? undefined, openingBalance: data.openingBalance, debit: data.totalDebit, credit: data.totalCredit, closingBalance: data.closingBalance, rows: data.rows.map((row) => ({ id: row.id, createdAt: row.createdAt, reference: row.reference, type: row.typeLabel, debit: row.debit, credit: row.credit, runningBalance: row.runningBalance, treasury: row.treasuryName, note: row.note })) } : null;
+
+  return <>
+    <Modal open onClose={onClose} title={`كشف حساب تفصيلي — ${account.name}`} description={`${account.accountNumber} • الرصيد الحالي ${formatMoney(account.currentBalance)} ${CURRENCY}`} size="xl" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button variant="outline" onClick={exportCsv} disabled={!data}><Download size={15} /> تصدير CSV</Button><Button variant="outline" onClick={() => setPrintRequested(true)} disabled={!printData}><Printer size={15} /> طباعة A4</Button></>}>
       <div className="space-y-4">
         {error ? <Alert variant="error">{error}</Alert> : null}
-        {data === null && !error ? <p className="text-xs text-bmw-muted">جاري التحميل…</p> : null}
-
-        {data ? (
-          <>
-            <div>
-              <h3 className="mb-2 text-xs font-bold text-bmw-blue">الفواتير</h3>
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>رقم الفاتورة</TH>
-                    <TH>النوع</TH>
-                    <TH>الإجمالي</TH>
-                    <TH>المدفوع</TH>
-                    <TH>المتبقي</TH>
-                    <TH>الحالة</TH>
-                    <TH>التاريخ</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {data.invoices.length === 0 ? (
-                    <EmptyState colSpan={7} title="لا توجد فواتير" />
-                  ) : (
-                    data.invoices.map((i) => (
-                      <TR key={i.id} className={i.isVoided ? "opacity-50" : undefined}>
-                        <TD className="tabular text-xs font-bold text-white">{i.invoiceNumber}</TD>
-                        <TD className="text-xs">{LABELS.invoiceType[i.type]}</TD>
-                        <TD className="tabular text-xs font-bold">{formatMoney(i.grandTotal)}</TD>
-                        <TD className="tabular text-xs text-emerald-400">{formatMoney(i.paidAmount)}</TD>
-                        <TD className="tabular text-xs text-amber-400">{formatMoney(i.remainingAmount)}</TD>
-                        <TD>
-                          {i.isVoided ? (
-                            <Badge variant="danger">ملغاة</Badge>
-                          ) : (
-                            <Badge variant={i.paymentStatus === "PAID" ? "success" : "warning"}>
-                              {LABELS.paymentStatus[i.paymentStatus]}
-                            </Badge>
-                          )}
-                        </TD>
-                        <TD className="tabular text-xs text-bmw-muted">{formatDateTime(i.createdAt)}</TD>
-                      </TR>
-                    ))
-                  )}
-                </TBody>
-              </Table>
-            </div>
-
-            <div>
-              <h3 className="mb-2 text-xs font-bold text-bmw-blue">الحركات المالية</h3>
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>رقم السند</TH>
-                    <TH>النوع</TH>
-                    <TH>المبلغ</TH>
-                    <TH>الخزينة</TH>
-                    <TH>البيان</TH>
-                    <TH>التاريخ</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {data.transactions.length === 0 ? (
-                    <EmptyState colSpan={6} title="لا توجد حركات" />
-                  ) : (
-                    data.transactions.map((t) => (
-                      <TR key={t.id}>
-                        <TD className="tabular text-xs font-bold text-white">{t.transactionNumber}</TD>
-                        <TD>
-                          <Badge variant={t.type === "RECEIPT" ? "success" : "danger"}>
-                            {LABELS.transactionType[t.type]}
-                          </Badge>
-                        </TD>
-                        <TD className="tabular text-xs font-bold">{formatMoney(t.amount)}</TD>
-                        <TD className="text-xs">{t.treasuryName}</TD>
-                        <TD className="max-w-[220px] truncate text-xs text-bmw-muted">{t.description}</TD>
-                        <TD className="tabular text-xs text-bmw-muted">{formatDateTime(t.createdAt)}</TD>
-                      </TR>
-                    ))
-                  )}
-                </TBody>
-              </Table>
-            </div>
-          </>
-        ) : null}
+        {!data && !error ? <p className="text-xs text-bmw-muted">جاري تحميل دفتر الأستاذ…</p> : null}
+        <div className="grid gap-2 sm:grid-cols-4"><Field label="من"><Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></Field><Field label="إلى"><Input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></Field><Field label="نوع الحركة"><Select value={movementType} onChange={(event) => setMovementType(event.target.value)}><option value="ALL">كل الحركات</option><option value="SALE">فواتير بيع</option><option value="PURCHASE">فواتير شراء</option><option value="SALE_RETURN">مرتجع بيع</option><option value="PURCHASE_RETURN">مرتجع شراء</option><option value="RECEIPT">سند قبض</option><option value="PAYMENT">سند صرف</option></Select></Field><Field label="بحث"><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="مرجع أو بيان" /></Field></div>
+        {data ? <><div className="grid gap-2 sm:grid-cols-4"><StatementKpi label="رصيد افتتاحي" value={data.openingBalance} /><StatementKpi label="إجمالي مدين" value={data.totalDebit} tone="text-bmw-mRed" /><StatementKpi label="إجمالي دائن" value={data.totalCredit} tone="text-emerald-400" /><StatementKpi label="رصيد ختامي" value={data.closingBalance} tone="text-bmw-blue" /></div><Table><THead><TR><TH>التاريخ والوقت</TH><TH>المرجع</TH><TH>الحركة</TH><TH>مدين</TH><TH>دائن</TH><TH>الرصيد المتراكم</TH><TH>الخزينة</TH><TH>البيان</TH></TR></THead><TBody>{data.rows.length === 0 ? <EmptyState colSpan={8} title="لا توجد حركات وفق الفلاتر المحددة" /> : data.rows.map((row) => <TR key={row.id}><TD className="tabular whitespace-nowrap text-xs text-bmw-muted">{formatDateTime(row.createdAt)}</TD><TD><button type="button" className="font-mono text-xs font-bold text-bmw-blue hover:underline" onClick={() => row.documentKind === "INVOICE" ? router.push(`/invoices?q=${encodeURIComponent(row.reference)}`) : undefined}>{row.reference}</button></TD><TD><Badge variant={row.credit > 0 ? "success" : row.debit > 0 ? "danger" : "default"}>{row.typeLabel}</Badge></TD><TD className="tabular text-bmw-mRed">{row.debit ? formatMoney(row.debit) : "—"}</TD><TD className="tabular text-emerald-400">{row.credit ? formatMoney(row.credit) : "—"}</TD><TD><span className="rounded-full bg-bmw-blue/15 px-2 py-1 font-mono text-xs font-bold text-bmw-blue">{formatMoney(row.runningBalance)}</span></TD><TD className="text-xs">{row.treasuryName ?? "—"}</TD><TD className="max-w-[180px] truncate text-xs text-bmw-muted">{row.note ?? "—"}</TD></TR>)}</TBody></Table></> : null}
       </div>
     </Modal>
-  );
+    {printRequested && printData ? <AccountStatementTemplate data={printData} /> : null}
+  </>;
+}
+
+function StatementKpi({ label, value, tone = "text-white" }: { label: string; value: number; tone?: string }) {
+  return <div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><p className="text-[11px] text-bmw-muted">{label}</p><p className={`tabular mt-1 text-sm font-bold ${tone}`}>{formatMoney(value)} <span className="text-[10px] text-bmw-muted">{CURRENCY}</span></p></div>;
+}
+
+function AccountVoucherModal({ account, type, treasuries, onClose }: { account: AccountRow; type: "RECEIPT" | "PAYMENT"; treasuries: Array<{ id: string; name: string; currentBalance: number }>; onClose: () => void }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [treasuryId, setTreasuryId] = useState(treasuries[0]?.id ?? "");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const parsed = Number(amount) || 0;
+  const selectedTreasury = treasuries.find((treasury) => treasury.id === treasuryId);
+  const insufficient = type === "PAYMENT" && !!selectedTreasury && parsed > selectedTreasury.currentBalance;
+  const submit = () => { setError(null); startTransition(async () => { const result = await createTreasuryTransactionAction({ treasuryId, accountId: account.id, type, amount: parsed, description: description || `${type === "RECEIPT" ? "تحصيل من" : "سداد إلى"} ${account.name}` }); if (!result.success) { setError(result.error); return; } onClose(); router.refresh(); }); };
+  return <Modal open onClose={onClose} title={type === "RECEIPT" ? `سند قبض — ${account.name}` : `سند صرف — ${account.name}`} description={type === "RECEIPT" ? "يُسجّل القبض في الخزينة ويخفض مديونية الحساب." : "يُسجّل الصرف من الخزينة ويخفض مستحقات الحساب."} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button variant={type === "RECEIPT" ? "success" : "danger"} onClick={submit} loading={pending} disabled={!treasuryId || parsed <= 0 || insufficient}>تسجيل السند</Button></>}>
+    <div className="space-y-3">
+      {error ? <Alert variant="error">{error}</Alert> : null}
+      <Alert variant="info">الرصيد الحالي: <strong>{formatMoney(Math.abs(account.currentBalance))} {CURRENCY}</strong> {account.currentBalance < 0 ? "(عليه)" : account.currentBalance > 0 ? "(له)" : ""}</Alert>
+      <Field label="الخزينة" required><Select value={treasuryId} onChange={(event) => setTreasuryId(event.target.value)}><option value="">اختر الخزينة</option>{treasuries.map((treasury) => <option key={treasury.id} value={treasury.id}>{treasury.name} — {formatMoney(treasury.currentBalance)} {CURRENCY}</option>)}</Select></Field>
+      <Field label="المبلغ" required error={insufficient ? `السيولة المتاحة ${formatMoney(selectedTreasury!.currentBalance)} فقط` : undefined}><Input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} autoFocus dir="ltr" /></Field>
+      <Field label="البيان"><Textarea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`${type === "RECEIPT" ? "تحصيل" : "سداد"} ${account.name}`} /></Field>
+    </div>
+  </Modal>;
 }

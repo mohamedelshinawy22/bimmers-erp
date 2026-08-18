@@ -57,6 +57,7 @@ export default async function TreasuryPage({ searchParams }: PageProps) {
         canTransact: can(user.role, "treasury.transact"),
         canTransfer: can(user.role, "treasury.transfer"),
         canCloseShift: can(user.role, "treasury.closeShift"),
+        canManage: can(user.role, "treasury.manage"),
       }}
       initialVoucher={can(user.role, "treasury.transact") ? voucher : null}
     />

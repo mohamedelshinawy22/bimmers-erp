@@ -106,6 +106,32 @@ export const voidInvoiceSchema = z.object({
 
 export type VoidInvoiceInput = z.infer<typeof voidInvoiceSchema>;
 
+export const settleInvoiceSchema = z.object({
+  invoiceId: uuid,
+  treasuryId: uuid,
+  amount: positiveMoney,
+  description: optionalText(500),
+});
+
+export type SettleInvoiceInput = z.infer<typeof settleInvoiceSchema>;
+
+export const invoiceReturnLineSchema = z.object({
+  invoiceItemId: uuid,
+  quantity: positiveInt.max(100_000, "الكمية كبيرة جداً"),
+});
+
+export const createInvoiceReturnSchema = z.object({
+  originalInvoiceId: uuid,
+  treasuryId: optionalUuid,
+  paidAmount: nonNegativeMoney.default(0),
+  notes: optionalText(500),
+  items: z.array(invoiceReturnLineSchema).min(1, "اختر صنفاً واحداً على الأقل للمرتجع").max(300),
+}).superRefine((data, ctx) => {
+  if (data.paidAmount > 0 && !data.treasuryId) ctx.addIssue({ code: "custom", path: ["treasuryId"], message: "يجب تحديد الخزينة لرد أو استلام المبلغ" });
+});
+
+export type CreateInvoiceReturnInput = z.infer<typeof createInvoiceReturnSchema>;
+
 export const treasuryTransactionSchema = z.object({
   treasuryId: uuid,
   accountId: optionalUuid,

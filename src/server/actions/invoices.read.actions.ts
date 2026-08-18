@@ -4,7 +4,7 @@ import { requirePermission, can } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getInvoiceDetail, type InvoiceDetail } from "@/server/services/invoices.service";
 import { getStockLedger } from "@/server/services/parts.service";
-import { getAccountStatement } from "@/server/services/accounts.service";
+import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
 
 /**
  * Read-only lookups used by drawers and modals.
@@ -38,6 +38,17 @@ export async function getStockLedgerAction(partId: string) {
     return ok(await getStockLedger(partId, 100));
   } catch (error) {
     return toActionError(error, "getStockLedgerAction");
+  }
+}
+
+export async function getAccountDetailedLedgerAction(accountId: string, filters?: { from?: string; to?: string; movementTypes?: string[]; query?: string }) {
+  try {
+    await requirePermission("account.viewStatement");
+    const ledger = await getAccountDetailedLedger(accountId, filters);
+    if (!ledger) return { success: false as const, error: "الحساب غير موجود." };
+    return ok(ledger);
+  } catch (error) {
+    return toActionError(error, "getAccountDetailedLedgerAction");
   }
 }
 
