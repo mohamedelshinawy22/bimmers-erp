@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma, type InvoiceType, type PaymentStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { num } from "@/lib/utils";
+import { normalizeSearchTerm } from "@/lib/search-utils";
 
 export interface InvoiceListRow {
   id: string;
@@ -41,14 +42,13 @@ export async function listInvoices(options: {
 
   const and: Prisma.InvoiceWhereInput[] = [];
   if (options.query) {
-    const q = options.query.trim();
-    and.push({
-      OR: [
-        { invoiceNumber: { contains: q, mode: "insensitive" } },
-        { account: { name: { contains: q } } },
-        { notes: { contains: q } },
-      ],
-    });
+    const { variations } = normalizeSearchTerm(options.query);
+    and.push({ OR: variations.flatMap((term) => [
+      { invoiceNumber: { contains: term, mode: "insensitive" as const } },
+      { account: { name: { contains: term } } },
+      { account: { phone: { contains: term } } },
+      { notes: { contains: term } },
+    ]) });
   }
   if (options.type && options.type !== "ALL") and.push({ type: options.type });
   if (options.status && options.status !== "ALL") and.push({ paymentStatus: options.status });

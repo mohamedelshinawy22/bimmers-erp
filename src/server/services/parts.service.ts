@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { num } from "@/lib/utils";
+import { normalizeSearchTerm } from "@/lib/search-utils";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
 
 /** Plain-JSON shape safe to hand to client components (no Decimal instances). */
@@ -158,19 +159,23 @@ export interface PosPartRow {
 }
 
 export async function quickSearchParts(query: string, limit = 12): Promise<PosPartRow[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
-  const numeric = q.replace(/[\s\-.]/g, "");
+  const { normalized, numericNormalized, variations } = normalizeSearchTerm(query);
+  if (normalized.length < 2) return [];
 
   const rows = await prisma.partItem.findMany({
     where: {
       isActive: true,
       OR: [
-        { barcode: { equals: numeric } },
-        { oemNumber: { contains: numeric, mode: "insensitive" } },
-        { nameAr: { contains: q } },
-        { nameEn: { contains: q, mode: "insensitive" } },
-        { brandPartNumber: { contains: q, mode: "insensitive" } },
+        { barcode: { equals: numericNormalized } },
+        { oemNumber: { contains: numericNormalized, mode: "insensitive" } },
+        ...variations.flatMap((term) => [
+          { nameAr: { contains: term } },
+          { nameEn: { contains: term, mode: "insensitive" as const } },
+          { brandPartNumber: { contains: term, mode: "insensitive" as const } },
+          { brand: { name: { contains: term, mode: "insensitive" as const } } },
+          { compatibleChassis: { some: { chassis: { code: { contains: term, mode: "insensitive" as const } } } } },
+          { compatibleEngines: { some: { engine: { code: { contains: term, mode: "insensitive" as const } } } } },
+        ]),
       ],
     },
     select: {

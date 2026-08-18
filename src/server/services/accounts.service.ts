@@ -2,6 +2,7 @@ import "server-only";
 import type { AccountType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { num } from "@/lib/utils";
+import { normalizeSearchTerm } from "@/lib/search-utils";
 
 export interface AccountRow {
   id: string;
@@ -34,15 +35,13 @@ export async function listAccounts(options: {
 
   const and: Prisma.AccountWhereInput[] = [];
   if (options.query) {
-    const q = options.query.trim();
-    and.push({
-      OR: [
-        { name: { contains: q } },
-        { accountNumber: { contains: q, mode: "insensitive" } },
-        { phone: { contains: q } },
-        { taxNumber: { contains: q } },
-      ],
-    });
+    const { variations } = normalizeSearchTerm(options.query);
+    and.push({ OR: variations.flatMap((term) => [
+      { name: { contains: term } },
+      { accountNumber: { contains: term, mode: "insensitive" as const } },
+      { phone: { contains: term } },
+      { taxNumber: { contains: term } },
+    ]) });
   }
   if (options.type && options.type !== "ALL") and.push({ type: options.type });
   if (options.debtorsOnly) and.push({ currentBalance: { lt: 0 } });
