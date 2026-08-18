@@ -23,7 +23,7 @@ import {
 import { nextShiftNumber, nextTransactionNumber } from "@/server/services/numbering.service";
 import { lockAccountForUpdate, lockAccountsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
-import { treasuryReportSchema, treasurySchema, type TreasuryInput, type TreasuryReportInput } from "@/lib/validations/treasury";
+import { createTreasurySchema, treasuryReportSchema, treasurySchema, type CreateTreasuryInput, type TreasuryInput, type TreasuryReportInput } from "@/lib/validations/treasury";
 
 
 
@@ -181,18 +181,51 @@ export async function settleInvoiceAction(raw: SettleInvoiceInput): Promise<Acti
   } catch (error) { return toActionError(error, "settleInvoiceAction"); }
 }
 
-export async function createTreasuryAction(raw: TreasuryInput): Promise<ActionResult<{ id: string; name: string }>> {
+const TREASURY_REVALIDATION_PATHS = ["/", "/treasury", "/pos", "/invoices", "/sales/returns", "/purchases/returns", "/accounts"] as const;
+
+function revalidateTreasuryConsumers() {
+  for (const path of TREASURY_REVALIDATION_PATHS) revalidatePath(path);
+}
+
+export async function createTreasuryAction(raw: CreateTreasuryInput): Promise<ActionResult<{ id: string; name: string; openingTransactionNumber: string | null }>> {
   try {
     const user = await requirePermission("treasury.manage");
-    const input = treasurySchema.parse(raw);
-    const treasury = await prisma.$transaction(async (tx) => {
+    const input = createTreasurySchema.parse(raw);
+    if (input.isDefault && !input.isActive) throw new BusinessRuleError("الخزينة الافتراضية يجب أن تكون نشطة.");
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
       if (input.isDefault) await tx.treasury.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
-      const created = await tx.treasury.create({ data: input });
-      await writeAudit(tx, { tableName: "Treasury", recordId: created.id, action: "INSERT", newData: created, performedBy: user.id });
-      return created;
-    }, TX_OPTIONS);
-    revalidatePath("/treasury");
-    return ok({ id: treasury.id, name: treasury.name });
+      const created = await tx.treasury.create({
+        data: {
+          name: input.name,
+          type: input.type,
+          notes: input.notes ?? null,
+          isDefault: input.isDefault,
+          isActive: input.isActive,
+          currentBalance: money(input.openingBalance),
+        },
+      });
+      let openingTransactionNumber: string | null = null;
+      if (input.openingBalance > 0) {
+        openingTransactionNumber = await nextTransactionNumber(tx);
+        const openingTransaction = await tx.treasuryTransaction.create({
+          data: {
+            transactionNumber: openingTransactionNumber,
+            treasuryId: created.id,
+            type: "RECEIPT",
+            category: "OPENING_BALANCE",
+            amount: money(input.openingBalance),
+            description: "رصيد افتتاحي للخزينة عند الإنشاء",
+            createdByUser: user.id,
+          },
+        });
+        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: openingTransaction.id, action: "INSERT", newData: openingTransaction, performedBy: user.id });
+      }
+      await writeAudit(tx, { tableName: "Treasury", recordId: created.id, action: "INSERT", newData: { ...created, openingBalance: input.openingBalance, openingTransactionNumber }, performedBy: user.id });
+      return { id: created.id, name: created.name, openingTransactionNumber };
+    }, TX_OPTIONS));
+    await invalidateCache("dashboard");
+    revalidateTreasuryConsumers();
+    return ok(result);
   } catch (error) { return toActionError(error, "createTreasuryAction"); }
 }
 
@@ -200,33 +233,65 @@ export async function updateTreasuryAction(id: string, raw: TreasuryInput): Prom
   try {
     const user = await requirePermission("treasury.manage");
     const input = treasurySchema.parse(raw);
-    await prisma.$transaction(async (tx) => {
+    if (input.isDefault && !input.isActive) throw new BusinessRuleError("الخزينة الافتراضية يجب أن تكون نشطة.");
+    await withTxRetry(() => prisma.$transaction(async (tx) => {
       const before = await tx.treasury.findUnique({ where: { id } });
       if (!before) throw new BusinessRuleError("الخزينة غير موجودة.");
+      if (!input.isActive && before.isDefault) {
+        const replacement = await tx.treasury.count({ where: { id: { not: id }, isActive: true, isDefault: true } });
+        if (replacement === 0) throw new BusinessRuleError("لا يمكن تعطيل الخزينة الافتراضية قبل تعيين خزينة نشطة أخرى كافتراضية.");
+      }
       if (input.isDefault) await tx.treasury.updateMany({ where: { isDefault: true, id: { not: id } }, data: { isDefault: false } });
-      const updated = await tx.treasury.update({ where: { id }, data: input });
+      const updated = await tx.treasury.update({ where: { id }, data: { ...input, notes: input.notes ?? null } });
       await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "UPDATE", oldData: before, newData: updated, performedBy: user.id });
-    }, TX_OPTIONS);
-    revalidatePath("/treasury");
+    }, TX_OPTIONS));
+    revalidateTreasuryConsumers();
     return ok({ id });
   } catch (error) { return toActionError(error, "updateTreasuryAction"); }
 }
 
-export async function deactivateTreasuryAction(id: string): Promise<ActionResult<{ id: string; hardDeleted: boolean }>> {
+export async function toggleTreasuryStatusAction(id: string): Promise<ActionResult<{ id: string; isActive: boolean }>> {
   try {
     const user = await requirePermission("treasury.manage");
-    const result = await prisma.$transaction(async (tx) => {
-      const treasury = await tx.treasury.findUnique({ where: { id }, include: { _count: { select: { transactions: true, shifts: true, invoices: true, heldSales: true, transfersSent: true, transfersReceived: true } } } });
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const treasury = await tx.treasury.findUnique({ where: { id } });
       if (!treasury) throw new BusinessRuleError("الخزينة غير موجودة.");
-      const hasHistory = Object.values(treasury._count).some((count) => count > 0) || !treasury.currentBalance.eq(0);
-      if (!hasHistory) { await tx.treasury.delete({ where: { id } }); await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "DELETE", oldData: treasury, performedBy: user.id }); return { hardDeleted: true }; }
-      const updated = await tx.treasury.update({ where: { id }, data: { isActive: false, isDefault: false } });
+      const nextIsActive = !treasury.isActive;
+      if (!nextIsActive && treasury.isDefault) {
+        const replacement = await tx.treasury.count({ where: { id: { not: id }, isActive: true, isDefault: true } });
+        if (replacement === 0) throw new BusinessRuleError("لا يمكن تعطيل الخزينة الافتراضية قبل تعيين خزينة نشطة أخرى كافتراضية.");
+      }
+      const updated = await tx.treasury.update({ where: { id }, data: { isActive: nextIsActive, ...(nextIsActive ? {} : { isDefault: false }) } });
       await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "UPDATE", oldData: treasury, newData: updated, performedBy: user.id });
-      return { hardDeleted: false };
-    }, TX_OPTIONS);
-    revalidatePath("/treasury");
-    return ok({ id, ...result });
-  } catch (error) { return toActionError(error, "deactivateTreasuryAction"); }
+      return { id: updated.id, isActive: updated.isActive };
+    }, TX_OPTIONS));
+    revalidateTreasuryConsumers();
+    return ok(result);
+  } catch (error) { return toActionError(error, "toggleTreasuryStatusAction"); }
+}
+
+export async function deleteTreasuryAction(id: string): Promise<ActionResult<{ id: string }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const treasury = await tx.treasury.findUnique({
+        where: { id },
+        include: { _count: { select: { transactions: true, shifts: true, invoices: true, heldSales: true, transfersSent: true, transfersReceived: true } } },
+      });
+      if (!treasury) throw new BusinessRuleError("الخزينة غير موجودة.");
+      if (!treasury.currentBalance.eq(0)) {
+        throw new BusinessRuleError("لا يمكن حذف الخزينة لأن رصيدها الحالي لا يساوي صفراً. يرجى تصفية أو تحويل الرصيد إلى خزينة أخرى أولاً.");
+      }
+      const historyCount = Object.values(treasury._count).reduce((total, count) => total + count, 0);
+      if (historyCount > 0) {
+        throw new BusinessRuleError("لا يمكن حذف خزينة لها سجل حركات مالي أو تشغيلي. استخدم تعطيل الخزينة للحفاظ على التاريخ المحاسبي.");
+      }
+      await tx.treasury.delete({ where: { id } });
+      await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "DELETE", oldData: treasury, performedBy: user.id });
+    }, TX_OPTIONS));
+    revalidateTreasuryConsumers();
+    return ok({ id });
+  } catch (error) { return toActionError(error, "deleteTreasuryAction"); }
 }
 
 export async function getTreasuryReportAction(raw: TreasuryReportInput) {

@@ -13,6 +13,7 @@ import {
   Lock,
   Printer,
   Plus,
+  Power,
   Settings2,
   Trash2,
   Unlock,
@@ -32,9 +33,10 @@ import {
   closeShiftAction,
   createTreasuryAction,
   createTreasuryTransactionAction,
-  deactivateTreasuryAction,
+  deleteTreasuryAction,
   openShiftAction,
   transferBetweenTreasuriesAction,
+  toggleTreasuryStatusAction,
   updateTreasuryAction,
   deleteManualTreasuryTransactionsAction,
 } from "@/server/actions/treasury.actions";
@@ -118,6 +120,9 @@ export function TreasuryClient({
   const [transferOpen, setTransferOpen] = useState(false);
   const [shiftAction, setShiftAction] = useState<{ mode: "open" | "close"; treasury: TreasuryRow } | null>(null);
   const [manageTreasury, setManageTreasury] = useState<TreasuryRow | "NEW" | null>(null);
+  const [deleteTreasury, setDeleteTreasury] = useState<TreasuryRow | null>(null);
+  const [treasuryActionError, setTreasuryActionError] = useState<string | null>(null);
+  const [statusPending, startStatusTransition] = useTransition();
   const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<string[]>([]);
   const [deleteTransactionsOpen, setDeleteTransactionsOpen] = useState(false);
@@ -131,6 +136,14 @@ export function TreasuryClient({
   const filteredTransactions = transactions.filter((transaction) => { const at = new Date(transaction.createdAt).getTime(); return at >= new Date(range.from).getTime() && at <= new Date(range.to).getTime(); });
   const selectableTransactions = filteredTransactions.filter((transaction) => !transaction.invoiceNumber && transaction.type !== "TRANSFER");
   const selectedTransactions = selectableTransactions.filter((transaction) => selectedTransactionIds.includes(transaction.id));
+  const toggleStatus = (treasury: TreasuryRow) => {
+    setTreasuryActionError(null);
+    startStatusTransition(async () => {
+      const result = await toggleTreasuryStatusAction(treasury.id);
+      if (!result.success) { setTreasuryActionError(result.error); return; }
+      router.refresh();
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -160,9 +173,11 @@ export function TreasuryClient({
               <ArrowLeftRight size={16} /> تحويل داخلي
             </Button>
           ) : null}
-          {permissions.canManage ? <Button variant="outline" onClick={() => setManageTreasury("NEW")}><Plus size={16} /> خزينة جديدة</Button> : null}
+          {permissions.canManage ? <Button variant="outline" onClick={() => setManageTreasury("NEW")}><Plus size={16} /> إنشاء خزينة جديدة</Button> : null}
         </div>
       </div>
+
+      {treasuryActionError ? <Alert variant="error">{treasuryActionError}</Alert> : null}
 
       <UniversalDateTimePicker value={range} onChange={setRange} syncToUrl storageKey="bimmererp:treasury-range" />
 
@@ -192,14 +207,20 @@ export function TreasuryClient({
                       </p>
                     </div>
                   </div>
-                  {treasury.openShift ? (
-                    <Badge variant="success" mono>
-                      {treasury.openShift.shiftNumber}
-                    </Badge>
-                  ) : (
-                    <Badge variant="muted">مغلقة</Badge>
-                  )}
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    <Badge variant={treasury.isActive ? "success" : "muted"}>{treasury.isActive ? "نشطة" : "معطلة"}</Badge>
+                    {treasury.isDefault ? <Badge variant="blue">افتراضية</Badge> : null}
+                    {treasury.openShift ? (
+                      <Badge variant="success" mono>
+                        {treasury.openShift.shiftNumber}
+                      </Badge>
+                    ) : (
+                      <Badge variant="muted">مغلقة</Badge>
+                    )}
+                  </div>
                 </div>
+
+                {treasury.notes ? <p className="min-h-4 text-[11px] text-bmw-muted">{treasury.notes}</p> : null}
 
                 <p className="tabular text-2xl font-bold text-white">
                   {formatMoney(treasury.currentBalance)}
@@ -211,9 +232,9 @@ export function TreasuryClient({
                   <span className="tabular text-bmw-mRed">▼ {formatMoney(treasury.todayOut)}</span>
                 </div>
 
-                {permissions.canManage ? <div className="flex gap-2 border-t border-bmw-cardBorder pt-3"><Button size="sm" variant="ghost" className="flex-1" onClick={() => setManageTreasury(treasury)}><Settings2 size={14} /> تعديل</Button>{treasury.isActive ? <Button size="sm" variant="ghost" className="text-bmw-mRed hover:bg-bmw-mRed/10 hover:text-bmw-mRed" onClick={() => setManageTreasury(treasury)} title="تعطيل أو حذف الخزينة"><Trash2 size={14} /></Button> : null}</div> : null}
+                {permissions.canManage ? <div className="grid grid-cols-3 gap-2 border-t border-bmw-cardBorder pt-3"><Button size="sm" variant="ghost" onClick={() => setManageTreasury(treasury)}><Settings2 size={14} /> تعديل</Button><Button size="sm" variant="ghost" onClick={() => toggleStatus(treasury)} disabled={statusPending} title={treasury.isActive ? "تعطيل الخزينة" : "تنشيط الخزينة"}><Power size={14} /> {treasury.isActive ? "تعطيل" : "تنشيط"}</Button><Button size="sm" variant="ghost" className="text-bmw-mRed hover:bg-bmw-mRed/10 hover:text-bmw-mRed" onClick={() => setDeleteTreasury(treasury)} title="حذف الخزينة بعد فحص الرصيد والسجل"><Trash2 size={14} /> حذف</Button></div> : null}
 
-                {permissions.canCloseShift ? (
+                {permissions.canCloseShift && treasury.isActive ? (
                   <div className="border-t border-bmw-cardBorder pt-3">
                     {treasury.openShift ? (
                       <div className="space-y-2">
@@ -450,6 +471,7 @@ export function TreasuryClient({
       ) : null}
 
       {manageTreasury ? <TreasuryManageModal treasury={manageTreasury === "NEW" ? null : manageTreasury} onClose={() => setManageTreasury(null)} /> : null}
+      {deleteTreasury ? <DeleteTreasuryModal treasury={deleteTreasury} onClose={() => setDeleteTreasury(null)} onDone={() => { setDeleteTreasury(null); router.refresh(); }} /> : null}
 
       {shiftAction ? (
         <ShiftModal
@@ -460,6 +482,17 @@ export function TreasuryClient({
       ) : null}
     </div>
   );
+}
+
+function DeleteTreasuryModal({ treasury, onClose, onDone }: { treasury: TreasuryRow; onClose: () => void; onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => {
+    const result = await deleteTreasuryAction(treasury.id);
+    if (!result.success) { setError(result.error); return; }
+    onDone();
+  });
+  return <Modal open onClose={onClose} title={`حذف الخزينة — ${treasury.name}`} description="سيُنفّذ الحذف النهائي فقط للخزينة الفارغة التي لا تمتلك أي سجل مالي أو تشغيلي." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">لا يمكن الحذف إذا كان الرصيد لا يساوي صفراً أو وُجدت حركات أو فواتير أو ورديات أو تحويلات تاريخية. في هذه الحالة عطّل الخزينة بدلاً من حذفها.</Alert><div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-sm"><Row label="الرصيد الحالي" value={`${formatMoney(treasury.currentBalance)} ${CURRENCY}`} bold /><Row label="الحالة" value={treasury.isActive ? "نشطة" : "معطلة"} /></div></div></Modal>;
 }
 
 function DeleteManualTreasuryTransactionsModal({ transactions, onClose, onDone }: { transactions: TransactionRow[]; onClose: () => void; onDone: () => void }) {
@@ -812,38 +845,35 @@ function TreasuryManageModal({ treasury, onClose }: { treasury: TreasuryRow | nu
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [name, setName] = useState(treasury?.name ?? "");
   const [type, setType] = useState(treasury?.type ?? "CASH_DRAWER");
+  const [notes, setNotes] = useState(treasury?.notes ?? "");
   const [isDefault, setIsDefault] = useState(treasury?.isDefault ?? false);
   const [isActive, setIsActive] = useState(treasury?.isActive ?? true);
+  const [openingBalance, setOpeningBalance] = useState("0");
+  const parsedOpeningBalance = openingBalance.trim() === "" ? 0 : Number(openingBalance);
   const submit = () => {
     setError(null);
     startTransition(async () => {
-      const payload = { name, type: type as "CASH_DRAWER" | "BANK_ACCOUNT" | "POS_TERMINAL" | "WALLET" | "INSTAPAY" | "OTHER", isDefault, isActive };
-      const result = treasury ? await updateTreasuryAction(treasury.id, payload) : await createTreasuryAction(payload);
+      const payload = { name, type: type as "CASH_DRAWER" | "BANK_ACCOUNT" | "POS_TERMINAL" | "WALLET" | "INSTAPAY" | "OTHER", notes, isDefault, isActive };
+      const result = treasury
+        ? await updateTreasuryAction(treasury.id, payload)
+        : await createTreasuryAction({ ...payload, openingBalance: parsedOpeningBalance });
       if (!result.success) { setError(result.error); return; }
-      onClose(); router.refresh();
+      onClose();
+      router.refresh();
     });
   };
-  const deactivate = () => {
-    if (!treasury) return;
-    if (!confirmDeactivate) { setConfirmDeactivate(true); return; }
-    setError(null);
-    startTransition(async () => {
-      const result = await deactivateTreasuryAction(treasury.id);
-      if (!result.success) { setError(result.error); return; }
-      onClose(); router.refresh();
-    });
-  };
-  return <Modal open onClose={onClose} title={treasury ? `إدارة خزينة — ${treasury.name}` : "إضافة خزينة جديدة"} description={treasury ? "تُسجّل كل التعديلات في سجل التدقيق، ولا تُحذف الخزائن ذات التاريخ المالي." : "أدخل بيانات الخزينة الجديدة ثم احفظها."} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button onClick={submit} loading={pending} disabled={name.trim().length < 2}><Settings2 size={15} /> حفظ</Button></>}>
+  return <Modal open onClose={onClose} title={treasury ? `إدارة خزينة — ${treasury.name}` : "إنشاء خزينة جديدة"} description={treasury ? "عدّل بيانات التعريف فقط. استخدم أزرار البطاقة المخصصة للتنشيط أو التعطيل والحذف المحمي." : "يمكن إدخال رصيد افتتاحي غير سالب؛ يُرحّل تلقائياً كسند قبض افتتاحي مدقق."} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button onClick={submit} loading={pending} disabled={name.trim().length < 2 || !Number.isFinite(parsedOpeningBalance) || parsedOpeningBalance < 0}><Settings2 size={15} /> حفظ</Button></>}>
     <div className="space-y-3">
       {error ? <Alert variant="error">{error}</Alert> : null}
       <Field label="اسم الخزينة" required><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus /></Field>
       <Field label="النوع" required><Select value={type} onChange={(event) => setType(event.target.value as typeof type)}><option value="CASH_DRAWER">درج نقدية</option><option value="BANK_ACCOUNT">حساب بنكي</option><option value="POS_TERMINAL">نقطة بيع</option><option value="WALLET">محفظة إلكترونية</option><option value="INSTAPAY">إنستاباي</option><option value="OTHER">أخرى</option></Select></Field>
+      {!treasury ? <Field label="الرصيد الافتتاحي" hint="سيُرحّل كسند قبض افتتاحي قابل للتدقيق"><Input type="number" min={0} step="0.01" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} /></Field> : null}
+      <Field label="ملاحظات"><Textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="مثال: خزينة فرع مدينة نصر أو محفظة التحصيل الإلكتروني" /></Field>
       <label className="flex cursor-pointer items-center gap-2 text-sm text-bmw-silver"><input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} className="accent-bmw-blue" />الخزينة الافتراضية</label>
       <label className="flex cursor-pointer items-center gap-2 text-sm text-bmw-silver"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="accent-bmw-blue" />الخزينة نشطة</label>
-      {treasury ? <div className="border-t border-bmw-cardBorder pt-3"><p className="mb-2 text-xs text-bmw-muted">تعطيل الخزينة يمنع استخدامها مستقبلاً ويحافظ على حركاتها التاريخية.</p><Button type="button" variant="danger" className="w-full" onClick={deactivate} disabled={pending}>{confirmDeactivate ? "اضغط مرة أخرى لتأكيد التعطيل / الحذف" : <><Trash2 size={15} /> تعطيل أو حذف الخزينة</>}</Button></div> : null}
+      {treasury ? <Alert variant="warning">تعطيل الخزينة يمنع ظهورها فوراً في نقاط البيع والفواتير والمرتجعات، بينما يحتفظ بسجلها المالي كاملاً.</Alert> : null}
     </div>
   </Modal>;
 }

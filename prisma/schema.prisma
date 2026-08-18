@@ -379,6 +379,7 @@ model Treasury {
   currentBalance Decimal      @default(0.0) @db.Decimal(14, 2)
   isDefault      Boolean      @default(false)
   isActive       Boolean      @default(true)
+  notes          String?
 
   invoices          Invoice[]
   transactions      TreasuryTransaction[]
