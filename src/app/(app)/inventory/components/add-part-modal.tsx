@@ -120,9 +120,12 @@ export function AddPartModal({
         nameAr: form.nameAr,
         nameEn: form.nameEn,
         brandId: form.brandId,
+        brandName: "",
         brandPartNumber: form.brandPartNumber,
         barcode: form.barcode,
         category: form.category,
+        categoryId: "",
+        categoryName: "",
         sidePosition: form.sidePosition,
         binLocationId: binId,
         sellPriceRetail: numeric(form.sellPriceRetail),
@@ -131,6 +134,10 @@ export function AddPartModal({
         minReorderLevel: Math.trunc(numeric(form.minReorderLevel)),
         chassisIds,
         engineIds,
+        chassisCodes: [],
+        engineCodes: [],
+        imageKey: "",
+        imageUrl: "",
       };
 
       const result = isEdit

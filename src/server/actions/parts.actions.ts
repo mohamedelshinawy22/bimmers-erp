@@ -12,6 +12,7 @@ import {
   adjustStockSchema,
   createBinSchema,
   createPartSchema,
+  masterCatalogCreateSchema,
   updatePartSchema,
   type AdjustStockInput,
   type CreateBinInput,
@@ -31,10 +32,31 @@ export async function createPartAction(
     const input = createPartSchema.parse(raw);
 
     const part = await prisma.$transaction(async (tx) => {
-      // Validate every FK up-front so we return a readable Arabic error instead
-      // of a raw constraint violation.
-      const brand = await tx.brand.findUnique({ where: { id: input.brandId }, select: { id: true } });
+      // Resolve a selected or newly typed brand inside the transaction so concurrent submissions cannot duplicate it.
+      let brandId = input.brandId;
+      if (!brandId && input.brandName) {
+        const normalizedName = input.brandName.trim().toLocaleLowerCase("ar-EG");
+        brandId = (await tx.brand.upsert({
+          where: { normalizedName },
+          update: {},
+          create: { name: input.brandName.trim(), normalizedName },
+          select: { id: true },
+        })).id;
+      }
+      if (!brandId) throw new BusinessRuleError("يجب اختيار أو إضافة الماركة.");
+      const brand = await tx.brand.findUnique({ where: { id: brandId }, select: { id: true } });
       if (!brand) throw new BusinessRuleError("الماركة المحددة غير موجودة.");
+
+      let categoryId = input.categoryId;
+      if (!categoryId && input.categoryName) {
+        const normalizedName = input.categoryName.trim().toLocaleLowerCase("ar-EG");
+        categoryId = (await tx.category.upsert({
+          where: { normalizedName },
+          update: {},
+          create: { name: input.categoryName.trim(), normalizedName },
+          select: { id: true },
+        })).id;
+      }
 
       if (input.binLocationId) {
         const bin = await tx.warehouseBin.findUnique({
@@ -60,10 +82,13 @@ export async function createPartAction(
           partNumberFormatted: formatOemNumber(input.oemNumber),
           nameAr: input.nameAr,
           nameEn: input.nameEn || null,
-          brandId: input.brandId,
+          brandId,
           brandPartNumber: input.brandPartNumber || null,
           barcode: input.barcode || null,
-          category: input.category,
+          category: input.categoryName || input.category,
+          categoryId,
+          imageKey: input.imageKey || null,
+          imageUrl: input.imageUrl || null,
           sidePosition: input.sidePosition || null,
           binLocationId: input.binLocationId,
           buyPriceLast: buyPrice,
@@ -146,15 +171,30 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
         }
       }
 
+      let brandId = input.brandId;
+      if (!brandId && input.brandName) {
+        const normalizedName = input.brandName.trim().toLocaleLowerCase("ar-EG");
+        brandId = (await tx.brand.upsert({ where: { normalizedName }, update: {}, create: { name: input.brandName.trim(), normalizedName }, select: { id: true } })).id;
+      }
+      if (!brandId) throw new BusinessRuleError("يجب اختيار أو إضافة الماركة.");
+      let categoryId = input.categoryId;
+      if (!categoryId && input.categoryName) {
+        const normalizedName = input.categoryName.trim().toLocaleLowerCase("ar-EG");
+        categoryId = (await tx.category.upsert({ where: { normalizedName }, update: {}, create: { name: input.categoryName.trim(), normalizedName }, select: { id: true } })).id;
+      }
+
       const updated = await tx.partItem.update({
         where: { id: input.id },
         data: {
           nameAr: input.nameAr,
           nameEn: input.nameEn || null,
-          brandId: input.brandId,
+          brandId,
           brandPartNumber: input.brandPartNumber || null,
           barcode: input.barcode || null,
-          category: input.category,
+          category: input.categoryName || input.category,
+          categoryId,
+          imageKey: input.imageKey || null,
+          imageUrl: input.imageUrl || null,
           sidePosition: input.sidePosition || null,
           binLocationId: input.binLocationId ?? null,
           sellPriceRetail: money(input.sellPriceRetail),
@@ -213,6 +253,40 @@ export async function adjustStockAction(
   } catch (error) {
     return toActionError(error, "adjustStockAction");
   }
+}
+
+export async function getMasterCatalogDataAction() {
+  try {
+    await requirePermission("part.read");
+    const [brands, categories, chassis, engines] = await Promise.all([
+      prisma.brand.findMany({ select: { id: true, name: true, isOem: true }, orderBy: { name: "asc" } }),
+      prisma.category.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.bmwChassis.findMany({ select: { id: true, code: true, series: true }, orderBy: { code: "asc" } }),
+      prisma.bmwEngine.findMany({ select: { id: true, code: true, displacement: true, fuelType: true }, orderBy: { code: "asc" } }),
+    ]);
+    return ok({ brands, categories, chassis, engines });
+  } catch (error) { return toActionError(error, "getMasterCatalogDataAction"); }
+}
+
+export async function createMasterCatalogEntryAction(kind: "brand" | "category" | "chassis" | "engine", raw: unknown) {
+  try {
+    const user = await requirePermission("part.write");
+    const input = masterCatalogCreateSchema.parse(raw);
+    const name = input.name.trim();
+    const normalizedName = name.toLocaleLowerCase("ar-EG");
+    const result = await prisma.$transaction(async (tx) => {
+      if (kind === "brand") return tx.brand.upsert({ where: { normalizedName }, update: {}, create: { name, normalizedName, isOem: input.isOem ?? false } });
+      if (kind === "category") return tx.category.upsert({ where: { normalizedName }, update: {}, create: { name, normalizedName } });
+      if (kind === "chassis") {
+        if (!input.series || !input.productionStartYear) throw new BusinessRuleError("يلزم إدخال الفئة وسنة بدء الإنتاج للشاسيه الجديد.");
+        return tx.bmwChassis.upsert({ where: { code: name.toUpperCase() }, update: {}, create: { code: name.toUpperCase(), series: input.series, productionStartYear: input.productionStartYear } });
+      }
+      return tx.bmwEngine.upsert({ where: { code: name.toUpperCase() }, update: {}, create: { code: name.toUpperCase(), displacement: input.displacement || null, fuelType: input.fuelType || "PETROL" } });
+    });
+    await writeAudit(prisma, { tableName: `Master:${kind}`, recordId: result.id, action: "INSERT", newData: result, performedBy: user.id });
+    revalidatePath("/inventory");
+    return ok({ id: result.id, label: "name" in result ? result.name : result.code });
+  } catch (error) { return toActionError(error, "createMasterCatalogEntryAction"); }
 }
 
 export async function createBinAction(raw: CreateBinInput): Promise<ActionResult<{ id: string; fullCode: string }>> {

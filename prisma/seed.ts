@@ -210,7 +210,12 @@ async function main() {
 
   // ── 4. Premium / OEM brands ────────────────────────────────────────────────
   for (const b of BRANDS) {
-    await prisma.brand.upsert({ where: { name: b.name }, update: b, create: b });
+    const normalizedName = b.name.trim().toLocaleLowerCase("ar-EG");
+    await prisma.brand.upsert({
+      where: { name: b.name },
+      update: { ...b, normalizedName },
+      create: { ...b, normalizedName },
+    });
   }
   console.log(`  ✓ ${BRANDS.length} brands`);
 

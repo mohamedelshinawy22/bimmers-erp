@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 
 export const HOTKEYS = [
   { key: "F2", href: "/pos", label: "نقطة البيع" },
-  { key: "F3", href: "/inventory", label: "كتالوج البضاعة" },
-  { key: "F4", href: "/accounts", label: "الحسابات والورش" },
+  { key: "F3", href: "/accounts", label: "الحسابات والورش" },
+  { key: "F4", href: "/inventory", label: "كتالوج البضاعة" },
   { key: "F5", href: "/treasury", label: "الخزينة والسيولة" },
 ] as const;
 
@@ -23,6 +23,14 @@ export function HotkeysListener() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "F6" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const target = event.target as HTMLElement | null;
+        if (!target?.closest('[role="dialog"]')) {
+          event.preventDefault();
+          window.dispatchEvent(new CustomEvent("bimmererp:quick-voucher"));
+        }
+        return;
+      }
       const match = HOTKEYS.find((h) => h.key === event.key);
       if (!match) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;

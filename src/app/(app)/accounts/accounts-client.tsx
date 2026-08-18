@@ -360,6 +360,8 @@ function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void
         creditLimit: Number(form.creditLimit) || 0,
         defaultPriceTier: form.defaultPriceTier,
         openingBalance: Number(form.openingBalance) || 0,
+        category: "",
+        status: "ACTIVE",
       });
       if (!result.success) {
         setError(result.error);
@@ -613,6 +615,8 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
         taxNumber: form.taxNumber,
         creditLimit: newLimit,
         defaultPriceTier: form.defaultPriceTier,
+        category: "",
+        status: form.isActive ? "ACTIVE" : "INACTIVE",
         isActive: form.isActive,
       });
       if (!res.success) {

@@ -25,6 +25,7 @@ import type { PosPartRow } from "@/server/services/parts.service";
 import type { AccountVehicle, PosAccount } from "@/server/services/accounts.service";
 import { getAccountVehiclesAction, searchPartsForPosAction } from "@/server/actions/search.actions";
 import { createSaleInvoiceAction, type InvoiceResult } from "@/server/actions/invoice.actions";
+import { holdSaleAction } from "@/server/actions/held-sales.actions";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -263,6 +264,25 @@ export function PosTerminal({
     !creditBlocked &&
     !(appliedPaid > 0 && !treasuryId);
 
+  const holdCurrentCart = useCallback(() => {
+    if (!cart.length || pending) return;
+    startTransition(async () => {
+      const result = await holdSaleAction({
+        accountId: accountId || undefined,
+        treasuryId: treasuryId || undefined,
+        paymentMethod,
+        discountAmount: discount,
+        taxAmount,
+        paidAmount: appliedPaid,
+        notes,
+        items: cart.map((line) => ({ partId: line.part.id, quantity: line.quantity, unitPrice: line.unitPrice, lineDiscount: line.lineDiscount })),
+      });
+      if (!result.success) { setError(result.error); return; }
+      resetInvoice();
+      setError(`تم تعليق الفاتورة برقم ${result.data.holdNumber}.`);
+    });
+  }, [accountId, appliedPaid, cart, discount, notes, paymentMethod, pending, resetInvoice, startTransition, taxAmount, treasuryId]);
+
   /* ── Hotkeys local to the POS ───────────────────────────────────────────── */
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -274,6 +294,10 @@ export function PosTerminal({
         event.preventDefault();
         searchRef.current?.focus();
       }
+      if (event.key === "F12" && !checkoutOpen) {
+        event.preventDefault();
+        holdCurrentCart();
+      }
       if (event.key === "Escape" && !checkoutOpen) {
         setQuery("");
         setResults([]);
@@ -281,7 +305,7 @@ export function PosTerminal({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canCheckout, checkoutOpen]);
+  }, [canCheckout, checkoutOpen, holdCurrentCart]);
 
   /* ── Submit ─────────────────────────────────────────────────────────────── */
   const submit = () => {

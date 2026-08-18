@@ -11,9 +11,11 @@ import { formatMoney, money } from "@/lib/utils";
 import {
   createAccountSchema,
   createVehicleSchema,
+  quickPosAccountSchema,
   updateAccountSchema,
   type CreateAccountInput,
   type CreateVehicleInput,
+  type QuickPosAccountInput,
   type UpdateAccountInput,
 } from "@/lib/validations/accounts";
 import { nextAccountNumber } from "@/server/services/numbering.service";
@@ -24,11 +26,15 @@ const ACCOUNT_PREFIX: Record<CreateAccountInput["type"], string> = {
   WORKSHOP_BMW: "WRK",
   SUPPLIER: "SUP",
   EXPENSE: "EXP",
+  EMPLOYEE: "EMP",
+  ADVANCE: "ADV",
+  PARTNER: "PRT",
+  OTHER: "OTH",
 };
 
 export async function createAccountAction(
   raw: CreateAccountInput,
-): Promise<ActionResult<{ id: string; accountNumber: string }>> {
+): Promise<ActionResult<{ id: string; accountNumber: string; name: string; type: CreateAccountInput["type"]; phone: string | null; creditLimit: number; currentBalance: number; defaultPriceTier: string; status: string }>> {
   try {
     const user = await requirePermission("account.write");
     const input = createAccountSchema.parse(raw);
@@ -47,6 +53,9 @@ export async function createAccountAction(
             creditLimit: money(input.creditLimit),
             currentBalance: money(input.openingBalance),
             defaultPriceTier: input.defaultPriceTier,
+            category: input.category || null,
+            status: input.status,
+            isActive: input.status !== "INACTIVE",
           },
         });
         await writeAudit(tx, {
@@ -63,7 +72,17 @@ export async function createAccountAction(
 
     revalidatePath("/accounts");
     revalidatePath("/pos");
-    return ok({ id: account.id, accountNumber: account.accountNumber });
+    return ok({
+      id: account.id,
+      accountNumber: account.accountNumber,
+      name: account.name,
+      type: account.type,
+      phone: account.phone,
+      creditLimit: Number(account.creditLimit),
+      currentBalance: Number(account.currentBalance),
+      defaultPriceTier: account.defaultPriceTier,
+      status: account.status,
+    });
   } catch (error) {
     return toActionError(error, "createAccountAction");
   }
@@ -109,7 +128,9 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
           taxNumber: input.taxNumber || null,
           creditLimit: newLimit,
           defaultPriceTier: input.defaultPriceTier,
-          isActive: input.isActive,
+          category: input.category || null,
+          status: input.status,
+          isActive: input.isActive && input.status !== "INACTIVE",
         },
       });
 
@@ -127,6 +148,18 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
     return ok({ id: input.id });
   } catch (error) {
     return toActionError(error, "updateAccountAction");
+  }
+}
+
+export async function createQuickPosAccountAction(
+  raw: QuickPosAccountInput,
+): Promise<ActionResult<{ id: string; accountNumber: string; name: string; type: CreateAccountInput["type"]; phone: string | null; creditLimit: number; currentBalance: number; defaultPriceTier: string; status: string }>> {
+  try {
+    await requirePermission("account.quickCreate");
+    const input = quickPosAccountSchema.parse(raw);
+    return createAccountAction(input);
+  } catch (error) {
+    return toActionError(error, "createQuickPosAccountAction");
   }
 }
 

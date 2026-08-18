@@ -1,38 +1,120 @@
 import { z } from "zod";
-import { arabicName, nonNegativeMoney, optionalText, optionalUuid, phone, uuid, vin } from "./common";
+import {
+  arabicName,
+  nonNegativeMoney,
+  optionalText,
+  optionalUuid,
+  phone,
+  positiveMoney,
+  uuid,
+  vin,
+} from "./common";
+
+export const accountTypeSchema = z.enum([
+  "CUSTOMER",
+  "WORKSHOP_BMW",
+  "SUPPLIER",
+  "EXPENSE",
+  "EMPLOYEE",
+  "ADVANCE",
+  "PARTNER",
+  "OTHER",
+]);
+
+export const accountStatusSchema = z.enum(["ACTIVE", "INACTIVE", "UNDER_REVIEW"]);
+
+const openingBalance = z.number().min(-99_999_999.99).max(99_999_999.99).default(0);
 
 export const createAccountSchema = z.object({
   name: arabicName,
-  type: z.enum(["CUSTOMER", "WORKSHOP_BMW", "SUPPLIER", "EXPENSE"]),
+  type: accountTypeSchema,
   phone,
   email: z.string().trim().email("بريد إلكتروني غير صالح").optional().or(z.literal("")),
   address: optionalText(300),
   taxNumber: optionalText(50),
+  category: optionalText(80),
   creditLimit: nonNegativeMoney.default(0),
   defaultPriceTier: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL"),
-  openingBalance: z
-    .number()
-    .min(-99_999_999.99)
-    .max(99_999_999.99)
-    .default(0),
+  openingBalance,
+  status: accountStatusSchema.default("ACTIVE"),
 });
 
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 
+export const quickPosAccountSchema = createAccountSchema.extend({
+  phone: z.string().trim().regex(/^[0-9+\-\s()]{7,20}$/, "رقم تليفون غير صالح"),
+  notes: optionalText(500),
+});
+
+export type QuickPosAccountInput = z.infer<typeof quickPosAccountSchema>;
+
 export const updateAccountSchema = z.object({
   id: uuid,
   name: arabicName,
-  type: z.enum(["CUSTOMER", "WORKSHOP_BMW", "SUPPLIER", "EXPENSE"]),
+  type: accountTypeSchema,
   phone,
   email: z.string().trim().email("بريد إلكتروني غير صالح").optional().or(z.literal("")),
   address: optionalText(300),
   taxNumber: optionalText(50),
+  category: optionalText(80),
   creditLimit: nonNegativeMoney,
   defaultPriceTier: z.enum(["RETAIL", "WHOLESALE"]),
-  isActive: z.boolean(),
+  status: accountStatusSchema.default("ACTIVE"),
+  isActive: z.boolean().default(true),
 });
 
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
+
+export const accountListFiltersSchema = z.object({
+  query: z.string().trim().max(120).default(""),
+  type: accountTypeSchema.or(z.literal("ALL")).default("ALL"),
+  category: z.string().trim().max(80).optional(),
+  hideZeroBalances: z.boolean().default(false),
+  underReviewOnly: z.boolean().default(false),
+  inactiveOnly: z.boolean().default(false),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(100).default(25),
+});
+
+export type AccountListFilters = z.infer<typeof accountListFiltersSchema>;
+
+export const quickVoucherSchema = z.object({
+  accountId: uuid,
+  type: z.enum(["RECEIPT", "PAYMENT"]),
+  amount: positiveMoney,
+  treasuryId: uuid,
+  notes: optionalText(500),
+});
+
+export type QuickVoucherInput = z.infer<typeof quickVoucherSchema>;
+
+export const accountStatementSchema = z.object({
+  accountId: uuid,
+  fromDate: z.coerce.date().optional(),
+  toDate: z.coerce.date().optional(),
+});
+
+export type AccountStatementInput = z.infer<typeof accountStatementSchema>;
+
+export const historicalBalancesSchema = z.object({
+  targetDate: z.coerce.date(),
+  type: accountTypeSchema.or(z.literal("ALL")).default("ALL"),
+});
+
+export type HistoricalBalancesInput = z.infer<typeof historicalBalancesSchema>;
+
+export const createCheckSchema = z.object({
+  accountId: uuid,
+  direction: z.enum(["RECEIVABLE", "PAYABLE"]),
+  checkNumber: z.string().trim().min(2).max(100),
+  bankName: optionalText(120),
+  amount: positiveMoney,
+  issueDate: z.coerce.date().optional(),
+  dueDate: z.coerce.date(),
+  notes: optionalText(500),
+});
+
+export type CreateCheckInput = z.infer<typeof createCheckSchema>;
 
 export const createVehicleSchema = z.object({
   accountId: uuid,

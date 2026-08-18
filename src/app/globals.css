@@ -96,3 +96,47 @@
 .print-only {
   display: none;
 }
+
+/* Modular invoice print engine. */
+.invoice-print-root { position: fixed; left: -200vw; top: 0; width: 210mm; background: #fff; color: #111; }
+.invoice-print-page { box-sizing: border-box; font-family: Arial, "Noto Naskh Arabic", sans-serif; background: #fff; color: #111; }
+.invoice-a4 { width: 100%; min-height: 277mm; }
+.invoice-header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; }
+.invoice-header h1,.invoice-header h2 { margin: 0 0 4px; font-size: 20px; }
+.invoice-header p,.invoice-meta-grid p,.invoice-notes { margin: 3px 0; font-size: 12px; }
+.invoice-title { text-align: left; direction: ltr; }
+.invoice-meta-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 12px 0; }
+.invoice-meta-grid>div { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; }
+.invoice-lines { width: 100%; border-collapse: collapse; font-size: 11px; }
+.invoice-lines th,.invoice-lines td { border: 1px solid #9ca3af; padding: 5px; text-align: right; vertical-align: top; }
+.invoice-lines th { background: #e5e7eb; font-weight: 700; }
+.invoice-lines tbody tr:nth-child(even) { background: #f8fafc; }
+.invoice-lines small,.thermal-lines small { display: block; color: #4b5563; direction: ltr; }
+.invoice-bottom { display: flex; justify-content: space-between; gap: 20px; margin-top: 12px; break-inside: avoid; }
+.invoice-totals { min-width: 260px; }
+.invoice-totals p,.thermal-totals p { display: flex; justify-content: space-between; gap: 20px; margin: 4px 0; }
+.grand-total { border-top: 2px solid #111; padding-top: 5px; font-size: 15px; }
+.invoice-qr { text-align: center; }
+.invoice-void-watermark { position: absolute; inset: 35% 0 auto; text-align: center; font-size: 64px; font-weight: 900; color: #dc262655; transform: rotate(-18deg); pointer-events: none; }
+.invoice-print-page footer { border-top: 1px solid #d1d5db; margin-top: 12px; padding-top: 8px; text-align: center; font-size: 11px; }
+.invoice-thermal { width: 80mm; padding: 3mm; font-size: 10px; }
+.thermal-center { text-align: center; }
+.thermal-center h1 { font-size: 14px; margin: 0; }
+.thermal-center p,.thermal-party p { margin: 3px 0; }
+.thermal-lines { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.thermal-lines th,.thermal-lines td { border-bottom: 1px dashed #6b7280; padding: 3px 1px; vertical-align: top; }
+.thermal-lines td:not(:first-child),.thermal-lines th:not(:first-child) { text-align: center; direction: ltr; }
+
+@media print {
+  @page { size: A4 portrait; margin: 10mm 12mm; }
+  body * { visibility: hidden !important; }
+  .invoice-print-root,.invoice-print-root * { visibility: visible !important; }
+  .invoice-print-root { position: static !important; width: auto !important; left: auto !important; }
+  .invoice-print-page { break-inside: avoid; }
+  .invoice-lines thead { display: table-header-group; }
+  .invoice-lines tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-format-thermal_80 { width: 80mm !important; }
+  .print-format-thermal_80 .invoice-thermal { width: 80mm; padding: 2mm; }
+  .invoice-print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+@media print and (max-width: 90mm) { @page { size: 80mm auto; margin: 2mm; } }

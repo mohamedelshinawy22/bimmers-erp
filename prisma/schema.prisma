@@ -37,6 +37,46 @@ enum AccountType {
   WORKSHOP_BMW
   SUPPLIER
   EXPENSE
+  EMPLOYEE
+  ADVANCE
+  PARTNER
+  OTHER
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  UNDER_REVIEW
+}
+
+enum HeldSaleStatus {
+  HELD
+  RESUMED
+  CANCELLED
+  CONVERTED
+}
+
+enum CheckDirection {
+  RECEIVABLE
+  PAYABLE
+}
+
+enum CheckStatus {
+  PENDING
+  DEPOSITED
+  CLEARED
+  BOUNCED
+  CANCELLED
+  VOIDED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+  VOIDED
 }
 
 /// SALE and PURCHASE are the only types the application creates today.
@@ -101,15 +141,26 @@ model User {
   invoices   Invoice[]
   stockMoves StockMovement[]
   shifts     TreasuryShift[]
+  heldSales  HeldSale[]
 }
 
 model Brand {
-  id            String     @id @default(uuid())
-  name          String     @unique
-  originCountry String?
-  isOem         Boolean    @default(false)
-  parts         PartItem[]
-  createdAt     DateTime   @default(now())
+  id             String     @id @default(uuid())
+  name           String     @unique
+  normalizedName String     @unique
+  originCountry  String?
+  isOem          Boolean    @default(false)
+  parts          PartItem[]
+  createdAt      DateTime   @default(now())
+}
+
+model Category {
+  id             String     @id @default(uuid())
+  name           String     @unique
+  normalizedName String     @unique
+  parts          PartItem[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 }
 
 model BmwChassis {
@@ -150,16 +201,20 @@ model WarehouseBin {
 }
 
 model PartItem {
-  id                  String  @id @default(uuid())
-  oemNumber           String  @unique // 11 digits BMW (e.g. 34116859066)
+  id                  String    @id @default(uuid())
+  oemNumber           String    @unique // 11 digits BMW (e.g. 34116859066)
   partNumberFormatted String?
   nameAr              String
   nameEn              String?
   brandId             String
-  brand               Brand   @relation(fields: [brandId], references: [id])
+  brand               Brand     @relation(fields: [brandId], references: [id])
   brandPartNumber     String? // Brembo P06088
-  barcode             String? @unique
-  category            String // الفرامل، التعليق، المحرك، الكهرباء
+  barcode             String?   @unique
+  category            String // Legacy display category; retained through master-data migration.
+  categoryId          String?
+  categoryRef         Category? @relation(fields: [categoryId], references: [id])
+  imageKey            String?
+  imageUrl            String?
   sidePosition        String? // أمامي يمين، أمامي شمال، خلفي
 
   binLocationId String?
@@ -183,6 +238,7 @@ model PartItem {
   compatibleEngines PartEngine[]
   invoiceItems      InvoiceItem[]
   stockMovements    StockMovement[]
+  heldSaleItems     HeldSaleItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -191,6 +247,7 @@ model PartItem {
   @@index([nameAr], map: "PartItem_nameAr_btree_idx")
   @@index([category])
   @@index([brandId])
+  @@index([categoryId])
   @@index([binLocationId])
   @@index([isActive, stockQuantity])
   // Matches the catalog list's ORDER BY (isActive desc, nameAr asc).
@@ -222,22 +279,31 @@ model PartEngine {
 }
 
 model Account {
-  id               String      @id @default(uuid())
-  accountNumber    String      @unique
-  name             String
-  type             AccountType @default(CUSTOMER)
-  phone            String?
-  email            String?
-  address          String?
-  taxNumber        String?
-  creditLimit      Decimal     @default(0.0) @db.Decimal(12, 2)
-  currentBalance   Decimal     @default(0.0) @db.Decimal(12, 2) // موجب (له)، سالب (عليه)
-  defaultPriceTier String      @default("RETAIL")
-  isActive         Boolean     @default(true)
+  id                String        @id @default(uuid())
+  accountNumber     String        @unique
+  name              String
+  type              AccountType   @default(CUSTOMER)
+  phone             String?
+  email             String?
+  address           String?
+  taxNumber         String?
+  creditLimit       Decimal       @default(0.0) @db.Decimal(12, 2)
+  currentBalance    Decimal       @default(0.0) @db.Decimal(12, 2) // موجب (له)، سالب (عليه)
+  defaultPriceTier  String        @default("RETAIL")
+  isActive          Boolean       @default(true)
+  status            AccountStatus @default(ACTIVE)
+  category          String?
+  lastSaleDate      DateTime?
+  lastSaleAmount    Decimal?      @db.Decimal(12, 2)
+  lastPaymentDate   DateTime?
+  lastPaymentAmount Decimal?      @db.Decimal(12, 2)
 
-  vehicles     CustomerVehicle[]
-  invoices     Invoice[]
-  transactions TreasuryTransaction[]
+  vehicles         CustomerVehicle[]
+  invoices         Invoice[]
+  transactions     TreasuryTransaction[]
+  heldSales        HeldSale[]
+  checks           AccountCheck[]
+  installmentPlans InstallmentPlan[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -275,6 +341,7 @@ model Treasury {
   invoices     Invoice[]
   transactions TreasuryTransaction[]
   shifts       TreasuryShift[]
+  heldSales    HeldSale[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -333,11 +400,15 @@ model Invoice {
   paymentMethod PaymentMethod @default(CASH)
   notes         String?
 
-  isVoided   Boolean   @default(false)
-  voidedAt   DateTime?
-  voidReason String?
+  isVoided             Boolean   @default(false)
+  voidedAt             DateTime?
+  voidReason           String?
+  accountBalanceBefore Decimal?  @db.Decimal(12, 2)
+  accountBalanceAfter  Decimal?  @db.Decimal(12, 2)
+  verificationToken    String?   @unique
 
   items        InvoiceItem[]
+  heldSale     HeldSale?
   transactions TreasuryTransaction[]
   stockMoves   StockMovement[]
 
@@ -360,6 +431,7 @@ model InvoiceItem {
   unitPrice           Decimal  @db.Decimal(12, 2)
   unitCostSnapshot    Decimal  @db.Decimal(12, 2)
   totalPrice          Decimal  @db.Decimal(12, 2)
+  lineDiscount        Decimal  @default(0.0) @db.Decimal(12, 2)
   binLocationSnapshot String?
 
   @@index([invoiceId])
@@ -373,6 +445,98 @@ model InvoiceItem {
 /// concurrent cashiers commit within the same millisecond, so timestamps tie and
 /// the replay becomes ambiguous. Because a writer holds the part's FOR UPDATE
 /// lock until commit, per-part `seq` order is exactly per-part commit order.
+model HeldSale {
+  id             String         @id @default(uuid())
+  holdNumber     String         @unique
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  accountId      String?
+  account        Account?       @relation(fields: [accountId], references: [id])
+  treasuryId     String?
+  treasury       Treasury?      @relation(fields: [treasuryId], references: [id])
+  invoiceId      String?        @unique
+  invoice        Invoice?       @relation(fields: [invoiceId], references: [id])
+  paymentMethod  PaymentMethod  @default(CASH)
+  subtotal       Decimal        @default(0.0) @db.Decimal(12, 2)
+  discountAmount Decimal        @default(0.0) @db.Decimal(12, 2)
+  taxAmount      Decimal        @default(0.0) @db.Decimal(12, 2)
+  paidAmount     Decimal        @default(0.0) @db.Decimal(12, 2)
+  notes          String?
+  status         HeldSaleStatus @default(HELD)
+  items          HeldSaleItem[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([userId, status])
+  @@index([accountId, status])
+}
+
+model HeldSaleItem {
+  id           String   @id @default(uuid())
+  heldSaleId   String
+  heldSale     HeldSale @relation(fields: [heldSaleId], references: [id], onDelete: Cascade)
+  partId       String
+  part         PartItem @relation(fields: [partId], references: [id])
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  lineDiscount Decimal  @default(0.0) @db.Decimal(12, 2)
+
+  @@index([heldSaleId])
+  @@index([partId])
+}
+
+model AccountCheck {
+  id             String         @id @default(uuid())
+  accountId      String
+  account        Account        @relation(fields: [accountId], references: [id])
+  direction      CheckDirection
+  checkNumber    String
+  bankName       String?
+  amount         Decimal        @db.Decimal(12, 2)
+  issueDate      DateTime?
+  dueDate        DateTime
+  status         CheckStatus    @default(PENDING)
+  settlementTxId String?        @unique
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([accountId, direction, checkNumber])
+  @@index([accountId, dueDate])
+  @@index([status, dueDate])
+}
+
+model InstallmentPlan {
+  id           String            @id @default(uuid())
+  accountId    String
+  account      Account           @relation(fields: [accountId], references: [id])
+  totalAmount  Decimal           @db.Decimal(12, 2)
+  startDate    DateTime
+  notes        String?
+  status       InstallmentStatus @default(PENDING)
+  installments Installment[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([accountId, status])
+}
+
+model Installment {
+  id             String            @id @default(uuid())
+  planId         String
+  plan           InstallmentPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  dueDate        DateTime
+  amount         Decimal           @db.Decimal(12, 2)
+  paidAmount     Decimal           @default(0.0) @db.Decimal(12, 2)
+  status         InstallmentStatus @default(PENDING)
+  settlementTxId String?           @unique
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([planId, dueDate])
+  @@index([status, dueDate])
+}
+
 model StockMovement {
   id            String          @id @default(uuid())
   seq           BigInt          @unique @default(autoincrement())

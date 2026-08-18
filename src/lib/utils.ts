@@ -117,6 +117,10 @@ export const ARABIC_LABELS = {
     WORKSHOP_BMW: "ورشة BMW",
     SUPPLIER: "مورد",
     EXPENSE: "مصروف",
+    EMPLOYEE: "موظف",
+    ADVANCE: "سلفة",
+    PARTNER: "شريك",
+    OTHER: "جهة أخرى",
   },
   invoiceType: {
     SALE: "فاتورة بيع",
