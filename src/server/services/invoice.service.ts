@@ -754,6 +754,11 @@ export async function createInvoiceReturn(input: CreateInvoiceReturnInput, actor
     } });
     await tx.invoiceItem.createMany({ data: lines.map((line) => ({ invoiceId: returned.id, ...line })) });
 
+    const returnedIncludingCurrent = new Map(priorReturned);
+    for (const line of lines) returnedIncludingCurrent.set(line.partId, (returnedIncludingCurrent.get(line.partId) ?? 0) + line.quantity);
+    const isFullyReturned = [...sourceByPart.entries()].every(([partId, quantity]) => (returnedIncludingCurrent.get(partId) ?? 0) >= quantity);
+    await tx.invoice.update({ where: { id: source.id }, data: { returnStatus: isFullyReturned ? "FULLY_RETURNED" : "PARTIALLY_RETURNED" } });
+
     const runningStock = new Map<string, number>();
     const runningAvg = new Map<string, Prisma.Decimal>();
     for (const line of lines) {
@@ -913,6 +918,26 @@ export async function voidInvoice(input: VoidInvoiceInput, actor: InvoiceActor):
           remainingAmount: ZERO,
         },
       });
+
+      if ((invoice.type === "SALE_RETURN" || invoice.type === "PURCHASE_RETURN") && invoice.returnOfId) {
+        const source = await tx.invoice.findUnique({
+          where: { id: invoice.returnOfId },
+          select: {
+            id: true,
+            items: { select: { partId: true, quantity: true } },
+            returns: { where: { isVoided: false }, select: { items: { select: { partId: true, quantity: true } } } },
+          },
+        });
+        if (source) {
+          const sourceByPart = new Map<string, number>();
+          const returnedByPart = new Map<string, number>();
+          for (const item of source.items) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
+          for (const returned of source.returns) for (const item of returned.items) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
+          const hasAnyReturn = [...returnedByPart.values()].some((quantity) => quantity > 0);
+          const isFullyReturned = sourceByPart.size > 0 && [...sourceByPart.entries()].every(([partId, quantity]) => (returnedByPart.get(partId) ?? 0) >= quantity);
+          await tx.invoice.update({ where: { id: source.id }, data: { returnStatus: isFullyReturned ? "FULLY_RETURNED" : hasAnyReturn ? "PARTIALLY_RETURNED" : "NONE" } });
+        }
+      }
 
       await writeAudit(tx, {
         tableName: "Invoice",

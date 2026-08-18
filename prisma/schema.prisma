@@ -97,6 +97,12 @@ enum PaymentStatus {
   CREDIT
 }
 
+enum ReturnStatus {
+  NONE
+  PARTIALLY_RETURNED
+  FULLY_RETURNED
+}
+
 enum PaymentMethod {
   CASH
   VISA
@@ -433,6 +439,7 @@ model Invoice {
 
   paymentStatus PaymentStatus @default(PAID)
   paymentMethod PaymentMethod @default(CASH)
+  returnStatus  ReturnStatus  @default(NONE)
   notes         String?
 
   isVoided             Boolean   @default(false)
