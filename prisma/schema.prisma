@@ -269,6 +269,9 @@ model PartItem {
   stockReserved   Int     @default(0)
   minReorderLevel Int     @default(2)
   isActive        Boolean @default(true)
+  /// Archived when all document references are voided; retained to preserve immutable invoice history.
+  isDeleted       Boolean @default(false)
+  deletedAt       DateTime?
 
   compatibleChassis PartChassis[]
   compatibleEngines PartEngine[]
@@ -286,8 +289,10 @@ model PartItem {
   @@index([categoryId])
   @@index([binLocationId])
   @@index([isActive, stockQuantity])
-  // Matches the catalog list's ORDER BY (isActive desc, nameAr asc).
+  @@index([isDeleted, isActive, stockQuantity])
+  // Matches the catalog list's ORDER BY (isActive desc, nameAr).
   @@index([isActive(sort: Desc), nameAr])
+  @@index([isDeleted, isActive(sort: Desc), nameAr])
   // Sub-millisecond fuzzy / infix search (pg_trgm)
   @@index([oemNumber(ops: raw("gin_trgm_ops"))], map: "PartItem_oemNumber_trgm_idx", type: Gin)
   @@index([nameAr(ops: raw("gin_trgm_ops"))], map: "PartItem_nameAr_trgm_idx", type: Gin)

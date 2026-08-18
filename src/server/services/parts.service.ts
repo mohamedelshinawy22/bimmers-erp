@@ -85,7 +85,7 @@ export async function searchParts(
   raw: Partial<SearchPartsInput>,
 ): Promise<{ rows: PartRow[]; total: number; page: number; pageSize: number }> {
   const input = searchPartsSchema.parse(raw);
-  const where: Prisma.PartItemWhereInput = {};
+  const where: Prisma.PartItemWhereInput = { isDeleted: false };
   const and: Prisma.PartItemWhereInput[] = [];
 
   if (input.query) {
@@ -165,6 +165,7 @@ export async function quickSearchParts(query: string, limit = 12): Promise<PosPa
   const rows = await prisma.partItem.findMany({
     where: {
       isActive: true,
+      isDeleted: false,
       OR: [
         { barcode: { equals: numericNormalized } },
         { oemNumber: { contains: numericNormalized, mode: "insensitive" } },
@@ -223,7 +224,7 @@ export async function getPosPartsByIds(ids: string[]): Promise<PosPartRow[]> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
   const rows = await prisma.partItem.findMany({
-    where: { id: { in: unique } },
+    where: { id: { in: unique }, isDeleted: false },
     select: { id: true, oemNumber: true, nameAr: true, nameEn: true, brandPartNumber: true, category: true, sidePosition: true, sellPriceRetail: true, sellPriceWholesale: true, sellPriceMin: true, stockQuantity: true, stockReserved: true, minReorderLevel: true, brand: { select: { name: true, isOem: true } }, binLocation: { select: { fullCode: true } } },
   });
   const order = new Map(unique.map((id, index) => [id, index]));
@@ -240,7 +241,7 @@ async function lowStockPartIds(limit: number): Promise<string[]> {
   const rows = await prisma.$queryRaw<Array<{ id: string }>>(
     Prisma.sql`
       SELECT "id" FROM "PartItem"
-      WHERE "isActive" = true AND "stockQuantity" <= "minReorderLevel"
+      WHERE "isActive" = true AND "isDeleted" = false AND "stockQuantity" <= "minReorderLevel"
       ORDER BY ("stockQuantity" - "minReorderLevel") ASC
       LIMIT ${limit}
     `,
@@ -292,7 +293,7 @@ export async function getStockLedger(partId: string, limit = 100) {
     include: {
       performedBy: { select: { fullName: true } },
       part: { select: { binLocation: { select: { fullCode: true } } } },
-      invoice: { select: { id: true, invoiceNumber: true, type: true, account: { select: { name: true } }, items: { where: { partId }, select: { unitPrice: true, unitCostSnapshot: true, totalPrice: true, quantity: true, binLocationSnapshot: true } } } },
+      invoice: { select: { id: true, invoiceNumber: true, type: true, isVoided: true, account: { select: { name: true } }, items: { where: { partId }, select: { unitPrice: true, unitCostSnapshot: true, totalPrice: true, quantity: true, binLocationSnapshot: true } } } },
     },
   });
   return moves.map((m) => ({
@@ -311,6 +312,7 @@ export async function getStockLedger(partId: string, limit = 100) {
     invoiceId: m.invoice?.id ?? null,
     invoiceNumber: m.invoice?.invoiceNumber ?? null,
     invoiceType: m.invoice?.type ?? null,
+    invoiceIsVoided: m.invoice?.isVoided ?? false,
     partyName: m.invoice?.account.name ?? null,
     note: m.note,
     createdAt: m.createdAt.toISOString(),

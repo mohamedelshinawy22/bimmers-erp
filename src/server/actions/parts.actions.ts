@@ -245,39 +245,51 @@ const deletePartsSchema = z.object({ partIds: z.array(z.string().uuid()).min(1).
  * Removes only catalog-only parts. Any historical invoice, stock ledger, or
  * held-sale reference blocks the whole selected set, preserving auditability.
  */
-export async function deletePartAction(raw: { partIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
+export async function deletePartAction(raw: { partIds: string[] }): Promise<ActionResult<{ deleted: number; archived: number }>> {
   try {
     const user = await requirePermission("part.deactivate");
     const input = deletePartsSchema.parse(raw);
     const partIds = [...new Set(input.partIds)];
 
     const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
-      const parts = await tx.partItem.findMany({ where: { id: { in: partIds } }, select: { id: true, nameAr: true, oemNumber: true } });
+      const parts = await tx.partItem.findMany({ where: { id: { in: partIds } }, select: { id: true, nameAr: true, oemNumber: true, stockQuantity: true, stockReserved: true } });
       if (parts.length !== partIds.length) throw new BusinessRuleError("أحد الأصناف المحددة لم يعد موجوداً.");
 
+      let deleted = 0;
+      let archived = 0;
       for (const part of parts) {
-        const [invoiceLines, movementInvoiceRefs, movementWithoutInvoiceCount, heldSaleCount] = await Promise.all([
-          tx.invoiceItem.findMany({ where: { partId: part.id }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
-          tx.stockMovement.findMany({ where: { partId: part.id, invoiceId: { not: null } }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
+        const [activeInvoiceLines, activeMovementInvoiceRefs, movementWithoutInvoiceCount, heldSaleCount, voidedInvoiceLineCount, voidedMovementCount] = await Promise.all([
+          tx.invoiceItem.findMany({ where: { partId: part.id, invoice: { isVoided: false } }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
+          tx.stockMovement.findMany({ where: { partId: part.id, invoiceId: { not: null }, invoice: { isVoided: false } }, select: { invoiceId: true }, distinct: ["invoiceId"] }),
           tx.stockMovement.count({ where: { partId: part.id, invoiceId: null } }),
           tx.heldSaleItem.count({ where: { partId: part.id } }),
+          tx.invoiceItem.count({ where: { partId: part.id, invoice: { isVoided: true } } }),
+          tx.stockMovement.count({ where: { partId: part.id, invoice: { isVoided: true } } }),
         ]);
-        const linkedInvoiceIds = new Set([...invoiceLines.map((line) => line.invoiceId), ...movementInvoiceRefs.map((movement) => movement.invoiceId).filter((id): id is string => Boolean(id))]);
-        if (linkedInvoiceIds.size > 0 || movementWithoutInvoiceCount > 0 || heldSaleCount > 0) {
+        const activeInvoiceIds = new Set([...activeInvoiceLines.map((line) => line.invoiceId), ...activeMovementInvoiceRefs.map((movement) => movement.invoiceId).filter((id): id is string => Boolean(id))]);
+        const hasActiveStock = part.stockQuantity !== 0 || part.stockReserved !== 0;
+        if (activeInvoiceIds.size > 0 || movementWithoutInvoiceCount > 0 || heldSaleCount > 0 || hasActiveStock) {
           const historyText = [
-            linkedInvoiceIds.size > 0 ? `${linkedInvoiceIds.size} فاتورة مرتبطة` : "",
-            movementWithoutInvoiceCount > 0 ? `${movementWithoutInvoiceCount} حركة مخزون مسجلة` : "",
+            activeInvoiceIds.size > 0 ? `${activeInvoiceIds.size} فاتورة نشطة مرتبطة` : "",
+            movementWithoutInvoiceCount > 0 ? `${movementWithoutInvoiceCount} حركة مخزون غير مرتبطة بفاتورة` : "",
             heldSaleCount > 0 ? `${heldSaleCount} عملية بيع معلقة` : "",
+            hasActiveStock ? `رصيد حالي ${part.stockQuantity}` : "",
           ].filter(Boolean).join(" و");
-          throw new BusinessRuleError(`لا يمكن حذف الصنف (${part.nameAr}) لوجود ${historyText}. يجب إلغاء الفواتير أو الحركات المرتبطة أولاً لإتمام الحذف.`);
+          throw new BusinessRuleError(`لا يمكن حذف الصنف (${part.nameAr}) لوجود ${historyText}. يجب إلغاء الفواتير أو تصفير الرصيد والحركات المرتبطة أولاً لإتمام الحذف.`);
+        }
+
+        const hasVoidedHistory = voidedInvoiceLineCount > 0 || voidedMovementCount > 0;
+        if (hasVoidedHistory) {
+          const archivedPart = await tx.partItem.update({ where: { id: part.id }, data: { isDeleted: true, isActive: false, deletedAt: new Date() } });
+          await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "DELETE", oldData: part, newData: { isDeleted: true, deletedAt: archivedPart.deletedAt, reason: "VOIDED_HISTORY_PRESERVED" }, performedBy: user.id });
+          archived += 1;
+        } else {
+          await tx.partItem.delete({ where: { id: part.id } });
+          await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "DELETE", oldData: part, performedBy: user.id });
+          deleted += 1;
         }
       }
-
-      for (const part of parts) {
-        await tx.partItem.delete({ where: { id: part.id } });
-        await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "DELETE", oldData: part, performedBy: user.id });
-      }
-      return { deleted: parts.length };
+      return { deleted, archived };
     }, TX_OPTIONS));
 
     revalidatePath("/inventory");
