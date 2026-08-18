@@ -6,13 +6,47 @@ import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
-import { updateSettingsSchema } from "@/lib/validations/accounts";
+import { companyProfileSettingsSchema, updateSettingsSchema, type CompanyProfileSettingsInput } from "@/lib/validations/accounts";
 import {
   BOOLEAN_SETTING_KEYS as BOOLEAN_KEYS,
   NUMERIC_SETTING_KEYS as NUMERIC_KEYS,
 } from "@/lib/settings-keys";
 
 
+
+export async function updateCompanySettingsAction(raw: CompanyProfileSettingsInput): Promise<ActionResult<{ updated: number }>> {
+  try {
+    const user = await requirePermission("settings.write");
+    const input = companyProfileSettingsSchema.parse(raw);
+    const entries = [
+      { key: "COMPANY_NAME", value: input.companyName, group: "GENERAL", label: "اسم الشركة / المنشأة" },
+      { key: "COMMERCIAL_NAME", value: input.commercialName, group: "GENERAL", label: "الاسم التجاري / النشاط" },
+      { key: "COMPANY_ADDRESS", value: input.address, group: "GENERAL", label: "عنوان المنشأة" },
+      { key: "COMPANY_PHONE", value: input.phonePrimary, group: "GENERAL", label: "الهاتف الرئيسي" },
+      { key: "COMPANY_PHONE_SECONDARY", value: input.phoneSecondary, group: "GENERAL", label: "الهاتف الثانوي" },
+      { key: "TAX_NUMBER", value: input.taxNumber, group: "TAX", label: "رقم التسجيل الضريبي" },
+      { key: "COMMERCIAL_REGISTER", value: input.commercialRegister, group: "GENERAL", label: "السجل التجاري" },
+      { key: "COMPANY_LOGO_URL", value: input.logoUrl, group: "PRINTING", label: "رابط الشعار" },
+      { key: "INVOICE_FOOTER", value: input.footerNote, group: "PRINTING", label: "تذييل الفاتورة وشروط الضمان" },
+    ];
+    const updated = await prisma.$transaction(async (tx) => {
+      const before = await tx.systemSetting.findMany({ where: { key: { in: entries.map((entry) => entry.key) } } });
+      let count = 0;
+      for (const entry of entries) {
+        const old = before.find((item) => item.key === entry.key);
+        if (old?.value === entry.value) continue;
+        await tx.systemSetting.upsert({ where: { key: entry.key }, create: entry, update: { value: entry.value, group: entry.group, label: entry.label } });
+        count++;
+      }
+      if (count) await writeAudit(tx, { tableName: "SystemSetting", recordId: "COMPANY_PROFILE", action: "UPDATE", oldData: before, newData: entries, performedBy: user.id });
+      return count;
+    });
+    for (const path of ["/settings", "/invoices", "/pos", "/accounts", "/inventory"]) revalidatePath(path);
+    return ok({ updated });
+  } catch (error) {
+    return toActionError(error, "updateCompanySettingsAction");
+  }
+}
 
 export async function updateSettingsAction(
   raw: { entries: Array<{ key: string; value: string }> },

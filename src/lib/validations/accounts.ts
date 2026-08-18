@@ -170,6 +170,20 @@ export const createUserSchema = z.object({
   role: z.enum(["SUPER_ADMIN", "MANAGER", "CASHIER", "STOREKEEPER"]),
 });
 
+export const companyProfileSettingsSchema = z.object({
+  companyName: z.string().trim().min(2, "اسم المنشأة مطلوب").max(160),
+  commercialName: z.string().trim().max(160).default(""),
+  taxNumber: z.string().trim().max(80).default(""),
+  commercialRegister: z.string().trim().max(80).default(""),
+  address: z.string().trim().max(500).default(""),
+  phonePrimary: z.string().trim().max(40).default(""),
+  phoneSecondary: z.string().trim().max(40).default(""),
+  logoUrl: z.string().trim().max(1000).default(""),
+  footerNote: z.string().trim().max(1000).default(""),
+});
+
+export type CompanyProfileSettingsInput = z.infer<typeof companyProfileSettingsSchema>;
+
 export const updateSettingsSchema = z.object({
   entries: z
     .array(

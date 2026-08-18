@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
-import { getSettingsGrouped } from "@/server/services/settings.service";
+import { getCompanyProfile, getSettingsGrouped } from "@/server/services/settings.service";
 import { listUsers } from "@/server/services/audit.service";
 import { SettingsForm } from "./settings-form";
 
@@ -13,9 +13,10 @@ export default async function SettingsPage() {
   if (!can(user.role, "settings.read")) redirect("/");
 
   const canManageUsers = can(user.role, "user.manage");
-  const [groups, users] = await Promise.all([
+  const [groups, users, companyProfile] = await Promise.all([
     getSettingsGrouped(),
     canManageUsers ? listUsers() : Promise.resolve(null),
+    getCompanyProfile(),
   ]);
 
   return (
@@ -26,6 +27,7 @@ export default async function SettingsPage() {
         canWrite={can(user.role, "settings.write")}
         users={users}
         currentUserId={user.id}
+        companyProfile={companyProfile}
       />
     </div>
   );

@@ -13,12 +13,12 @@ export interface InvoicePrintLine {
 }
 
 export interface InvoicePrintData {
-  company: { name: string; phone: string; address: string; taxNumber: string; footer: string; logoUrl?: string | null };
+  company: { name: string; commercialName: string; phone: string; phonePrimary: string; phoneSecondary: string; address: string; taxNumber: string; commercialRegister: string; footer: string; logoUrl?: string | null };
   invoice: {
     id: string; invoiceNumber: string; type: string; createdAt: string; paymentMethod: string; paymentStatus: string;
     subtotal: number; discountAmount: number; taxAmount: number; grandTotal: number; paidAmount: number; remainingAmount: number;
     notes?: string | null; isVoided: boolean; voidReason?: string | null; treasuryName?: string | null; cashierName?: string | null;
-    accountBalanceBefore?: number | null; accountBalanceAfter?: number | null; verificationUrl: string;
+    accountBalanceBefore?: number | null; accountBalanceAfter?: number | null; verificationUrl: string; qrPayload: string;
   };
   account: { name: string; accountNumber: string; phone?: string | null; taxNumber?: string | null; vehicleLabel?: string | null };
   lines: InvoicePrintLine[];

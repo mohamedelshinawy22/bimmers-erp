@@ -60,9 +60,14 @@ export async function getPartCategories(): Promise<string[]> {
 
 export interface CompanyProfile {
   name: string;
+  commercialName: string;
   phone: string;
+  phonePrimary: string;
+  phoneSecondary: string;
   address: string;
   taxNumber: string;
+  commercialRegister: string;
+  logoUrl: string;
   invoiceFooter: string;
 }
 
@@ -76,16 +81,21 @@ export interface CompanyProfile {
 export async function getCompanyProfile(): Promise<CompanyProfile> {
   const rows = await prisma.systemSetting.findMany({
     where: {
-      key: { in: ["COMPANY_NAME", "COMPANY_PHONE", "COMPANY_ADDRESS", "TAX_NUMBER", "INVOICE_FOOTER"] },
+      key: { in: ["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"] },
     },
     select: { key: true, value: true },
   });
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
     name: map.get("COMPANY_NAME") ?? "BimmerERP",
+    commercialName: map.get("COMMERCIAL_NAME") ?? "",
     phone: map.get("COMPANY_PHONE") ?? "",
+    phonePrimary: map.get("COMPANY_PHONE") ?? "",
+    phoneSecondary: map.get("COMPANY_PHONE_SECONDARY") ?? "",
     address: map.get("COMPANY_ADDRESS") ?? "",
     taxNumber: map.get("TAX_NUMBER") ?? "",
+    commercialRegister: map.get("COMMERCIAL_REGISTER") ?? "",
+    logoUrl: map.get("COMPANY_LOGO_URL") ?? "",
     invoiceFooter: map.get("INVOICE_FOOTER") ?? "",
   };
 }

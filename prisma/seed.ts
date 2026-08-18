@@ -117,12 +117,16 @@ const CATEGORIES = [
 ];
 
 const SETTINGS = [
-  { key: "COMPANY_NAME", value: "بيمرز لقطع غيار BMW", group: "GENERAL", label: "اسم الشركة" },
-  { key: "COMPANY_PHONE", value: "+20 100 000 0000", group: "GENERAL", label: "تليفون الشركة" },
+  { key: "COMPANY_NAME", value: "بيمرز لقطع غيار BMW", group: "GENERAL", label: "اسم الشركة / المنشأة" },
+  { key: "COMMERCIAL_NAME", value: "قطع غيار BMW", group: "GENERAL", label: "الاسم التجاري / النشاط" },
+  { key: "COMPANY_PHONE", value: "+20 100 000 0000", group: "GENERAL", label: "الهاتف الرئيسي" },
+  { key: "COMPANY_PHONE_SECONDARY", value: "", group: "GENERAL", label: "الهاتف الثانوي" },
   { key: "COMPANY_ADDRESS", value: "القاهرة - مصر", group: "GENERAL", label: "عنوان الشركة" },
+  { key: "COMMERCIAL_REGISTER", value: "", group: "GENERAL", label: "السجل التجاري" },
   { key: "TAX_NUMBER", value: "", group: "TAX", label: "الرقم الضريبي" },
   { key: "TAX_RATE_PERCENT", value: "0", group: "TAX", label: "نسبة ضريبة القيمة المضافة %" },
-  { key: "INVOICE_FOOTER", value: "قطع غيار BMW أصلية بضمان المصنع", group: "PRINTING", label: "تذييل الفاتورة" },
+  { key: "COMPANY_LOGO_URL", value: "", group: "PRINTING", label: "رابط الشعار" },
+  { key: "INVOICE_FOOTER", value: "قطع غيار BMW أصلية بضمان المصنع", group: "PRINTING", label: "تذييل الفاتورة وشروط الضمان" },
   { key: "ALLOW_NEGATIVE_STOCK", value: "false", group: "INVENTORY", label: "السماح بالبيع بالسالب" },
   { key: "ENFORCE_MIN_SELL_PRICE", value: "true", group: "PRICING", label: "إجبار حد السعر الأدنى" },
   { key: "ENFORCE_CREDIT_LIMIT", value: "true", group: "PRICING", label: "إجبار حد الائتمان" },

@@ -2,14 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Save, SlidersHorizontal } from "lucide-react";
+import { Building2, Printer, Save, SlidersHorizontal } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/modal";
 import { UsersPanel } from "./users-panel";
 import type { ManagedUser } from "@/server/services/audit.service";
-import { updateSettingsAction } from "@/server/actions/settings.actions";
+import type { CompanyProfile } from "@/server/services/settings.service";
+import { updateCompanySettingsAction, updateSettingsAction } from "@/server/actions/settings.actions";
 import {
   BOOLEAN_SETTING_KEYS as BOOLEAN_KEYS,
   HIDDEN_SETTING_KEYS as HIDDEN_KEYS,
@@ -28,13 +29,16 @@ interface SettingsFormProps {
   canWrite: boolean;
   users: ManagedUser[] | null;
   currentUserId: string;
+  companyProfile: CompanyProfile;
 }
 
 // Key classification is imported, not redeclared: the server validates against
 // the same sets, and a divergence would let a boolean be stored as free text
 // (which `getSetting(...) === "true"` silently reads as false).
 
-export function SettingsForm({ groups, canWrite, users, currentUserId }: SettingsFormProps) {
+const PROFILE_KEYS = new Set(["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"]);
+
+export function SettingsForm({ groups, canWrite, users, currentUserId, companyProfile }: SettingsFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +47,32 @@ export function SettingsForm({ groups, canWrite, users, currentUserId }: Setting
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.key, i.value]))),
   );
+  const [profile, setProfile] = useState({
+    companyName: companyProfile.name,
+    commercialName: companyProfile.commercialName,
+    taxNumber: companyProfile.taxNumber,
+    commercialRegister: companyProfile.commercialRegister,
+    address: companyProfile.address,
+    phonePrimary: companyProfile.phonePrimary,
+    phoneSecondary: companyProfile.phoneSecondary,
+    logoUrl: companyProfile.logoUrl,
+    footerNote: companyProfile.invoiceFooter,
+  });
 
   const dirty = groups
     .flatMap((g) => g.items)
     .filter((item) => !HIDDEN_KEYS.has(item.key) && values[item.key] !== item.value);
+
+  const saveProfile = () => {
+    setError(null);
+    setSuccess(null);
+    startTransition(async () => {
+      const result = await updateCompanySettingsAction(profile);
+      if (!result.success) { setError(result.error); return; }
+      setSuccess(result.data.updated ? "تم حفظ بيانات المنشأة والطباعة بنجاح." : "بيانات المنشأة محفوظة بالفعل.");
+      router.refresh();
+    });
+  };
 
   const submit = () => {
     setError(null);
@@ -91,9 +117,30 @@ export function SettingsForm({ groups, canWrite, users, currentUserId }: Setting
         <Alert variant="warning">لديك صلاحية العرض فقط. تعديل الإعدادات متاح لمدير النظام.</Alert>
       ) : null}
 
+      <Card className="border-bmw-blue/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Building2 size={18} className="text-bmw-blue" /> بيانات المنشأة والطباعة</CardTitle>
+          <p className="text-xs text-bmw-muted">تظهر هذه البيانات تلقائياً في جميع فواتير البيع والشراء، الإيصالات الحرارية، الفاتورة الإلكترونية، والـ QR.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="اسم الشركة / المنشأة" required><Input value={profile.companyName} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, companyName: event.target.value }))} /></Field>
+            <Field label="الاسم التجاري / النشاط"><Input value={profile.commercialName} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, commercialName: event.target.value }))} placeholder="مثال: الشافعي لقطع غيار BMW" /></Field>
+            <Field label="رقم التسجيل الضريبي"><Input value={profile.taxNumber} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, taxNumber: event.target.value }))} dir="ltr" className="text-left" /></Field>
+            <Field label="السجل التجاري"><Input value={profile.commercialRegister} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, commercialRegister: event.target.value }))} dir="ltr" className="text-left" /></Field>
+            <Field label="الهاتف الرئيسي"><Input value={profile.phonePrimary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phonePrimary: event.target.value }))} dir="ltr" className="text-left" /></Field>
+            <Field label="الهاتف الثانوي"><Input value={profile.phoneSecondary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phoneSecondary: event.target.value }))} dir="ltr" className="text-left" /></Field>
+            <Field label="العنوان الرئيسي / الفروع" className="sm:col-span-2"><Textarea rows={2} value={profile.address} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, address: event.target.value }))} /></Field>
+            <Field label="رابط الشعار" hint="اختياري — يستخدم في رأس الفاتورة"><Input value={profile.logoUrl} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, logoUrl: event.target.value }))} placeholder="https://…" dir="ltr" className="text-left" /></Field>
+            <Field label="رسالة التذييل / شروط الضمان" className="sm:col-span-2"><Textarea rows={3} value={profile.footerNote} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, footerNote: event.target.value }))} placeholder="شكراً لتعاملكم معنا" /></Field>
+          </div>
+          {canWrite ? <Button onClick={saveProfile} loading={pending}><Printer size={16} /> حفظ بيانات المنشأة</Button> : null}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {groups.map((group) => {
-          const visible = group.items.filter((i) => !HIDDEN_KEYS.has(i.key));
+          const visible = group.items.filter((i) => !HIDDEN_KEYS.has(i.key) && !PROFILE_KEYS.has(i.key));
           if (visible.length === 0) return null;
           return (
             <Card key={group.group}>
