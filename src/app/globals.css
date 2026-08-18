@@ -146,3 +146,19 @@
 .barcode-bars { height:18mm; margin:1mm 0; display:flex; align-items:end; justify-content:center; background:repeating-linear-gradient(90deg,#000 0 1px,#fff 1px 3px,#000 3px 5px,#fff 5px 8px); }
 .barcode-bars span { margin-bottom:1mm; background:#fff; padding:0 1mm; font-size:8px; }
 @media print { .barcode-print-root,.barcode-print-root * { visibility:visible !important; } .barcode-print-root { display:block !important; position:static; } }
+
+/* Final print format profiles and selector isolation. */
+.invoice-a5 { width: 148mm; min-height: 190mm; padding: 8mm; }
+.invoice-thermal-57 { width: 57mm; padding: 2mm; font-size: 9px; }
+.e-invoice { width: 210mm; min-height: 277mm; padding: 10mm 12mm; }
+@media print {
+  #printable-area, #printable-area * { visibility: visible !important; }
+  #printable-area { position: static !important; display: block !important; background: #fff !important; }
+  .print-format-a5 { width: 148mm !important; }
+  .print-format-thermal_57 { width: 57mm !important; }
+  .print-format-thermal_57 .invoice-thermal-57 { width: 57mm !important; }
+  .print-format-e_invoice { width: 210mm !important; }
+  .invoice-a5, .e-invoice, .invoice-thermal-57 { break-inside: avoid; page-break-inside: avoid; }
+}
+@page invoice-a5 { size: A5 portrait; margin: 8mm; }
+@page invoice-57mm { size: 57mm auto; margin: 2mm; }
