@@ -331,21 +331,16 @@ export function AccountsClient({
   );
 }
 
+const DEFAULT_ACCOUNT_FORM = { name: "", type: "CUSTOMER" as "CUSTOMER" | "WORKSHOP_BMW" | "SUPPLIER" | "EXPENSE", phone: "", email: "", address: "", taxNumber: "", creditLimit: "0", defaultPriceTier: "RETAIL" as "RETAIL" | "WHOLESALE", openingBalance: "0" };
+
 function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    type: "WORKSHOP_BMW" as "CUSTOMER" | "WORKSHOP_BMW" | "SUPPLIER" | "EXPENSE",
-    phone: "",
-    email: "",
-    address: "",
-    taxNumber: "",
-    creditLimit: "0",
-    defaultPriceTier: "WHOLESALE" as "RETAIL" | "WHOLESALE",
-    openingBalance: "0",
-  });
+  const [form, setForm] = useState(DEFAULT_ACCOUNT_FORM);
+  const reset = () => { setForm(DEFAULT_ACCOUNT_FORM); setError(null); };
+  const close = () => { reset(); onClose(); };
+  useEffect(() => { reset(); }, [open]);
 
   const submit = () => {
     setError(null);
@@ -367,6 +362,7 @@ function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void
         setError(result.error);
         return;
       }
+      reset();
       onClose();
       router.refresh();
     });
@@ -375,12 +371,12 @@ function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="إضافة حساب جديد"
       description="الرصيد الافتتاحي: سالب = مديونية على الحساب، موجب = رصيد له."
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={pending}>
+          <Button variant="ghost" onClick={close} disabled={pending}>
             إلغاء
           </Button>
           <Button onClick={submit} loading={pending} disabled={form.name.trim().length < 2}>
@@ -396,6 +392,7 @@ function AddAccountModal({ open, onClose }: { open: boolean; onClose: () => void
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
+              autoFocus
               placeholder="ورشة الشيخ زايد لصيانة BMW"
             />
           </Field>
