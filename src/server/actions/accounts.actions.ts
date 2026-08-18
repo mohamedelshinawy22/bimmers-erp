@@ -163,11 +163,11 @@ export async function createQuickPosAccountAction(
       phone: input.phone ?? "",
       defaultPriceTier: input.defaultPriceTier,
       email: "",
-      address: "",
+      address: input.address ?? "",
       taxNumber: "",
       category: "",
       creditLimit: 0,
-      openingBalance: 0,
+      openingBalance: input.openingBalance,
       status: "ACTIVE",
     });
   } catch (error) {

@@ -51,8 +51,10 @@ export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 
 export const quickPosAccountSchema = z.object({
   name: arabicName,
-  type: z.enum(["CUSTOMER", "WORKSHOP_BMW"]).default("CUSTOMER"),
+  type: accountTypeSchema,
   phone: optionalPhone,
+  address: optionalText(300),
+  openingBalance,
   defaultPriceTier: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL"),
   notes: optionalText(500),
 });

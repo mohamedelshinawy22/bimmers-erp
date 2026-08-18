@@ -14,6 +14,7 @@ import type { PosPartRow } from "@/server/services/parts.service";
 import { searchPartsForPosAction } from "@/server/actions/search.actions";
 import { createPurchaseInvoiceAction, updatePurchaseInvoiceAction } from "@/server/actions/invoice.actions";
 import { createPartAction } from "@/server/actions/parts.actions";
+import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 
 interface Line {
   part: PosPartRow;
@@ -38,6 +39,21 @@ interface PurchaseInvoiceModalProps {
  * added through manual adjustment, which had no cost input — so received parts
  * were valued at zero and every subsequent sale reported ~100% margin.
  */
+function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (supplier: { id: string; name: string; accountNumber: string; currentBalance: number }) => void }) {
+  const [name, setName] = useState(initialName);
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [openingBalance, setOpeningBalance] = useState("0");
+  const [error, setError] = useState("");
+  const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => {
+    const result = await createQuickPosAccountAction({ name, phone, address, openingBalance: Number(openingBalance) || 0, type: "SUPPLIER", defaultPriceTier: "RETAIL", notes: "إنشاء سريع من فاتورة شراء" });
+    if (!result.success) { setError(result.error); return; }
+    onCreated({ id: result.data.id, name: result.data.name, accountNumber: result.data.accountNumber, currentBalance: result.data.currentBalance });
+  });
+  return <Modal open onClose={onClose} title="مورد جديد سريع" description="سيتم اختيار المورد الجديد في فاتورة الشراء الحالية دون فقدان بنود المسودة." size="md" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button loading={pending} disabled={!name.trim()} onClick={submit}>إنشاء واختيار</Button></>}><div className="grid gap-3 sm:grid-cols-2">{error ? <div className="sm:col-span-2"><Alert variant="error">{error}</Alert></div> : null}<Field label="اسم المورد" required className="sm:col-span-2"><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus placeholder="اسم المورد" /></Field><Field label="الهاتف"><Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="رقم الهاتف (اختياري)" dir="ltr" className="text-left" /></Field><Field label="الرصيد الافتتاحي"><Input type="number" step="0.01" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} /></Field><Field label="العنوان" className="sm:col-span-2"><Textarea rows={2} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="العنوان (اختياري)" /></Field></div></Modal>;
+}
+
 function QuickPartModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (oem: string, cost: number) => Promise<void> }) {
   const [nameAr, setNameAr] = useState(initialName); const [oemNumber, setOemNumber] = useState(""); const [brandName, setBrandName] = useState(""); const [category, setCategory] = useState("عام"); const [cost, setCost] = useState(""); const [price, setPrice] = useState(""); const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
   const submit = () => startTransition(async () => { const buyPrice = Number(cost) || 0; const sellPrice = Number(price) || 0; const result = await createPartAction({ nameAr, oemNumber, brandId: undefined, brandName, categoryId: undefined, category, categoryName: category, chassisIds: [], engineIds: [], chassisCodes: [], engineCodes: [], nameEn: "", brandPartNumber: "", barcode: "", sidePosition: "", binLocationId: undefined, buyPriceLast: buyPrice, sellPriceRetail: sellPrice, sellPriceWholesale: sellPrice, sellPriceMin: sellPrice, openingQuantity: 0, minReorderLevel: 2, isActive: true }); if (!result.success) { setError(result.error); return; } await onCreated(result.data.oemNumber, buyPrice); });
@@ -56,6 +72,7 @@ export function PurchaseInvoiceModal({
   const [pending, startTransition] = useTransition();
 
   const [supplierId, setSupplierId] = useState("");
+  const [supplierOptions, setSupplierOptions] = useState(suppliers);
   const [treasuryId, setTreasuryId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "VISA" | "ON_ACCOUNT">("ON_ACCOUNT");
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
@@ -69,7 +86,10 @@ export function PurchaseInvoiceModal({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ invoiceNumber: string; grandTotal: number } | null>(null);
   const [quickPartOpen, setQuickPartOpen] = useState(false);
+  const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
   const isEditMode = Boolean(initialDraft);
+
+  useEffect(() => { setSupplierOptions(suppliers); }, [suppliers]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,7 +128,7 @@ export function PurchaseInvoiceModal({
     return () => clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => { const handler = (event: KeyboardEvent) => { if (event.altKey && event.key.toLowerCase() === "p") { event.preventDefault(); setQuickPartOpen(true); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
+  useEffect(() => { const handler = (event: KeyboardEvent) => { if (event.altKey && event.key.toLowerCase() === "p") { event.preventDefault(); setQuickPartOpen(true); } if (event.altKey && event.key.toLowerCase() === "s") { event.preventDefault(); setQuickSupplierOpen(true); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
 
   const addLine = (part: PosPartRow) => {
     setError(null);
@@ -262,14 +282,17 @@ export function PurchaseInvoiceModal({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="المورد" required>
-            <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-              <option value="">— اختر المورد —</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.accountNumber})
-                </option>
-              ))}
-            </Select>
+            <div className="space-y-1.5">
+              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                <option value="">— اختر المورد —</option>
+                {supplierOptions.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name} ({supplier.accountNumber})
+                  </option>
+                ))}
+              </Select>
+              <Button type="button" size="sm" variant="ghost" className="w-full justify-start" onClick={() => setQuickSupplierOpen(true)}><Plus size={14} /> مورد جديد (Alt+S)</Button>
+            </div>
           </Field>
           <Field label="طريقة السداد" required>
             <Select
@@ -356,6 +379,7 @@ export function PurchaseInvoiceModal({
         {query.trim().length >= 2 && !searching && results.length === 0 ? <Button type="button" variant="outline" className="w-full" onClick={() => setQuickPartOpen(true)}><Plus size={16}/> إضافة صنف جديد "{query.trim()}"</Button> : null}
         <Button type="button" variant="ghost" size="sm" onClick={() => setQuickPartOpen(true)}><Plus size={14}/> صنف جديد (Alt+P)</Button>
         {quickPartOpen ? <QuickPartModal initialName={query} onClose={() => setQuickPartOpen(false)} onCreated={async (oemNumber, cost) => { const result = await searchPartsForPosAction(oemNumber); if (result.success) { const part = result.data.find((item) => item.oemNumber === oemNumber); if (part) { addLine(part); setLines((current) => current.map((line) => line.part.id === part.id ? { ...line, unitPrice: cost } : line)); } } setQuickPartOpen(false); }} /> : null}
+        {quickSupplierOpen ? <QuickSupplierModal initialName="" onClose={() => setQuickSupplierOpen(false)} onCreated={(supplier) => { setSupplierOptions((current) => current.some((item) => item.id === supplier.id) ? current : [...current, supplier].sort((a, b) => a.name.localeCompare(b.name, "ar"))); setSupplierId(supplier.id); setQuickSupplierOpen(false); }} /> : null}
 
         {lines.length === 0 ? (
           <Card>
