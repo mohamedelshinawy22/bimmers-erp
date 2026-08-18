@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, Search, UserRound, Users, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, ScrollText, Search, UserRound, Users, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from 
 import type { AccountRow } from "@/server/services/accounts.service";
 import { createAccountAction, createVehicleAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
-import { getAccountDetailedLedgerAction } from "@/server/actions/invoices.read.actions";
+import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
 import { AccountStatementTemplate, type AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
 
@@ -64,6 +64,7 @@ export function AccountsClient({
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [statementFor, setStatementFor] = useState<AccountRow | null>(null);
   const [voucherFor, setVoucherFor] = useState<{ account: AccountRow; type: "RECEIPT" | "PAYMENT" } | null>(null);
+  const [pdcFor, setPdcFor] = useState<AccountRow | null>(null);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const displayedDebit = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
@@ -274,6 +275,7 @@ export function AccountsClient({
                       ) : null}
                       {canTransact && account.type !== "EXPENSE" ? <button type="button" onClick={() => setVoucherFor({ account, type: "RECEIPT" })} title="سند قبض" className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-emerald-500/10 hover:text-emerald-400"><ArrowDownLeft size={15} /></button> : null}
                       {canTransact && account.type !== "EXPENSE" ? <button type="button" onClick={() => setVoucherFor({ account, type: "PAYMENT" })} title="سند صرف" className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-mRed/10 hover:text-bmw-mRed"><ArrowUpRight size={15} /></button> : null}
+                      {canViewStatement ? <button type="button" onClick={() => setPdcFor(account)} title="الشيكات والأقساط" className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-amber-500/10 hover:text-amber-400"><ScrollText size={15} /></button> : null}
                       {canViewStatement ? (
                         <button
                           type="button"
@@ -335,6 +337,7 @@ export function AccountsClient({
         <StatementModal key={statementFor.id} account={statementFor} companyName={companyName} onClose={() => setStatementFor(null)} />
       ) : null}
       {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
+      {pdcFor ? <AccountPdcModal account={pdcFor} onClose={() => setPdcFor(null)} /> : null}
       {vehicleFor ? (
         <AddVehicleModal
           key={vehicleFor.id}
@@ -817,4 +820,11 @@ function AccountVoucherModal({ account, type, treasuries, onClose }: { account: 
       <Field label="البيان"><Textarea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`${type === "RECEIPT" ? "تحصيل" : "سداد"} ${account.name}`} /></Field>
     </div>
   </Modal>;
+}
+
+function AccountPdcModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {
+  const [data, setData] = useState<{ checks: Array<{ id: string; direction: string; checkNumber: string; bankName: string | null; amount: number; issueDate: string | null; dueDate: string; status: string; notes: string | null }>; installmentPlans: Array<{ id: string; totalAmount: number; startDate: string; status: string; notes: string | null; installments: Array<{ id: string; dueDate: string; amount: number; paidAmount: number; status: string }> }> } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { let cancelled = false; void getAccountPdcInstallmentsAction(account.id).then((result) => { if (cancelled) return; if (result.success) setData(result.data); else setError(result.error); }); return () => { cancelled = true; }; }, [account.id]);
+  return <Modal open onClose={onClose} title={`الشيكات والأقساط — ${account.name}`} description="سجل الاستحقاقات وحالات التحصيل أو السداد المرتبطة بالحساب." size="lg" footer={<Button variant="ghost" onClick={onClose}>إغلاق</Button>}><div className="space-y-5">{error ? <Alert variant="error">{error}</Alert> : null}{!data && !error ? <p className="text-xs text-bmw-muted">جاري تحميل السجل…</p> : null}{data ? <><section><h3 className="mb-2 text-sm font-bold text-bmw-blue">سجل الشيكات</h3><Table><THead><TR><TH>الاتجاه</TH><TH>رقم الشيك</TH><TH>البنك</TH><TH>القيمة</TH><TH>الاستحقاق</TH><TH>الحالة</TH><TH>ملاحظات</TH></TR></THead><TBody>{data.checks.length ? data.checks.map((check) => <TR key={check.id}><TD><Badge variant={check.direction === "RECEIVABLE" ? "success" : "danger"}>{check.direction === "RECEIVABLE" ? "وارد" : "صادر"}</Badge></TD><TD className="font-mono text-xs">{check.checkNumber}</TD><TD className="text-xs">{check.bankName ?? "—"}</TD><TD className="tabular">{formatMoney(check.amount)}</TD><TD className="tabular text-xs">{formatDateTime(check.dueDate)}</TD><TD><Badge variant={check.status === "CLEARED" ? "success" : check.status === "BOUNCED" ? "danger" : "warning"}>{check.status}</Badge></TD><TD className="max-w-[180px] truncate text-xs text-bmw-muted">{check.notes ?? "—"}</TD></TR>) : <EmptyState colSpan={7} title="لا توجد شيكات مرتبطة" />}</TBody></Table></section><section><h3 className="mb-2 text-sm font-bold text-bmw-blue">خطط الأقساط</h3>{data.installmentPlans.length ? <div className="space-y-3">{data.installmentPlans.map((plan) => <div key={plan.id} className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><div className="mb-2 flex items-center justify-between"><span className="text-xs text-bmw-muted">بدأت {formatDateTime(plan.startDate)}</span><span className="tabular font-bold">{formatMoney(plan.totalAmount)} {CURRENCY}</span><Badge variant={plan.status === "PAID" ? "success" : "warning"}>{plan.status}</Badge></div><Table><THead><TR><TH>تاريخ الاستحقاق</TH><TH>القيمة</TH><TH>المسدد</TH><TH>الحالة</TH></TR></THead><TBody>{plan.installments.map((installment) => <TR key={installment.id}><TD className="tabular text-xs">{formatDateTime(installment.dueDate)}</TD><TD className="tabular">{formatMoney(installment.amount)}</TD><TD className="tabular text-emerald-400">{formatMoney(installment.paidAmount)}</TD><TD><Badge variant={installment.status === "PAID" ? "success" : installment.status === "OVERDUE" ? "danger" : "warning"}>{installment.status}</Badge></TD></TR>)}</TBody></Table></div>)}</div> : <Alert variant="info">لا توجد خطط أقساط مرتبطة بهذا الحساب.</Alert>}</section></> : null}</div></Modal>;
 }

@@ -29,6 +29,9 @@ import { createSaleInvoiceAction, type InvoiceResult } from "@/server/actions/in
 import { holdSaleAction } from "@/server/actions/held-sales.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { QuickPartModal } from "@/components/pos/quick-part-modal";
+import { useInvoicePrint } from "@/hooks/use-invoice-print";
+import { PrintContainer } from "@/components/print/print-container";
+import { PRINT_FORMATS, type InvoicePrintFormat } from "@/lib/invoice-print-types";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -116,6 +119,7 @@ export function PosTerminal({
   const [vehicles, setVehicles] = useState<AccountVehicle[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<InvoiceResult | null>(null);
+  const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -798,8 +802,8 @@ export function PosTerminal({
             <Button variant="ghost" onClick={() => setReceipt(null)}>
               إغلاق
             </Button>
-            <Button variant="outline" onClick={() => window.print()}>
-              <Printer size={15} /> طباعة
+            <Button variant="outline" onClick={() => receipt && setPrintInvoiceId(receipt.invoiceId)}>
+              <Printer size={15} /> اختيار الطباعة
             </Button>
           </>
         }
@@ -836,6 +840,19 @@ export function PosTerminal({
           </div>
         ) : null}
       </Modal>
+      {printInvoiceId ? <PosInvoicePrintDialog invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} /> : null}
     </div>
   );
+}
+
+function PosInvoicePrintDialog({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
+  const { data, error, format, setFormat, state, prepare, print, onAfterPrint } = useInvoicePrint(invoiceId);
+  useEffect(() => { void prepare(); }, [prepare]);
+  const busy = state === "loading" || state === "printing";
+  return <>
+    <Modal open onClose={onClose} title="اختيار تنسيق الطباعة" description="اختر نسخة الفاتورة المناسبة للعميل أو الكاشير." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={busy}>إغلاق</Button><Button onClick={() => void print()} loading={busy} disabled={!data}><Printer size={15} /> طباعة الآن</Button></>}>
+      <div className="space-y-3">{state === "loading" ? <Alert variant="info">جاري تجهيز الفاتورة للطباعة…</Alert> : null}{error ? <Alert variant="error">{error}</Alert> : null}{data ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{PRINT_FORMATS.map((option) => <button key={option.value} type="button" onClick={() => setFormat(option.value as InvoicePrintFormat)} className={`rounded-xl border px-3 py-3 text-right text-sm ${format === option.value ? "border-bmw-blue bg-bmw-blue/15 text-white" : "border-bmw-cardBorder bg-bmw-carbon text-bmw-silver hover:border-bmw-blue/60"}`}>{option.label}</button>)}</div> : null}</div>
+    </Modal>
+    {data && state === "printing" ? <PrintContainer data={data} format={format} autoPrint onAfterPrint={onAfterPrint} /> : null}
+  </>;
 }

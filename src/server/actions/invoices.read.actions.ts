@@ -4,6 +4,7 @@ import { requirePermission, can } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getInvoiceDetail, type InvoiceDetail } from "@/server/services/invoices.service";
 import { getStockLedger } from "@/server/services/parts.service";
+import { prisma } from "@/lib/prisma";
 import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
 
 /**
@@ -49,6 +50,24 @@ export async function getAccountDetailedLedgerAction(accountId: string, filters?
     return ok(ledger);
   } catch (error) {
     return toActionError(error, "getAccountDetailedLedgerAction");
+  }
+}
+
+export async function getAccountPdcInstallmentsAction(accountId: string) {
+  try {
+    await requirePermission("account.viewStatement");
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: {
+        id: true,
+        checks: { orderBy: { dueDate: "asc" }, select: { id: true, direction: true, checkNumber: true, bankName: true, amount: true, issueDate: true, dueDate: true, status: true, notes: true } },
+        installmentPlans: { orderBy: { startDate: "desc" }, select: { id: true, totalAmount: true, startDate: true, status: true, notes: true, installments: { orderBy: { dueDate: "asc" }, select: { id: true, dueDate: true, amount: true, paidAmount: true, status: true } } } },
+      },
+    });
+    if (!account) return { success: false as const, error: "الحساب غير موجود." };
+    return ok({ checks: account.checks.map((check) => ({ ...check, amount: Number(check.amount), issueDate: check.issueDate?.toISOString() ?? null, dueDate: check.dueDate.toISOString() })), installmentPlans: account.installmentPlans.map((plan) => ({ ...plan, totalAmount: Number(plan.totalAmount), startDate: plan.startDate.toISOString(), installments: plan.installments.map((installment) => ({ ...installment, amount: Number(installment.amount), paidAmount: Number(installment.paidAmount), dueDate: installment.dueDate.toISOString() })) })) });
+  } catch (error) {
+    return toActionError(error, "getAccountPdcInstallmentsAction");
   }
 }
 
