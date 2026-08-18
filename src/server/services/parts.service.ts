@@ -280,7 +280,7 @@ export async function getStockLedger(partId: string, limit = 100) {
     take: limit,
     include: {
       performedBy: { select: { fullName: true } },
-      invoice: { select: { invoiceNumber: true } },
+      invoice: { select: { id: true, invoiceNumber: true, type: true, account: { select: { name: true } } } },
     },
   });
   return moves.map((m) => ({
@@ -291,7 +291,10 @@ export async function getStockLedger(partId: string, limit = 100) {
     balanceAfter: m.balanceAfter,
     unitCost: num(m.unitCost),
     performedBy: m.performedBy.fullName,
+    invoiceId: m.invoice?.id ?? null,
     invoiceNumber: m.invoice?.invoiceNumber ?? null,
+    invoiceType: m.invoice?.type ?? null,
+    partyName: m.invoice?.account.name ?? null,
     note: m.note,
     createdAt: m.createdAt.toISOString(),
   }));

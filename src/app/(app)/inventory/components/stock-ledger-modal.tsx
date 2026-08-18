@@ -16,7 +16,10 @@ interface LedgerRow {
   balanceAfter: number;
   unitCost: number;
   performedBy: string;
+  invoiceId: string | null;
   invoiceNumber: string | null;
+  invoiceType: string | null;
+  partyName: string | null;
   note: string | null;
   createdAt: string;
 }
@@ -87,6 +90,7 @@ export function StockLedgerModal({
               <TH>الرصيد بعدها</TH>
               {canViewCost ? <TH>تكلفة الوحدة</TH> : null}
               <TH>الفاتورة</TH>
+              <TH>الطرف (عميل / مورد)</TH>
               <TH>المستخدم</TH>
               <TH>البيان</TH>
               <TH>التاريخ</TH>
@@ -94,10 +98,10 @@ export function StockLedgerModal({
           </THead>
           <TBody>
             {rows === null ? (
-              <EmptyState colSpan={canViewCost ? 9 : 8} title="جاري التحميل…" />
+              <EmptyState colSpan={canViewCost ? 10 : 9} title="جاري التحميل…" />
             ) : rows.length === 0 ? (
               <EmptyState
-                colSpan={canViewCost ? 9 : 8}
+                colSpan={canViewCost ? 10 : 9}
                 title="لا توجد حركات مسجّلة"
                 icon={<History size={30} />}
               />
@@ -126,7 +130,8 @@ export function StockLedgerModal({
                       {r.unitCost > 0 ? `${formatMoney(r.unitCost)} ${CURRENCY}` : "—"}
                     </TD>
                   ) : null}
-                  <TD className="tabular text-xs text-bmw-blue">{r.invoiceNumber ?? "—"}</TD>
+                  <TD className="tabular text-xs text-bmw-blue">{r.invoiceNumber ? <a href={`/invoices?q=${encodeURIComponent(r.invoiceNumber)}`} className="underline decoration-dotted hover:text-white">{r.invoiceNumber}</a> : "—"}</TD>
+                  <TD className="text-xs text-bmw-muted">{r.partyName ?? "—"}</TD>
                   <TD className="text-xs text-bmw-muted">{r.performedBy}</TD>
                   <TD className="max-w-[200px] truncate text-xs text-bmw-muted">{r.note ?? "—"}</TD>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
