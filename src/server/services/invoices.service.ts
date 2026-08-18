@@ -24,6 +24,7 @@ export interface InvoiceListRow {
   voidReason: string | null;
   treasuryName: string | null;
   vehicleLabel: string | null;
+  sourceInvoiceNumber: string | null;
   createdAt: string;
 }
 
@@ -85,6 +86,7 @@ export async function listInvoices(options: {
         user: { select: { fullName: true } },
         treasury: { select: { name: true } },
         vehicle: { select: { vin: true, plateNumber: true, chassis: { select: { code: true } } } },
+        returnOf: { select: { invoiceNumber: true } },
         _count: { select: { items: true } },
       },
     }),
@@ -116,6 +118,7 @@ export async function listInvoices(options: {
             .filter(Boolean)
             .join(" • ")
         : null,
+      sourceInvoiceNumber: i.returnOf?.invoiceNumber ?? null,
       createdAt: i.createdAt.toISOString(),
     })),
     total,

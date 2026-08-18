@@ -119,10 +119,38 @@ export async function createInvoiceReturnAction(raw: CreateInvoiceReturnInput): 
       canSellBelowMin: can(user.role, "invoice.belowMinPrice"),
       canOverrideDiscount: can(user.role, "invoice.overrideDiscount"),
     });
-    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/treasury", "/accounts"]);
+    await revalidateAfterInvoice(["/", "/invoices", "/sales/returns", "/purchases/returns", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {
     return toActionError(error, "createInvoiceReturnAction");
+  }
+}
+
+export async function createSalesReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
+  try {
+    const input = createInvoiceReturnSchema.parse(raw);
+    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    if (original?.type !== "SALE") return { success: false, error: "يجب اختيار فاتورة بيع أصلية لإنشاء مرتجع البيع." };
+    const user = await requirePermission("invoice.sale");
+    const result = await createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    await revalidateAfterInvoice(["/", "/invoices", "/sales/returns", "/inventory", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "createSalesReturnAction");
+  }
+}
+
+export async function createPurchaseReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
+  try {
+    const input = createInvoiceReturnSchema.parse(raw);
+    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    if (original?.type !== "PURCHASE") return { success: false, error: "يجب اختيار فاتورة شراء أصلية لإنشاء مرتجع الشراء." };
+    const user = await requirePermission("invoice.purchase");
+    const result = await createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    await revalidateAfterInvoice(["/", "/invoices", "/purchases/returns", "/inventory", "/treasury", "/accounts"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "createPurchaseReturnAction");
   }
 }
 

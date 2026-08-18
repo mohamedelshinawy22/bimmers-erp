@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Car,
   ScrollText,
+  RotateCcw,
   ShieldCheck,
 } from "lucide-react";
 import type { Role } from "@prisma/client";
@@ -34,6 +35,8 @@ const NAV: Array<{
   { href: "/pos", label: "نقطة البيع", icon: Receipt, hotkey: "F2", permission: "invoice.sale" },
   { href: "/inventory", label: "كتالوج البضاعة", icon: Boxes, hotkey: "F3", permission: "part.read" },
   { href: "/invoices", label: "الفواتير", icon: ScrollText, hotkey: "F6", permission: "invoice.read" },
+  { href: "/sales/returns", label: "مرتجع المبيعات", icon: RotateCcw, hotkey: null, permission: "invoice.sale" },
+  { href: "/purchases/returns", label: "مرتجع المشتريات", icon: RotateCcw, hotkey: null, permission: "invoice.purchase" },
   { href: "/accounts", label: "الحسابات والورش", icon: Users, hotkey: "F4", permission: "account.read" },
   { href: "/treasury", label: "الخزينة والسيولة", icon: Wallet, hotkey: "F5", permission: "treasury.read" },
   { href: "/audit", label: "سجل التدقيق", icon: ShieldCheck, hotkey: null, permission: "audit.read" },

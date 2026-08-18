@@ -6,6 +6,7 @@ import { getInvoiceDetail, type InvoiceDetail } from "@/server/services/invoices
 import { getStockLedger } from "@/server/services/parts.service";
 import { prisma } from "@/lib/prisma";
 import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
+import { normalizeSearchTerm } from "@/lib/search-utils";
 
 /**
  * Read-only lookups used by drawers and modals.
@@ -79,5 +80,112 @@ export async function getAccountStatementAction(accountId: string) {
     return ok(statement);
   } catch (error) {
     return toActionError(error, "getAccountStatementAction");
+  }
+}
+
+export async function searchReturnSourceInvoicesAction(type: "SALE" | "PURCHASE", query = "") {
+  try {
+    await requirePermission("invoice.read");
+    const term = query.trim();
+    const variations = term ? normalizeSearchTerm(term).variations : [];
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        type,
+        isVoided: false,
+        ...(term ? {
+          OR: variations.flatMap((variation) => [
+            { invoiceNumber: { contains: variation, mode: "insensitive" } },
+            { account: { name: { contains: variation } } },
+            { account: { phone: { contains: variation } } },
+          ]),
+        } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        createdAt: true,
+        grandTotal: true,
+        paidAmount: true,
+        remainingAmount: true,
+        paymentStatus: true,
+        account: { select: { name: true, phone: true, accountNumber: true } },
+      },
+    });
+    return ok(invoices.map((invoice) => ({
+      ...invoice,
+      grandTotal: Number(invoice.grandTotal),
+      paidAmount: Number(invoice.paidAmount),
+      remainingAmount: Number(invoice.remainingAmount),
+      createdAt: invoice.createdAt.toISOString(),
+    })));
+  } catch (error) {
+    return toActionError(error, "searchReturnSourceInvoicesAction");
+  }
+}
+
+export async function getReturnSourceInvoiceAction(invoiceId: string) {
+  try {
+    await requirePermission("invoice.read");
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        type: true,
+        subtotal: true,
+        discountAmount: true,
+        taxAmount: true,
+        createdAt: true,
+        isVoided: true,
+        account: { select: { id: true, name: true, phone: true, accountNumber: true, currentBalance: true } },
+        items: {
+          select: {
+            id: true,
+            partId: true,
+            quantity: true,
+            unitPrice: true,
+            totalPrice: true,
+            part: { select: { nameAr: true, oemNumber: true, stockQuantity: true } },
+          },
+        },
+        returns: {
+          where: { isVoided: false },
+          select: { items: { select: { partId: true, quantity: true } } },
+        },
+      },
+    });
+    if (!invoice || invoice.isVoided || (invoice.type !== "SALE" && invoice.type !== "PURCHASE")) {
+      return { success: false as const, error: "الفاتورة الأصلية غير متاحة للمرتجع." };
+    }
+    const returnedByPart = new Map<string, number>();
+    for (const returned of invoice.returns) {
+      for (const item of returned.items) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
+    }
+    return ok({
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      type: invoice.type,
+      subtotal: Number(invoice.subtotal),
+      discountAmount: Number(invoice.discountAmount),
+      taxAmount: Number(invoice.taxAmount),
+      createdAt: invoice.createdAt.toISOString(),
+      account: { ...invoice.account, currentBalance: Number(invoice.account.currentBalance) },
+      items: invoice.items.map((item) => ({
+        id: item.id,
+        partId: item.partId,
+        nameAr: item.part.nameAr,
+        oemNumber: item.part.oemNumber,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        totalPrice: Number(item.totalPrice),
+        stockQuantity: item.part.stockQuantity,
+        previouslyReturnedQuantity: returnedByPart.get(item.partId) ?? 0,
+        availableQuantity: Math.max(0, item.quantity - (returnedByPart.get(item.partId) ?? 0)),
+      })),
+    });
+  } catch (error) {
+    return toActionError(error, "getReturnSourceInvoiceAction");
   }
 }
