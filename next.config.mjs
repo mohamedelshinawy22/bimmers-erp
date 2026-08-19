@@ -13,6 +13,9 @@ const nextConfig = {
     // externalising it gains nothing and only risks the file not being traced
     // into the serverless bundle. Let the bundler include it normally.
     serverComponentsExternalPackages: ["@prisma/client", "ioredis"],
+    // A 2MB source logo becomes roughly 2.7MB after base64 encoding. Leave room
+    // for the remaining validated company profile fields without accepting unbounded payloads.
+    serverActions: { bodySizeLimit: "6mb" },
   },
   logging: {
     fetches: { fullUrl: false },
