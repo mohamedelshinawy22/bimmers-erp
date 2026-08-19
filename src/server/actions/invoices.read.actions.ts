@@ -47,7 +47,7 @@ export async function getStockLedgerAction(partId: string) {
   }
 }
 
-export async function getAccountDetailedLedgerAction(accountId: string, filters?: { from?: string; to?: string; movementTypes?: string[]; query?: string }) {
+export async function getAccountDetailedLedgerAction(accountId: string, filters?: { from?: string; to?: string; movementTypes?: string[]; query?: string; mode?: "SUMMARY" | "DETAILED" }) {
   try {
     await requirePermission("account.viewStatement");
     const ledger = await getAccountDetailedLedger(accountId, filters);

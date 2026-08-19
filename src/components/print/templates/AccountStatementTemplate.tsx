@@ -16,7 +16,8 @@ export interface AccountStatementPrintData {
   debit: number;
   credit: number;
   closingBalance: number;
-  rows: Array<{ id: string; createdAt: string; reference: string; type: string; debit: number; credit: number; runningBalance: number; treasury?: string | null; note?: string | null }>;
+  mode?: "SUMMARY" | "DETAILED";
+  rows: Array<{ id: string; createdAt: string; reference: string; type: string; debit: number; credit: number; runningBalance: number; treasury?: string | null; note?: string | null; items?: Array<{ id: string; oemNumber: string; nameAr: string; brandName: string; quantity: number; unitPrice: number; lineDiscount: number; totalPrice: number }> }>;
 }
 
 export function AccountStatementTemplate({ data }: { data: AccountStatementPrintData }) {

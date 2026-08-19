@@ -180,8 +180,10 @@ export async function getAccountVehicles(accountId: string, limit = 50): Promise
   }));
 }
 
-export type AccountLedgerFilters = { from?: string; to?: string; movementTypes?: string[]; query?: string };
-export type AccountLedgerRow = { id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentId: string; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null };
+export type AccountLedgerMode = "SUMMARY" | "DETAILED";
+export type AccountLedgerFilters = { from?: string; to?: string; movementTypes?: string[]; query?: string; mode?: AccountLedgerMode };
+export type AccountLedgerItem = { id: string; oemNumber: string; nameAr: string; brandName: string; quantity: number; unitPrice: number; lineDiscount: number; totalPrice: number };
+export type AccountLedgerRow = { id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentId: string; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null; items: AccountLedgerItem[] };
 
 /**
  * Produces one replayable account ledger. Account balances use the established
@@ -192,20 +194,44 @@ export type AccountLedgerRow = { id: string; createdAt: string; reference: strin
 export async function getAccountDetailedLedger(accountId: string, filters: AccountLedgerFilters = {}) {
   const [account, invoices, transactions] = await Promise.all([
     prisma.account.findUnique({ where: { id: accountId }, select: { id: true, name: true, accountNumber: true, phone: true, type: true, creditLimit: true, currentBalance: true, createdAt: true } }),
-    prisma.invoice.findMany({ where: { accountId, isVoided: false }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, invoiceNumber: true, type: true, grandTotal: true, notes: true, createdAt: true } }),
+    prisma.invoice.findMany({
+      where: { accountId, isVoided: false },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        invoiceNumber: true,
+        type: true,
+        grandTotal: true,
+        notes: true,
+        createdAt: true,
+        items: {
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            lineDiscount: true,
+            totalPrice: true,
+            part: { select: { nameAr: true, oemNumber: true, brand: { select: { name: true } } } },
+          },
+        },
+      },
+    }),
     prisma.treasuryTransaction.findMany({ where: { accountId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, transactionNumber: true, invoiceId: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } } } }),
   ]);
   if (!account) return null;
 
   type InternalRow = Omit<AccountLedgerRow, "createdAt" | "debit" | "credit" | "runningBalance"> & { createdAt: Date; debit: Prisma.Decimal; credit: Prisma.Decimal; sequence: number };
+  const mode: AccountLedgerMode = filters.mode === "DETAILED" ? "DETAILED" : "SUMMARY";
   const invoiceRows: InternalRow[] = invoices.map((invoice) => {
     const isDebit = invoice.type === "SALE" || invoice.type === "PURCHASE_RETURN";
     const label = invoice.type === "SALE" ? "فاتورة بيع" : invoice.type === "PURCHASE" ? "فاتورة شراء" : invoice.type === "SALE_RETURN" ? "مرتجع بيع" : invoice.type === "PURCHASE_RETURN" ? "مرتجع شراء" : "عرض سعر";
-    return { id: `inv:${invoice.id}`, createdAt: invoice.createdAt, reference: invoice.invoiceNumber, type: invoice.type, typeLabel: label, debit: isDebit ? money(invoice.grandTotal) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(invoice.grandTotal), treasuryName: null, note: invoice.notes, documentId: invoice.id, documentKind: "INVOICE", invoiceId: invoice.id, sequence: 0 };
+    const items: AccountLedgerItem[] = mode === "DETAILED" ? invoice.items.map((item) => ({ id: item.id, oemNumber: item.part.oemNumber, nameAr: item.part.nameAr, brandName: item.part.brand.name, quantity: item.quantity, unitPrice: num(item.unitPrice), lineDiscount: num(item.lineDiscount), totalPrice: num(item.totalPrice) })) : [];
+    return { id: `inv:${invoice.id}`, createdAt: invoice.createdAt, reference: invoice.invoiceNumber, type: invoice.type, typeLabel: label, debit: isDebit ? money(invoice.grandTotal) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(invoice.grandTotal), treasuryName: null, note: invoice.notes, documentId: invoice.id, documentKind: "INVOICE", invoiceId: invoice.id, items, sequence: 0 };
   });
   const transactionRows: InternalRow[] = transactions.map((transaction) => {
     const isDebit = transaction.type === "PAYMENT";
-    return { id: `trx:${transaction.id}`, createdAt: transaction.createdAt, reference: transaction.transactionNumber, type: transaction.type, typeLabel: isDebit ? "سند صرف" : transaction.type === "RECEIPT" ? "سند قبض" : "تحويل خزينة", debit: isDebit ? money(transaction.amount) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(transaction.amount), treasuryName: transaction.treasury.name, note: transaction.description, documentId: transaction.id, documentKind: "TREASURY_TRANSACTION", invoiceId: transaction.invoiceId, sequence: 1 };
+    return { id: `trx:${transaction.id}`, createdAt: transaction.createdAt, reference: transaction.transactionNumber, type: transaction.type, typeLabel: isDebit ? "سند صرف" : transaction.type === "RECEIPT" ? "سند قبض" : "تحويل خزينة", debit: isDebit ? money(transaction.amount) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(transaction.amount), treasuryName: transaction.treasury.name, note: transaction.description, documentId: transaction.id, documentKind: "TREASURY_TRANSACTION", invoiceId: transaction.invoiceId, items: [], sequence: 1 };
   });
   const events = [...invoiceRows, ...transactionRows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.sequence - b.sequence || a.id.localeCompare(b.id));
   const totalDelta = events.reduce((sum, row) => sum.add(row.credit).sub(row.debit), new Prisma.Decimal(0));
@@ -231,13 +257,14 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
     running = money(running.add(event.credit).sub(event.debit));
     closingBalance = running;
     const matchesType = movementTypes.size === 0 || movementTypes.has(event.type);
-    const haystack = `${event.reference} ${event.typeLabel} ${event.note ?? ""} ${event.treasuryName ?? ""}`.toLocaleLowerCase("ar-EG");
+    const itemSearch = event.items.map((item) => `${item.nameAr} ${item.oemNumber} ${item.brandName}`).join(" ");
+    const haystack = `${event.reference} ${event.typeLabel} ${event.note ?? ""} ${event.treasuryName ?? ""} ${itemSearch}`.toLocaleLowerCase("ar-EG");
     if (!matchesType || (query && !haystack.includes(query))) continue;
     rows.push({ ...event, createdAt: event.createdAt.toISOString(), debit: num(event.debit), credit: num(event.credit), runningBalance: num(running) });
   }
   const totalDebit = rows.reduce((sum, row) => sum.add(row.debit), new Prisma.Decimal(0));
   const totalCredit = rows.reduce((sum, row) => sum.add(row.credit), new Prisma.Decimal(0));
-  return { account: { id: account.id, name: account.name, accountNumber: account.accountNumber, phone: account.phone, type: account.type, creditLimit: num(account.creditLimit), currentBalance: num(account.currentBalance) }, filters: { from: validFrom?.toISOString() ?? null, to: validTo?.toISOString() ?? null }, openingBalance: num(openingBalance), totalDebit: num(totalDebit), totalCredit: num(totalCredit), closingBalance: num(closingBalance), rows };
+  return { account: { id: account.id, name: account.name, accountNumber: account.accountNumber, phone: account.phone, type: account.type, creditLimit: num(account.creditLimit), currentBalance: num(account.currentBalance) }, filters: { from: validFrom?.toISOString() ?? null, to: validTo?.toISOString() ?? null, mode }, openingBalance: num(openingBalance), totalDebit: num(totalDebit), totalCredit: num(totalCredit), closingBalance: num(closingBalance), rows };
 }
 
 /** Account statement: chronological invoices + treasury movements. */
