@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MStripe } from "@/components/layout/m-stripe";
 import { HotkeysListener } from "@/components/layout/hotkeys-listener";
+import { SidebarProvider } from "@/components/layout/sidebar-context";
 import { getCompanyProfile } from "@/server/services/settings.service";
 
 export const dynamic = "force-dynamic";
@@ -40,14 +41,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const company = await getCompanyProfile();
   const branding = { name: company.name, logoUrl: company.logoUrl };
   return (
-    <div className="flex min-h-screen" dir="rtl">
-      <HotkeysListener />
-      <Sidebar role={user.role} branding={branding} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <MStripe className="no-print" />
-        <Header user={user} branding={branding} />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+    <SidebarProvider>
+      <div className="flex min-h-screen" dir="rtl">
+        <HotkeysListener />
+        <Sidebar role={user.role} branding={branding} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <MStripe className="no-print" />
+          <Header user={user} branding={branding} />
+          <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }

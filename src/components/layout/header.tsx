@@ -2,12 +2,13 @@
 
 import { useTransition } from "react";
 import Link from "next/link";
-import { Car, LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { Car, LogOut, Menu, ShieldCheck, UserRound, X } from "lucide-react";
 import type { Role } from "@prisma/client";
 import { logoutAction } from "@/server/actions/auth.actions";
 import { ARABIC_LABELS } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { HotkeyBadges } from "./hotkeys-listener";
+import { useSidebar } from "./sidebar-context";
 
 interface HeaderProps {
   user: { fullName: string; username: string; role: Role };
@@ -16,10 +17,14 @@ interface HeaderProps {
 
 export function Header({ user, branding }: HeaderProps) {
   const [pending, startTransition] = useTransition();
+  const { isMobileOpen, toggleMobileSidebar } = useSidebar();
 
   return (
-    <header className="no-print sticky top-0 z-40 flex items-center justify-between gap-4 border-b border-bmw-cardBorder bg-bmw-carbon/80 px-6 py-4 backdrop-blur-md">
-      <div className="flex items-center gap-4">
+    <header className="no-print sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-bmw-cardBorder bg-bmw-carbon/80 px-4 py-4 backdrop-blur-md sm:px-6">
+      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+        <button type="button" onClick={toggleMobileSidebar} className="rounded-xl border border-bmw-cardBorder bg-bmw-card p-2 text-bmw-muted transition-colors hover:border-bmw-blue/50 hover:text-white lg:hidden" aria-label={isMobileOpen ? "إغلاق القائمة الجانبية" : "فتح القائمة الجانبية"} aria-expanded={isMobileOpen}>
+          {isMobileOpen ? <X size={21} className="text-bmw-mRed" /> : <Menu size={21} />}
+        </button>
         <Link href="/" className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 text-bmw-blue">{branding.logoUrl ? <img src={branding.logoUrl} alt={`شعار ${branding.name}`} className="h-8 w-auto max-w-10 object-contain" /> : <Car size={22} />}</div>
           <div className="min-w-0">
