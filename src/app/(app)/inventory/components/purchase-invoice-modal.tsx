@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { PackageCheck, Plus, Printer, Search, ShoppingBag, Trash2, X } from "lucide-react";
+import { Barcode, PackageCheck, Plus, Printer, Search, ShoppingBag, Trash2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { createPartAction } from "@/server/actions/parts.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { useInvoicePrint } from "@/hooks/use-invoice-print";
 import { PrintContainer } from "@/components/print/print-container";
+import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 
 interface Line {
   part: PosPartRow;
@@ -32,6 +33,7 @@ interface PurchaseInvoiceModalProps {
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   taxRatePercent: number;
   initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; paymentMethod: "CASH" | "VISA" | "ON_ACCOUNT"; discountAmount: number; paidAmount: number; notes: string | null; lines: Line[] };
+  company?: { name: string; logoUrl?: string | null };
 }
 
 /**
@@ -69,6 +71,7 @@ export function PurchaseInvoiceModal({
   treasuries,
   taxRatePercent,
   initialDraft,
+  company,
 }: PurchaseInvoiceModalProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -89,6 +92,7 @@ export function PurchaseInvoiceModal({
   const [done, setDone] = useState<{ invoiceId: string; invoiceNumber: string; grandTotal: number } | null>(null);
   const [quickPartOpen, setQuickPartOpen] = useState(false);
   const [quickSupplierOpen, setQuickSupplierOpen] = useState(false);
+  const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const isEditMode = Boolean(initialDraft);
   const { data: printData, format, state: printState, print, onAfterPrint } = useInvoicePrint(done?.invoiceId);
 
@@ -272,6 +276,9 @@ export function PurchaseInvoiceModal({
         <>
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             إلغاء
+          </Button>
+          <Button variant="outline" onClick={() => setBarcodePrintOpen(true)} disabled={!lines.length || pending}>
+            <Barcode size={16} /> ملصقات الباركود
           </Button>
           <Button onClick={submit} loading={pending} disabled={!canSubmit}>
             <ShoppingBag size={16} /> {isEditMode ? "حفظ تعديلات الفاتورة" : "حفظ فاتورة الشراء"}
@@ -529,6 +536,7 @@ export function PurchaseInvoiceModal({
           </div>
         </div>
       </div>
+      {barcodePrintOpen ? <BarcodePrintModal parts={lines.map((line) => ({ id: line.part.id, nameAr: line.part.nameAr, oemNumber: line.part.oemNumber, brandName: line.part.brandName, sellPriceRetail: line.part.sellPriceRetail }))} company={company ?? { name: "BimmerERP" }} onClose={() => setBarcodePrintOpen(false)} /> : null}
     </Modal>
   );
 }

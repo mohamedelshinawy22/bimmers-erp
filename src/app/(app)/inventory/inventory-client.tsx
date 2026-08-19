@@ -33,7 +33,7 @@ import type { BinOption } from "./components/bin-locator";
 import type { ChassisOption, EngineOption } from "./components/fitment-matrix";
 import { PurchaseInvoiceModal } from "./components/purchase-invoice-modal";
 import { StockLedgerModal } from "./components/stock-ledger-modal";
-import { BarcodeThermalLabel } from "@/components/print/templates/barcode-thermal-label";
+import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { ExcelImportModal } from "@/components/inventory/excel-import-modal";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
@@ -444,7 +444,7 @@ export function InventoryClient({
       ) : null}
 
       {catalogPrintOpen ? <UniversalPrintModal documentType="part" title="معاينة وطباعة كتالوج الأصناف" description="اطبع قائمة الأسعار أو الكتالوج العصري أو نموذج الجرد الكلاسيكي أو ملصقات الرف الحرارية." onClose={() => setCatalogPrintOpen(false)} showBalanceToggle={false} renderDocument={(printOptions) => <PartCatalogPrintDocument data={catalogPrintData} options={printOptions} />} /> : null}
-      {barcodePrintOpen ? <BatchBarcodePrintModal parts={selectedParts} onClose={() => setBarcodePrintOpen(false)} /> : null}
+      {barcodePrintOpen ? <BarcodePrintModal parts={selectedParts} company={{ name: company.name, logoUrl: company.logoUrl }} onClose={() => setBarcodePrintOpen(false)} /> : null}
       {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
 
@@ -455,6 +455,7 @@ export function InventoryClient({
           suppliers={purchaseOptions.suppliers}
           treasuries={purchaseOptions.treasuries}
           taxRatePercent={purchaseOptions.taxRatePercent}
+          company={{ name: company.name, logoUrl: company.logoUrl }}
         />
       ) : null}
     </div>
@@ -501,12 +502,6 @@ function DeletePartsModal({ parts, onClose, onDeleted }: { parts: PartRow[]; onC
   };
   const title = parts.length === 1 ? `حذف الصنف: ${parts[0]?.nameAr ?? ""}` : `حذف ${parts.length} أصناف محددة`;
   return <Modal open onClose={onClose} title={title} description="لا يمكن التراجع عن حذف صنف من الكتالوج." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> تأكيد الحذف</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">سيجري النظام فحص كل صنف قبل الحذف. أي فاتورة بيع أو شراء أو مرتجع أو حركة مخزون أو عملية بيع معلقة مرتبطة بالصنف ستمنع الحذف بالكامل لحماية السجل المحاسبي.</Alert><div className="max-h-36 space-y-1 overflow-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-xs">{parts.map((part) => <p key={part.id}><b className="text-white">{part.nameAr}</b> <span className="font-mono text-bmw-muted">{formatOemNumber(part.oemNumber)}</span></p>)}</div></div></Modal>;
-}
-
-function BatchBarcodePrintModal({ parts, onClose }: { parts: PartRow[]; onClose: () => void }) {
-  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(parts.map((part) => [part.id, 1])));
-  const labels = parts.flatMap((part) => Array.from({ length: Math.max(0, Math.min(100, counts[part.id] ?? 1)) }, (_, index) => ({ part, index })));
-  return <Modal open onClose={onClose} title="طباعة ملصقات الباركود" description="حدّد عدد الملصقات لكل صنف ثم استخدم نافذة الطباعة." size="lg" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button onClick={() => window.print()} disabled={!labels.length}><Printer size={16}/>طباعة {labels.length} ملصق</Button></>}><div className="space-y-3"><div className="space-y-2">{parts.map((part) => <label key={part.id} className="flex items-center justify-between rounded-lg border border-bmw-cardBorder p-2 text-sm"><span>{part.nameAr} <span className="font-mono text-bmw-muted">{part.barcode || part.oemNumber}</span></span><Input className="w-20" type="number" min={0} max={100} value={counts[part.id] ?? 1} onChange={(event) => setCounts({ ...counts, [part.id]: Math.trunc(Number(event.target.value) || 0) })}/></label>)}</div><div id="printable-barcode-labels" className="hidden print:block">{labels.map(({ part, index }) => <BarcodeThermalLabel key={`${part.id}-${index}`} storeName="الشافعي لقطع غيار BMW" partName={part.nameAr} code={part.barcode || part.oemNumber} price={formatMoney(part.sellPriceRetail)} />)}</div></div></Modal>;
 }
 
 function AdjustStockModal({
