@@ -3,7 +3,7 @@
 import { requirePermission } from "@/lib/auth";
 import { toActionError, ok, type ActionResult } from "@/lib/action-result";
 import { quickSearchParts, type PosPartRow } from "@/server/services/parts.service";
-import { getAccountVehicles, searchPosAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
+import { getAccountVehicles, searchPosAccounts, searchSupplierAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
 
 /**
  * Thin authenticated wrapper so the POS can search on keystroke.
@@ -18,6 +18,15 @@ export async function searchPosAccountsAction(query: string): Promise<ActionResu
     return ok(await searchPosAccounts(query, 30));
   } catch (error) {
     return toActionError(error, "searchPosAccountsAction");
+  }
+}
+
+export async function searchSuppliersAction(query: string): Promise<ActionResult<PosAccount[]>> {
+  try {
+    await requirePermission("account.read");
+    return ok(await searchSupplierAccounts(query, 30));
+  } catch (error) {
+    return toActionError(error, "searchSuppliersAction");
   }
 }
 

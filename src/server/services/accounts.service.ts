@@ -188,6 +188,48 @@ export async function searchPosAccounts(query: string, limit = 30): Promise<PosA
   }));
 }
 
+export async function searchSupplierAccounts(query: string, limit = 30): Promise<PosAccount[]> {
+  const term = query.trim();
+  const { variations } = normalizeSearchTerm(term);
+  const accounts = await prisma.account.findMany({
+    where: {
+      isActive: true,
+      type: "SUPPLIER",
+      ...(term ? {
+        OR: variations.flatMap((value) => [
+          { name: { contains: value } },
+          { accountNumber: { contains: value, mode: "insensitive" as const } },
+          { phone: { contains: value } },
+        ]),
+      } : {}),
+    },
+    orderBy: [{ name: "asc" }],
+    take: Math.min(50, Math.max(1, limit)),
+    select: {
+      id: true,
+      accountNumber: true,
+      name: true,
+      type: true,
+      phone: true,
+      creditLimit: true,
+      currentBalance: true,
+      defaultPriceTier: true,
+      _count: { select: { vehicles: true } },
+    },
+  });
+  return accounts.map((account) => ({
+    id: account.id,
+    accountNumber: account.accountNumber,
+    name: account.name,
+    type: account.type,
+    phone: account.phone,
+    creditLimit: num(account.creditLimit),
+    currentBalance: num(account.currentBalance),
+    defaultPriceTier: account.defaultPriceTier,
+    vehicleCount: account._count.vehicles,
+  }));
+}
+
 export interface AccountVehicle {
   id: string;
   vin: string;

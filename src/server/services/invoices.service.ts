@@ -226,7 +226,7 @@ export async function getPurchaseFormOptions() {
     prisma.account.findMany({
       where: { isActive: true, type: "SUPPLIER" },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, accountNumber: true, currentBalance: true },
+      select: { id: true, name: true, accountNumber: true, phone: true, currentBalance: true },
     }),
     prisma.treasury.findMany({
       where: { isActive: true },

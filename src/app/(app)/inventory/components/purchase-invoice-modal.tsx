@@ -18,6 +18,7 @@ import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { useInvoicePrint } from "@/hooks/use-invoice-print";
 import { PrintContainer } from "@/components/print/print-container";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
+import { SupplierCombobox, type SupplierOption } from "@/components/purchases/supplier-combobox";
 
 interface Line {
   part: PosPartRow;
@@ -29,7 +30,7 @@ interface Line {
 interface PurchaseInvoiceModalProps {
   open: boolean;
   onClose: () => void;
-  suppliers: Array<{ id: string; name: string; accountNumber: string; currentBalance: number }>;
+  suppliers: SupplierOption[];
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   taxRatePercent: number;
   initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; paymentMethod: "CASH" | "VISA" | "ON_ACCOUNT"; discountAmount: number; paidAmount: number; notes: string | null; lines: Line[] };
@@ -43,7 +44,7 @@ interface PurchaseInvoiceModalProps {
  * added through manual adjustment, which had no cost input — so received parts
  * were valued at zero and every subsequent sale reported ~100% margin.
  */
-function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (supplier: { id: string; name: string; accountNumber: string; currentBalance: number }) => void }) {
+function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (supplier: SupplierOption) => void }) {
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -53,7 +54,7 @@ function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: 
   const submit = () => startTransition(async () => {
     const result = await createQuickPosAccountAction({ name, phone, address, openingBalance: Number(openingBalance) || 0, type: "SUPPLIER", defaultPriceTier: "RETAIL", notes: "إنشاء سريع من فاتورة شراء" });
     if (!result.success) { setError(result.error); return; }
-    onCreated({ id: result.data.id, name: result.data.name, accountNumber: result.data.accountNumber, currentBalance: result.data.currentBalance });
+    onCreated({ id: result.data.id, name: result.data.name, accountNumber: result.data.accountNumber, phone: phone.trim() || null, currentBalance: result.data.currentBalance });
   });
   return <Modal open onClose={onClose} title="مورد جديد سريع" description="سيتم اختيار المورد الجديد في فاتورة الشراء الحالية دون فقدان بنود المسودة." size="md" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button loading={pending} disabled={!name.trim()} onClick={submit}>إنشاء واختيار</Button></>}><div className="grid gap-3 sm:grid-cols-2">{error ? <div className="sm:col-span-2"><Alert variant="error">{error}</Alert></div> : null}<Field label="اسم المورد" required className="sm:col-span-2"><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus placeholder="اسم المورد" /></Field><Field label="الهاتف"><Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="رقم الهاتف (اختياري)" dir="ltr" className="text-left" /></Field><Field label="الرصيد الافتتاحي"><Input type="number" step="0.01" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} /></Field><Field label="العنوان" className="sm:col-span-2"><Textarea rows={2} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="العنوان (اختياري)" /></Field></div></Modal>;
 }
@@ -292,15 +293,16 @@ export function PurchaseInvoiceModal({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="المورد" required>
             <div className="space-y-1.5">
-              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">— اختر المورد —</option>
-                {supplierOptions.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name} ({supplier.accountNumber})
-                  </option>
-                ))}
-              </Select>
-              <Button type="button" size="sm" variant="ghost" className="w-full justify-start" onClick={() => setQuickSupplierOpen(true)}><Plus size={14} /> مورد جديد (Alt+S)</Button>
+              <SupplierCombobox
+                suppliers={supplierOptions}
+                selectedId={supplierId}
+                onSelect={(supplier) => {
+                  setSupplierOptions((current) => current.some((item) => item.id === supplier.id) ? current : [...current, supplier].sort((a, b) => a.name.localeCompare(b.name, "ar")));
+                  setSupplierId(supplier.id);
+                }}
+                onQuickCreate={() => setQuickSupplierOpen(true)}
+                onMoveToPartSearch={() => searchRef.current?.focus()}
+              />
             </div>
           </Field>
           <Field label="طريقة السداد" required>
