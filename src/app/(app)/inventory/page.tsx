@@ -3,7 +3,7 @@ import { can, requireUser } from "@/lib/auth";
 import { getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPartFormOptions, searchParts } from "@/server/services/parts.service";
 import { getPurchaseFormOptions } from "@/server/services/invoices.service";
-import { getPartCategories, getSetting } from "@/server/services/settings.service";
+import { getCompanyProfile, getPartCategories, getSetting } from "@/server/services/settings.service";
 import { InventoryClient } from "./inventory-client";
 
 export const metadata = { title: "كتالوج البضاعة" };
@@ -34,7 +34,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
   const lowStockOnly = searchParams.lowStock === "1";
   const canPurchase = can(user.role, "invoice.purchase");
 
-  const [result, options, categories, purchaseOptions, taxRateRaw] = await Promise.all([
+  const [result, options, categories, purchaseOptions, taxRateRaw, company] = await Promise.all([
     searchParts({
       query,
       chassisCode: chassisCode || undefined,
@@ -48,6 +48,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
     getPartCategories(),
     canPurchase ? getPurchaseFormOptions() : Promise.resolve({ suppliers: [], treasuries: [] }),
     getSetting("TAX_RATE_PERCENT", "0"),
+    getCompanyProfile(),
   ]);
 
   const canViewCost = can(user.role, "part.viewCost") && hasPermission(access, "canViewCostPrice");
@@ -85,6 +86,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       }}
       openNewOnMount={searchParams.new === "1" && can(user.role, "part.write")}
       openPurchaseOnMount={searchParams.purchase === "1" && canPurchase}
+      company={company}
     />
   );
 }

@@ -5,8 +5,8 @@ import { getInvoicePrintDataAction } from "@/server/actions/invoice-print.action
 import type { InvoicePrintData, InvoicePrintFormat } from "@/lib/invoice-print-types";
 import type { InvoiceTemplateChoice } from "@/components/print/print-container";
 
-const TEMPLATE_STORAGE_KEY = "bimmererp:preferred-invoice-template";
-const FORMAT_STORAGE_KEY = "bimmererp:preferred-invoice-paper";
+const TEMPLATE_STORAGE_KEY = "bimmer_print_template_invoice";
+const FORMAT_STORAGE_KEY = "bimmer_print_paper_invoice";
 const validTemplates: InvoiceTemplateChoice[] = ["modern", "classic", "thermal-80mm"];
 const validFormats: InvoicePrintFormat[] = ["A4_STANDARD", "A5", "THERMAL_80", "THERMAL_57", "E_INVOICE"];
 

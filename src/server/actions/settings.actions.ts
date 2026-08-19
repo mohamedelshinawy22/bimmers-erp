@@ -6,6 +6,7 @@ import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
+import { getCompanyProfile, type CompanyProfile } from "@/server/services/settings.service";
 import { companyProfileSettingsSchema, updateSettingsSchema, type CompanyProfileSettingsInput } from "@/lib/validations/accounts";
 import {
   BOOLEAN_SETTING_KEYS as BOOLEAN_KEYS,
@@ -13,6 +14,15 @@ import {
 } from "@/lib/settings-keys";
 
 
+
+export async function getCompanyProfileForPrintAction(): Promise<ActionResult<CompanyProfile>> {
+  try {
+    await requirePermission("reports.dailyMovement");
+    return ok(await getCompanyProfile());
+  } catch (error) {
+    return toActionError(error, "getCompanyProfileForPrintAction");
+  }
+}
 
 export async function updateCompanySettingsAction(raw: CompanyProfileSettingsInput): Promise<ActionResult<{ updated: number }>> {
   try {

@@ -15,7 +15,9 @@ import type { CompanyProfile } from "@/server/services/settings.service";
 import { createAccountAction, createVehicleAction, deleteAccountsAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
-import { AccountStatementTemplate, type AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
+import type { AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
+import { UniversalPrintModal } from "@/components/print/universal-print-modal";
+import { StatementPrintDocument } from "@/components/print/templates/universal-document-templates";
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 
@@ -761,7 +763,7 @@ function StatementModal({ account, company, onClose }: { account: AccountRow; co
   const [to, setTo] = useState("");
   const [movementType, setMovementType] = useState("ALL");
   const [query, setQuery] = useState("");
-  const [printRequested, setPrintRequested] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -774,13 +776,6 @@ function StatementModal({ account, company, onClose }: { account: AccountRow; co
     return () => { cancelled = true; };
   }, [account.id, from, to, movementType, query]);
 
-  useEffect(() => {
-    if (!printRequested) return;
-    const done = () => setPrintRequested(false);
-    window.addEventListener("afterprint", done);
-    const timer = window.setTimeout(() => window.print(), 60);
-    return () => { window.clearTimeout(timer); window.removeEventListener("afterprint", done); };
-  }, [printRequested]);
 
   const exportCsv = () => {
     if (!data) return;
@@ -792,7 +787,7 @@ function StatementModal({ account, company, onClose }: { account: AccountRow; co
   const printData: AccountStatementPrintData | null = data ? { companyName: company.name, companyAddress: company.address, companyPhone: [company.phonePrimary, company.phoneSecondary].filter(Boolean).join(" - "), companyTaxNumber: company.taxNumber, companyCommercialRegister: company.commercialRegister, companyLogoUrl: company.logoUrl, accountName: data.account.name, accountNumber: data.account.accountNumber, phone: data.account.phone, from: data.filters.from ?? undefined, to: data.filters.to ?? undefined, openingBalance: data.openingBalance, debit: data.totalDebit, credit: data.totalCredit, closingBalance: data.closingBalance, rows: data.rows.map((row) => ({ id: row.id, createdAt: row.createdAt, reference: row.reference, type: row.typeLabel, debit: row.debit, credit: row.credit, runningBalance: row.runningBalance, treasury: row.treasuryName, note: row.note })) } : null;
 
   return <>
-    <Modal open onClose={onClose} title={`كشف حساب تفصيلي — ${account.name}`} description={`${account.accountNumber} • الرصيد الحالي ${formatMoney(account.currentBalance)} ${CURRENCY}`} size="xl" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button variant="outline" onClick={exportCsv} disabled={!data}><Download size={15} /> تصدير CSV</Button><Button variant="outline" onClick={() => setPrintRequested(true)} disabled={!printData}><Printer size={15} /> طباعة A4</Button></>}>
+    <Modal open onClose={onClose} title={`كشف حساب تفصيلي — ${account.name}`} description={`${account.accountNumber} • الرصيد الحالي ${formatMoney(account.currentBalance)} ${CURRENCY}`} size="xl" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button variant="outline" onClick={exportCsv} disabled={!data}><Download size={15} /> تصدير CSV</Button><Button variant="outline" onClick={() => setPrintOpen(true)} disabled={!printData}><Printer size={15} /> طباعة كشف الحساب</Button></>}>
       <div className="space-y-4">
         {error ? <Alert variant="error">{error}</Alert> : null}
         {!data && !error ? <p className="text-xs text-bmw-muted">جاري تحميل دفتر الأستاذ…</p> : null}
@@ -800,7 +795,7 @@ function StatementModal({ account, company, onClose }: { account: AccountRow; co
         {data ? <><div className="grid gap-2 sm:grid-cols-4"><StatementKpi label="رصيد افتتاحي" value={data.openingBalance} /><StatementKpi label="إجمالي مدين" value={data.totalDebit} tone="text-bmw-mRed" /><StatementKpi label="إجمالي دائن" value={data.totalCredit} tone="text-emerald-400" /><StatementKpi label="رصيد ختامي" value={data.closingBalance} tone="text-bmw-blue" /></div><Table><THead><TR><TH>التاريخ والوقت</TH><TH>المرجع</TH><TH>الحركة</TH><TH>مدين</TH><TH>دائن</TH><TH>الرصيد المتراكم</TH><TH>الخزينة</TH><TH>البيان</TH></TR></THead><TBody>{data.rows.length === 0 ? <EmptyState colSpan={8} title="لا توجد حركات وفق الفلاتر المحددة" /> : data.rows.map((row) => <TR key={row.id}><TD className="tabular whitespace-nowrap text-xs text-bmw-muted">{formatDateTime(row.createdAt)}</TD><TD><button type="button" className="font-mono text-xs font-bold text-bmw-blue hover:underline" onClick={() => row.documentKind === "INVOICE" ? router.push(`/invoices?q=${encodeURIComponent(row.reference)}`) : undefined}>{row.reference}</button></TD><TD><Badge variant={row.credit > 0 ? "success" : row.debit > 0 ? "danger" : "default"}>{row.typeLabel}</Badge></TD><TD className="tabular text-bmw-mRed">{row.debit ? formatMoney(row.debit) : "—"}</TD><TD className="tabular text-emerald-400">{row.credit ? formatMoney(row.credit) : "—"}</TD><TD><span className="rounded-full bg-bmw-blue/15 px-2 py-1 font-mono text-xs font-bold text-bmw-blue">{formatMoney(row.runningBalance)}</span></TD><TD className="text-xs">{row.treasuryName ?? "—"}</TD><TD className="max-w-[180px] truncate text-xs text-bmw-muted">{row.note ?? "—"}</TD></TR>)}</TBody></Table></> : null}
       </div>
     </Modal>
-    {printRequested && printData ? <AccountStatementTemplate data={printData} /> : null}
+    {printOpen && printData ? <UniversalPrintModal documentType="statement" title="معاينة وطباعة كشف الحساب" description="اختر القالب العصري أو الكلاسيكي أو الحراري، ثم اطبع أو احفظ كملف PDF." onClose={() => setPrintOpen(false)} showPartMetaToggle={false} renderDocument={(options) => <StatementPrintDocument data={printData} options={options} />} /> : null}
   </>;
 }
 
