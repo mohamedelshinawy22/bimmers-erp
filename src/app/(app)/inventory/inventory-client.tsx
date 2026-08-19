@@ -469,14 +469,20 @@ function InventoryExportMenu({ filters }: { filters: InventoryClientProps["filte
   const exportScope = (scope: "ALL" | "CRITICAL" | "OUT_OF_STOCK" | "FILTERED") => {
     setError(null);
     startTransition(async () => {
-      const result = await exportInventoryDataAction({ scope, format, filters: { query: filters.query || undefined, chassisCode: filters.chassis || undefined, category: filters.category || undefined, lowStockOnly: filters.lowStock } });
-      if (!result.success) { setError(result.error); return; }
-      const binary = atob(result.data.base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-      const url = URL.createObjectURL(new Blob([bytes], { type: result.data.mimeType }));
-      const anchor = document.createElement("a"); anchor.href = url; anchor.download = result.data.fileName; anchor.click(); URL.revokeObjectURL(url);
-      setOpen(false);
+      try {
+        const result = await exportInventoryDataAction({ scope, format, filters: { query: filters.query || undefined, chassisCode: filters.chassis || undefined, category: filters.category || undefined, lowStockOnly: filters.lowStock } });
+        if (!result.success) { setError(result.error); return; }
+        const anchor = document.createElement("a");
+        anchor.href = `data:${result.data.mimeType};base64,${result.data.base64}`;
+        anchor.download = result.data.fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        setOpen(false);
+      } catch (downloadError) {
+        console.error("[INVENTORY_EXPORT_DOWNLOAD_ERROR]", downloadError);
+        setError("تعذر تجهيز ملف التصدير. يرجى المحاولة مرة أخرى.");
+      }
     });
   };
   return <div className="relative"><Button variant="outline" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Download size={16} /> تصدير البيانات <ChevronDown size={14} /></Button>{open ? <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-2xl border border-bmw-cardBorder bg-bmw-carbon p-3 shadow-2xl" dir="rtl"><div className="mb-3 flex items-center justify-between gap-2"><p className="text-sm font-bold text-white">تصدير بيانات المخزون</p><Select className="w-28" value={format} onChange={(event) => setFormat(event.target.value as "XLSX" | "CSV")}><option value="XLSX">Excel</option><option value="CSV">CSV</option></Select></div><p className="mb-2 text-[11px] text-bmw-muted">سيُحجب سعر التكلفة تلقائياً إن لم تكن لديك صلاحية عرضه.</p>{error ? <Alert variant="error">{error}</Alert> : null}<div className="space-y-1"><button type="button" disabled={pending} onClick={() => exportScope("ALL")} className="w-full rounded-xl px-3 py-2 text-right text-sm text-white transition-colors hover:bg-bmw-blue/15 disabled:opacity-50">📦 تصدير كل البضاعة</button><button type="button" disabled={pending} onClick={() => exportScope("CRITICAL")} className="w-full rounded-xl px-3 py-2 text-right text-sm text-amber-300 transition-colors hover:bg-amber-400/10 disabled:opacity-50">⚠️ تصدير النواقص والحد الحرج</button><button type="button" disabled={pending} onClick={() => exportScope("OUT_OF_STOCK")} className="w-full rounded-xl px-3 py-2 text-right text-sm text-bmw-mRed transition-colors hover:bg-bmw-mRed/10 disabled:opacity-50">🚫 تصدير الأصناف النافذة / الصفرية</button><button type="button" disabled={pending} onClick={() => exportScope("FILTERED")} className="w-full rounded-xl px-3 py-2 text-right text-sm text-bmw-blue transition-colors hover:bg-bmw-blue/10 disabled:opacity-50">🔍 تصدير نتائج التصفية الحالية</button></div>{pending ? <p className="mt-2 text-xs text-bmw-blue">يتم تجهيز الملف…</p> : null}</div> : null}</div>;
