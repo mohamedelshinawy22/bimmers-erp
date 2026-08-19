@@ -48,7 +48,10 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.key, i.value]))),
   );
-  const [profile, setProfile] = useState({
+  const [savedValues, setSavedValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.key, i.value]))),
+  );
+  const initialProfile = {
     companyName: companyProfile.name,
     commercialName: companyProfile.commercialName,
     taxNumber: companyProfile.taxNumber,
@@ -58,32 +61,21 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
     phoneSecondary: companyProfile.phoneSecondary,
     logoUrl: companyProfile.logoUrl,
     footerNote: companyProfile.invoiceFooter,
-  });
+  };
+  const [profile, setProfile] = useState(initialProfile);
+  const [savedProfile, setSavedProfile] = useState(initialProfile);
 
   const dirty = groups
     .flatMap((g) => g.items)
-    .filter((item) => !HIDDEN_KEYS.has(item.key) && values[item.key] !== item.value);
-
-  const saveProfile = () => {
-    setError(null);
-    setSuccess(null);
-    startTransition(async () => {
-      const result = await updateCompanySettingsAction(profile);
-      if (!result.success) { setError(result.error); return; }
-      setSuccess(result.data.updated ? "تم حفظ بيانات المنشأة والطباعة بنجاح." : "بيانات المنشأة محفوظة بالفعل.");
-      router.refresh();
-    });
-  };
+    .filter((item) => !HIDDEN_KEYS.has(item.key) && values[item.key] !== savedValues[item.key]);
+  const profileDirtyCount = (Object.keys(profile) as Array<keyof typeof profile>).filter((key) => profile[key] !== savedProfile[key]).length;
+  const totalDirtyCount = dirty.length + profileDirtyCount;
+  const updateProfileField = <K extends keyof typeof profile>(key: K, value: typeof profile[K]) => setProfile((current) => ({ ...current, [key]: value }));
 
   const saveLogo = (logoUrl: string) => {
-    const nextProfile = { ...profile, logoUrl };
-    setProfile(nextProfile); setError(null); setSuccess(null);
-    startTransition(async () => {
-      const result = await updateCompanySettingsAction(nextProfile);
-      if (!result.success) { setError(result.error); return; }
-      setSuccess(logoUrl ? "تم تحديث وحفظ لوجو المنشأة بنجاح." : "تمت إزالة لوجو المنشأة بنجاح.");
-      router.refresh();
-    });
+    updateProfileField("logoUrl", logoUrl);
+    setError(null);
+    setSuccess(logoUrl ? "تم تحديث معاينة الشعار. اضغط حفظ التعديلات لتثبيت التغيير." : "تمت إزالة الشعار من المعاينة. اضغط حفظ التعديلات لتثبيت التغيير.");
   };
 
   const handleLogoFile = (file?: File) => {
@@ -98,17 +90,24 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
   };
 
   const submit = () => {
+    if (totalDirtyCount === 0) { setSuccess("لا توجد تعديلات جديدة للحفظ."); return; }
     setError(null);
     setSuccess(null);
     startTransition(async () => {
-      const result = await updateSettingsAction({
-        entries: dirty.map((item) => ({ key: item.key, value: values[item.key] ?? "" })),
-      });
-      if (!result.success) {
-        setError(result.error);
-        return;
+      let updated = 0;
+      if (profileDirtyCount > 0) {
+        const profileResult = await updateCompanySettingsAction(profile);
+        if (!profileResult.success) { setError(profileResult.error); return; }
+        updated += profileResult.data.updated;
+        setSavedProfile(profile);
       }
-      setSuccess(`تم حفظ ${result.data.updated} إعداد بنجاح.`);
+      if (dirty.length > 0) {
+        const settingsResult = await updateSettingsAction({ entries: dirty.map((item) => ({ key: item.key, value: values[item.key] ?? "" })) });
+        if (!settingsResult.success) { setError(settingsResult.error); return; }
+        updated += settingsResult.data.updated;
+        setSavedValues(values);
+      }
+      setSuccess(updated ? `تم حفظ ${updated} تعديل بنجاح، وتم تحديث هوية المنشأة في النظام.` : "البيانات محفوظة بالفعل.");
       router.refresh();
     });
   };
@@ -128,8 +127,8 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
           </div>
         </div>
         {canWrite ? (
-          <Button onClick={submit} loading={pending} disabled={dirty.length === 0}>
-            <Save size={16} /> حفظ التعديلات ({dirty.length})
+          <Button onClick={submit} loading={pending} disabled={totalDirtyCount === 0}>
+            <Save size={16} /> حفظ التعديلات ({totalDirtyCount})
           </Button>
         ) : null}
       </div>
@@ -147,17 +146,17 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="اسم الشركة / المنشأة" required><Input value={profile.companyName} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, companyName: event.target.value }))} /></Field>
-            <Field label="الاسم التجاري / النشاط"><Input value={profile.commercialName} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, commercialName: event.target.value }))} placeholder="مثال: الشافعي لقطع غيار BMW" /></Field>
-            <Field label="رقم التسجيل الضريبي"><Input value={profile.taxNumber} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, taxNumber: event.target.value }))} dir="ltr" className="text-left" /></Field>
-            <Field label="السجل التجاري"><Input value={profile.commercialRegister} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, commercialRegister: event.target.value }))} dir="ltr" className="text-left" /></Field>
-            <Field label="الهاتف الرئيسي"><Input value={profile.phonePrimary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phonePrimary: event.target.value }))} dir="ltr" className="text-left" /></Field>
-            <Field label="الهاتف الثانوي"><Input value={profile.phoneSecondary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phoneSecondary: event.target.value }))} dir="ltr" className="text-left" /></Field>
-            <Field label="العنوان الرئيسي / الفروع" className="sm:col-span-2"><Textarea rows={2} value={profile.address} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, address: event.target.value }))} /></Field>
-            <div className="sm:col-span-2"><Field label="شعار المنشأة" hint="PNG / JPG / SVG / WebP حتى 2MB — يظهر في الطباعة والنظام"><input ref={logoInputRef} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => { handleLogoFile(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={!canWrite} /><div onDragOver={(event) => { if (canWrite) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (canWrite) handleLogoFile(event.dataTransfer.files?.[0]); }} onClick={() => canWrite && logoInputRef.current?.click()} className={`mt-1 flex min-h-32 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed p-4 transition-colors ${canWrite ? "border-bmw-blue/50 bg-bmw-blue/5 hover:bg-bmw-blue/10" : "border-bmw-cardBorder bg-bmw-carbon/40"}`}><div className="flex items-center gap-3">{profile.logoUrl ? <img src={profile.logoUrl} alt="معاينة شعار المنشأة" className="h-20 w-28 rounded-lg border border-bmw-cardBorder bg-white object-contain p-1" /> : <div className="flex h-20 w-28 items-center justify-center rounded-lg border border-bmw-cardBorder bg-bmw-carbon text-bmw-muted"><ImagePlus size={28} /></div>}<div><p className="font-bold text-white">{profile.logoUrl ? "معاينة الشعار الحالي" : "ارفع شعار المنشأة"}</p><p className="mt-1 text-xs text-bmw-muted">اسحب الصورة هنا أو انقر للاختيار. يتم الحفظ فوراً بشكل آمن.</p>{profile.logoUrl ? <p className="mt-1 text-[10px] text-emerald-400">سيظهر في الفواتير وكشوف الحسابات والواجهة الرئيسية.</p> : null}</div></div>{canWrite && profile.logoUrl ? <Button type="button" variant="danger" size="sm" onClick={(event) => { event.stopPropagation(); saveLogo(""); }} disabled={pending}><Trash2 size={14} />إزالة</Button> : canWrite ? <span className="rounded-lg border border-bmw-blue/30 px-3 py-2 text-xs text-bmw-blue"><Upload size={14} className="ml-1 inline" />اختيار ملف</span> : null}</div></Field></div><Field label="رابط الشعار" hint="اختياري — يمكنك أيضاً لصق رابط صورة آمن"><Input value={profile.logoUrl} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, logoUrl: event.target.value }))} placeholder="https://…" dir="ltr" className="text-left" /></Field>
-            <Field label="رسالة التذييل / شروط الضمان" className="sm:col-span-2"><Textarea rows={3} value={profile.footerNote} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, footerNote: event.target.value }))} placeholder="شكراً لتعاملكم معنا" /></Field>
+            <Field label="اسم الشركة / المنشأة" required><Input value={profile.companyName} disabled={!canWrite} onChange={(event) => updateProfileField("companyName", event.target.value)} /></Field>
+            <Field label="الاسم التجاري / النشاط"><Input value={profile.commercialName} disabled={!canWrite} onChange={(event) => updateProfileField("commercialName", event.target.value)} placeholder="مثال: الشافعي لقطع غيار BMW" /></Field>
+            <Field label="رقم التسجيل الضريبي"><Input value={profile.taxNumber} disabled={!canWrite} onChange={(event) => updateProfileField("taxNumber", event.target.value)} dir="ltr" className="text-left" /></Field>
+            <Field label="السجل التجاري"><Input value={profile.commercialRegister} disabled={!canWrite} onChange={(event) => updateProfileField("commercialRegister", event.target.value)} dir="ltr" className="text-left" /></Field>
+            <Field label="الهاتف الرئيسي"><Input value={profile.phonePrimary} disabled={!canWrite} onChange={(event) => updateProfileField("phonePrimary", event.target.value)} dir="ltr" className="text-left" /></Field>
+            <Field label="الهاتف الثانوي"><Input value={profile.phoneSecondary} disabled={!canWrite} onChange={(event) => updateProfileField("phoneSecondary", event.target.value)} dir="ltr" className="text-left" /></Field>
+            <Field label="العنوان الرئيسي / الفروع" className="sm:col-span-2"><Textarea rows={2} value={profile.address} disabled={!canWrite} onChange={(event) => updateProfileField("address", event.target.value)} /></Field>
+            <div className="sm:col-span-2"><Field label="شعار المنشأة" hint="PNG / JPG / SVG / WebP حتى 2MB — يظهر في الطباعة والنظام"><input ref={logoInputRef} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => { handleLogoFile(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={!canWrite} /><div onDragOver={(event) => { if (canWrite) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (canWrite) handleLogoFile(event.dataTransfer.files?.[0]); }} onClick={() => canWrite && logoInputRef.current?.click()} className={`mt-1 flex min-h-32 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed p-4 transition-colors ${canWrite ? "border-bmw-blue/50 bg-bmw-blue/5 hover:bg-bmw-blue/10" : "border-bmw-cardBorder bg-bmw-carbon/40"}`}><div className="flex items-center gap-3">{profile.logoUrl ? <img src={profile.logoUrl} alt="معاينة شعار المنشأة" className="h-20 w-28 rounded-lg border border-bmw-cardBorder bg-white object-contain p-1" /> : <div className="flex h-20 w-28 items-center justify-center rounded-lg border border-bmw-cardBorder bg-bmw-carbon text-bmw-muted"><ImagePlus size={28} /></div>}<div><p className="font-bold text-white">{profile.logoUrl ? "معاينة الشعار الحالي" : "ارفع شعار المنشأة"}</p><p className="mt-1 text-xs text-bmw-muted">اسحب الصورة هنا أو انقر للاختيار، ثم اضغط حفظ التعديلات لتثبيت التغيير بشكل آمن.</p>{profile.logoUrl ? <p className="mt-1 text-[10px] text-emerald-400">سيظهر في الفواتير وكشوف الحسابات والواجهة الرئيسية.</p> : null}</div></div>{canWrite && profile.logoUrl ? <Button type="button" variant="danger" size="sm" onClick={(event) => { event.stopPropagation(); saveLogo(""); }} disabled={pending}><Trash2 size={14} />إزالة</Button> : canWrite ? <span className="rounded-lg border border-bmw-blue/30 px-3 py-2 text-xs text-bmw-blue"><Upload size={14} className="ml-1 inline" />اختيار ملف</span> : null}</div></Field></div><Field label="رابط الشعار" hint="اختياري — يمكنك أيضاً لصق رابط صورة آمن"><Input value={profile.logoUrl} disabled={!canWrite} onChange={(event) => updateProfileField("logoUrl", event.target.value)} placeholder="https://…" dir="ltr" className="text-left" /></Field>
+            <Field label="رسالة التذييل / شروط الضمان" className="sm:col-span-2"><Textarea rows={3} value={profile.footerNote} disabled={!canWrite} onChange={(event) => updateProfileField("footerNote", event.target.value)} placeholder="شكراً لتعاملكم معنا" /></Field>
           </div>
-          {canWrite ? <Button onClick={saveProfile} loading={pending}><Printer size={16} /> حفظ بيانات المنشأة</Button> : null}
+          {canWrite ? <Button onClick={submit} loading={pending} disabled={totalDirtyCount === 0}><Printer size={16} /> حفظ بيانات المنشأة ({profileDirtyCount})</Button> : null}
         </CardContent>
       </Card>
 

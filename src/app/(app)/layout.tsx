@@ -6,6 +6,9 @@ import { MStripe } from "@/components/layout/m-stripe";
 import { HotkeysListener } from "@/components/layout/hotkeys-listener";
 import { getCompanyProfile } from "@/server/services/settings.service";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /**
  * Authenticated shell.
  *

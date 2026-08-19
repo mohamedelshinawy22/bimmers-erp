@@ -28,6 +28,7 @@ import { getCompanyProfile } from "@/server/services/settings.service";
 export const metadata = { title: "لوحة القيادة" };
 // Cockpit numbers must reflect the last committed transaction, never a cache.
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const QUICK_ACTIONS = [
   {
