@@ -28,6 +28,8 @@ import { UniversalDateTimePicker, type DateRangeValue } from "@/components/ui/un
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatMoney } from "@/lib/utils";
+import type { CompanyProfile } from "@/server/services/settings.service";
+import { ZReportPrintModal } from "@/components/printing/z-report-print-modal";
 import type { TreasuryRow } from "@/server/services/treasury.service";
 import {
   closeShiftAction,
@@ -60,6 +62,7 @@ interface ZReport {
   expectedBalance: number;
   invoiceCount: number;
   byPaymentMethod: Array<{ method: string; count: number; total: number; collected: number }>;
+  recentMovements: Array<{ reference: string; type: string; amount: number; description: string; createdAt: string }>;
 }
 
 interface TransactionRow {
@@ -95,6 +98,7 @@ interface TreasuryClientProps {
   accounts: Array<{ id: string; name: string; accountNumber: string; type: string }>;
   permissions: { canTransact: boolean; canTransfer: boolean; canCloseShift: boolean; canManage: boolean };
   initialVoucher: "RECEIPT" | "PAYMENT" | null;
+  company: CompanyProfile;
 }
 
 const initialTreasuryRange = (): DateRangeValue => { const now = new Date(); const from = new Date(now); from.setHours(0, 0, 0, 0); const iso = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); return { from: iso(from), to: iso(now), preset: "TODAY", pinned: false }; };
@@ -114,6 +118,7 @@ export function TreasuryClient({
   accounts,
   permissions,
   initialVoucher,
+  company,
 }: TreasuryClientProps) {
   const router = useRouter();
   const [voucher, setVoucher] = useState<"RECEIPT" | "PAYMENT" | null>(initialVoucher);
@@ -126,6 +131,7 @@ export function TreasuryClient({
   const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<string[]>([]);
   const [deleteTransactionsOpen, setDeleteTransactionsOpen] = useState(false);
+  const [zReportPrintOpen, setZReportPrintOpen] = useState(false);
 
   useEffect(() => setVoucher(initialVoucher), [initialVoucher]);
 
@@ -283,7 +289,7 @@ export function TreasuryClient({
               ) : (
                 <Badge variant="muted">من بداية اليوم</Badge>
               )}
-              <Button size="sm" variant="ghost" onClick={() => window.print()}>
+              <Button size="sm" variant="ghost" onClick={() => setZReportPrintOpen(true)}>
                 <Printer size={14} /> طباعة
               </Button>
             </div>
@@ -472,6 +478,8 @@ export function TreasuryClient({
 
       {manageTreasury ? <TreasuryManageModal treasury={manageTreasury === "NEW" ? null : manageTreasury} onClose={() => setManageTreasury(null)} /> : null}
       {deleteTreasury ? <DeleteTreasuryModal treasury={deleteTreasury} onClose={() => setDeleteTreasury(null)} onDone={() => { setDeleteTreasury(null); router.refresh(); }} /> : null}
+
+      {zReportPrintOpen && zReport ? <ZReportPrintModal report={zReport} company={company} onClose={() => setZReportPrintOpen(false)} /> : null}
 
       {shiftAction ? (
         <ShiftModal

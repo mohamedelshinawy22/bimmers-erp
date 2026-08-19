@@ -135,7 +135,7 @@ export async function getZReport(treasuryId: string) {
 
   const since = shift?.openedAt ?? startOfToday();
 
-  const [flows, invoicesByMethod] = await Promise.all([
+  const [flows, invoicesByMethod, recentMovements] = await Promise.all([
     prisma.treasuryTransaction.groupBy({
       by: ["type"],
       where: { treasuryId, createdAt: { gte: since } },
@@ -147,6 +147,12 @@ export async function getZReport(treasuryId: string) {
       where: { treasuryId, isVoided: false, type: "SALE", createdAt: { gte: since } },
       _sum: { grandTotal: true, paidAmount: true },
       _count: { _all: true },
+    }),
+    prisma.treasuryTransaction.findMany({
+      where: { treasuryId, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 12,
+      select: { transactionNumber: true, type: true, amount: true, description: true, createdAt: true, invoice: { select: { invoiceNumber: true } } },
     }),
   ]);
 
@@ -197,6 +203,13 @@ export async function getZReport(treasuryId: string) {
       count: m._count._all,
       total: num(m._sum.grandTotal),
       collected: num(m._sum.paidAmount),
+    })),
+    recentMovements: recentMovements.map((movement) => ({
+      reference: movement.invoice?.invoiceNumber ?? movement.transactionNumber,
+      type: movement.type,
+      amount: num(movement.amount),
+      description: movement.description,
+      createdAt: movement.createdAt.toISOString(),
     })),
   };
 }

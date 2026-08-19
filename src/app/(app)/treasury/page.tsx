@@ -8,6 +8,7 @@ import {
   listTreasuryTransactions,
 } from "@/server/services/treasury.service";
 import { TreasuryClient } from "./treasury-client";
+import { getCompanyProfile } from "@/server/services/settings.service";
 
 export const metadata = { title: "الخزينة والسيولة" };
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export default async function TreasuryPage({ searchParams }: PageProps) {
     treasuries.find((t) => t.type === "CASH_DRAWER")?.id ??
     treasuries[0]?.id;
 
-  const [transactions, closedShifts, zReport, accounts] = await Promise.all([
+  const [transactions, closedShifts, zReport, accounts, company] = await Promise.all([
     listTreasuryTransactions(40),
     getClosedShifts(10),
     focusId ? getZReport(focusId) : Promise.resolve(null),
@@ -41,6 +42,7 @@ export default async function TreasuryPage({ searchParams }: PageProps) {
       take: 400,
       select: { id: true, name: true, accountNumber: true, type: true },
     }),
+    getCompanyProfile(),
   ]);
 
   const voucher =
@@ -53,6 +55,7 @@ export default async function TreasuryPage({ searchParams }: PageProps) {
       closedShifts={closedShifts}
       zReport={zReport}
       accounts={accounts}
+      company={company}
       permissions={{
         canTransact: can(user.role, "treasury.transact"),
         canTransfer: can(user.role, "treasury.transfer"),
