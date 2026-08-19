@@ -92,7 +92,7 @@ export async function getInventoryMovementReportAction(input: Input): Promise<Ac
       canViewCost,
       period: { from: from.toISOString(), to: to.toISOString() },
       metrics: { unitsSold, grossSales, inwardUnits, frozenCapital, velocity: averageStockTotal > 0 ? unitsSold / averageStockTotal : 0 },
-      topSelling: [...rows].filter((row) => row.unitsSold > 0).sort((a, b) => b.unitsSold - a.unitsSold || b.salesRevenue - a.salesRevenue).slice(0, 100),
+      topSelling: [...rows].filter((row) => row.unitsSold > 0).sort((a, b) => b.unitsSold - a.unitsSold || b.salesRevenue - a.salesRevenue),
       deadStock: [...rows].filter((row) => row.closingStock > 0 && row.unitsSold === 0).sort((a, b) => (b.tiedUpCost ?? 0) - (a.tiedUpCost ?? 0) || b.closingStock - a.closingStock),
       ledger: rows.sort((a, b) => a.nameAr.localeCompare(b.nameAr, "ar")),
       options: { chassis, categories, brands, warehouses: bins.map((bin) => bin.warehouseName) },
