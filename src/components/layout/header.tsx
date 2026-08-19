@@ -9,6 +9,7 @@ import { ARABIC_LABELS } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { HotkeyBadges } from "./hotkeys-listener";
 import { useSidebar } from "./sidebar-context";
+import { BackButton } from "@/components/navigation/back-button";
 
 interface HeaderProps {
   user: { fullName: string; username: string; role: Role };
@@ -37,9 +38,10 @@ export function Header({ user, branding }: HeaderProps) {
         </Link>
       </div>
 
-      <HotkeyBadges />
+      <div className="hidden xl:block"><HotkeyBadges /></div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
+        <BackButton fallbackUrl="/" className="shrink-0 px-2.5 sm:px-3" />
         <div className="hidden items-center gap-2 rounded-xl border border-bmw-cardBorder bg-bmw-card px-3 py-1.5 sm:flex">
           <UserRound size={16} className="text-bmw-blue" />
           <div className="leading-tight">
