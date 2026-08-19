@@ -36,6 +36,23 @@ const PRESETS: LabelPreset[] = [
 ];
 
 const scale = { SMALL: 0.82, MEDIUM: 1, LARGE: 1.18 } as const;
+const BARCODE_PREFERENCES_KEY = "bimmererp:barcode-label-preferences:v1";
+
+type BarcodePreferences = {
+  presetId: PresetId;
+  customWidth: number;
+  customHeight: number;
+  symbology: Symbology;
+  fontScale: FontScale;
+  barcodeHeightMm: number;
+  lineWidth: number;
+  toggles: { company: boolean; partName: boolean; oem: boolean; fitment: boolean; price: boolean; barcode: boolean; barcodeText: boolean };
+};
+
+function isPresetId(value: unknown): value is PresetId { return PRESETS.some((preset) => preset.id === value); }
+function isSymbology(value: unknown): value is Symbology { return value === "CODE128" || value === "EAN13" || value === "QR"; }
+function isFontScale(value: unknown): value is FontScale { return value === "SMALL" || value === "MEDIUM" || value === "LARGE"; }
+function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number) { const numeric = Number(value); return Number.isFinite(numeric) ? Math.max(minimum, Math.min(maximum, numeric)) : fallback; }
 
 function printableCode(value: string, symbology: Symbology) {
   const fallback = "000000000000";
@@ -92,6 +109,33 @@ export function BarcodePrintModal({ parts, company, onClose }: { parts: BarcodeL
   const [isRendering, setIsRendering] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(parts.map((part) => [part.id, 1])));
   const [toggles, setToggles] = useState({ company: true, partName: true, oem: true, fitment: true, price: true, barcode: true, barcodeText: true });
+  const [preferencesReady, setPreferencesReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(BARCODE_PREFERENCES_KEY);
+      if (!raw) return;
+      const stored = JSON.parse(raw) as Partial<BarcodePreferences>;
+      if (isPresetId(stored.presetId)) setPresetId(stored.presetId);
+      setCustomWidth(boundedNumber(stored.customWidth, 50, 20, 150));
+      setCustomHeight(boundedNumber(stored.customHeight, 25, 15, 120));
+      if (isSymbology(stored.symbology)) setSymbology(stored.symbology);
+      if (isFontScale(stored.fontScale)) setFontScale(stored.fontScale);
+      setBarcodeHeightMm(boundedNumber(stored.barcodeHeightMm, 9, 4, 18));
+      setLineWidth(boundedNumber(stored.lineWidth, 1.15, 0.7, 2.2));
+      if (stored.toggles && typeof stored.toggles === "object") setToggles((current) => ({ ...current, ...Object.fromEntries(Object.entries(current).map(([key, value]) => [key, typeof stored.toggles?.[key as keyof typeof current] === "boolean" ? stored.toggles[key as keyof typeof current] : value])) }));
+    } catch (preferenceError) {
+      console.warn("[BARCODE_PREFERENCES_READ_ERROR]", preferenceError);
+    } finally { setPreferencesReady(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+    const preferences: BarcodePreferences = { presetId, customWidth, customHeight, symbology, fontScale, barcodeHeightMm, lineWidth, toggles };
+    try { window.localStorage.setItem(BARCODE_PREFERENCES_KEY, JSON.stringify(preferences)); }
+    catch (preferenceError) { console.warn("[BARCODE_PREFERENCES_WRITE_ERROR]", preferenceError); }
+  }, [preferencesReady, presetId, customWidth, customHeight, symbology, fontScale, barcodeHeightMm, lineWidth, toggles]);
+
   const preset = PRESETS.find((item) => item.id === presetId) ?? PRESETS[0]!;
   const widthMm = presetId === "CUSTOM" ? Math.max(20, Math.min(150, customWidth)) : preset.width;
   const heightMm = presetId === "CUSTOM" ? Math.max(15, Math.min(120, customHeight)) : preset.height;
