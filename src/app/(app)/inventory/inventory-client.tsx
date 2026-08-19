@@ -26,7 +26,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { CURRENCY, formatInt, formatMoney, formatOemNumber } from "@/lib/utils";
 import type { PartRow } from "@/server/services/parts.service";
-import { adjustStockAction, deletePartAction } from "@/server/actions/parts.actions";
+import { adjustStockAction, deletePartAction, getPartsForPrintAction } from "@/server/actions/parts.actions";
 import { exportInventoryDataAction } from "@/server/actions/inventory-export.actions";
 import { AddPartModal } from "./components/add-part-modal";
 import type { BinOption } from "./components/bin-locator";
@@ -97,11 +97,26 @@ export function InventoryClient({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [catalogPrintOpen, setCatalogPrintOpen] = useState(false);
+  const [catalogPrintData, setCatalogPrintData] = useState<PartCatalogPrintData | null>(null);
+  const [catalogPrintLoading, setCatalogPrintLoading] = useState(false);
+  const [catalogPrintError, setCatalogPrintError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PartRow[] | null>(null);
   const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
-  const printableCatalogParts = selectedParts.length ? selectedParts : rows;
-  const catalogPrintData: PartCatalogPrintData = { company, title: selectedParts.length ? "قائمة أسعار الأصناف المحددة" : "كتالوج وقائمة أسعار الأصناف المعروضة", parts: printableCatalogParts.map((part) => ({ id: part.id, nameAr: part.nameAr, oemNumber: part.oemNumber, brandName: part.brandName, category: part.category, barcode: part.barcode, stockQuantity: part.stockQuantity, sellPriceRetail: part.sellPriceRetail, chassisCodes: part.chassisCodes })) };
+  const openCatalogPrint = async () => {
+    setCatalogPrintError(null);
+    if (selectedParts.length) {
+      setCatalogPrintData(toCatalogPrintData(selectedParts, company, "قائمة أسعار الأصناف المحددة"));
+      setCatalogPrintOpen(true);
+      return;
+    }
+    setCatalogPrintLoading(true);
+    const result = await getPartsForPrintAction({ query: filters.query, chassisCode: filters.chassis || undefined, category: filters.category || undefined, lowStockOnly: filters.lowStock });
+    setCatalogPrintLoading(false);
+    if (!result.success) { setCatalogPrintError(result.error); return; }
+    setCatalogPrintData(toCatalogPrintData(result.data.rows, company, "كتالوج وقائمة أسعار الأصناف المصفاة"));
+    setCatalogPrintOpen(true);
+  };
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -138,7 +153,7 @@ export function InventoryClient({
               <ShoppingBag size={16} /> فاتورة شراء
             </Button>
           ) : null}
-          <Button variant="outline" onClick={() => setCatalogPrintOpen(true)} disabled={!printableCatalogParts.length}><Printer size={16} /> {selectedParts.length ? `طباعة قائمة أسعار (${selectedParts.length})` : "طباعة الكتالوج"}</Button>
+          <Button variant="outline" onClick={() => void openCatalogPrint()} loading={catalogPrintLoading} disabled={total === 0}><Printer size={16} /> {selectedParts.length ? `طباعة قائمة أسعار (${selectedParts.length})` : `طباعة جميع النتائج (${formatInt(total)})`}</Button>
           {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
           {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
           {permissions.canWrite ? (
@@ -153,7 +168,7 @@ export function InventoryClient({
         <div className="fixed inset-x-4 bottom-5 z-40 mx-auto flex w-auto max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-bmw-blue/40 bg-bmw-black/95 px-4 py-3 shadow-2xl backdrop-blur">
           <p className="text-sm font-bold text-white">تم تحديد <span className="tabular text-bmw-blue">{selectedParts.length}</span> صنف</p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setCatalogPrintOpen(true)}><Printer size={15} /> طباعة قائمة الأسعار</Button>
+            <Button size="sm" variant="outline" onClick={() => void openCatalogPrint()}><Printer size={15} /> طباعة قائمة الأسعار</Button>
             <Button size="sm" variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={15} /> طباعة الباركود</Button>
             {permissions.canWrite && selectedParts.length === 1 ? <Button size="sm" variant="outline" onClick={() => setEditPart(selectedParts[0] ?? null)}><Pencil size={15} /> تعديل</Button> : null}
             {permissions.canDelete ? <Button size="sm" variant="danger" onClick={() => setDeleteTarget(selectedParts)}><Trash2 size={15} /> حذف المحدد</Button> : null}
@@ -443,7 +458,8 @@ export function InventoryClient({
         />
       ) : null}
 
-      {catalogPrintOpen ? <UniversalPrintModal documentType="part" title="معاينة وطباعة كتالوج الأصناف" description="اطبع قائمة الأسعار أو الكتالوج العصري أو نموذج الجرد الكلاسيكي أو ملصقات الرف الحرارية." onClose={() => setCatalogPrintOpen(false)} showBalanceToggle={false} renderDocument={(printOptions) => <PartCatalogPrintDocument data={catalogPrintData} options={printOptions} />} /> : null}
+      {catalogPrintError ? <Alert variant="error">{catalogPrintError}</Alert> : null}
+      {catalogPrintOpen && catalogPrintData ? <UniversalPrintModal documentType="part" title="معاينة وطباعة كتالوج الأصناف" description="تُطبّق الفلاتر الحالية نفسها وتُجلب كل النتائج المطابقة، وليس الصفحة المعروضة فقط." filteredResultCount={catalogPrintData.parts.length} onClose={() => setCatalogPrintOpen(false)} showBalanceToggle={false} renderDocument={(printOptions) => <PartCatalogPrintDocument data={catalogPrintData} options={printOptions} />} /> : null}
       {barcodePrintOpen ? <BarcodePrintModal parts={selectedParts} company={{ name: company.name, logoUrl: company.logoUrl }} onClose={() => setBarcodePrintOpen(false)} /> : null}
       {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
@@ -460,6 +476,10 @@ export function InventoryClient({
       ) : null}
     </div>
   );
+}
+
+function toCatalogPrintData(parts: PartRow[], company: CompanyProfile, title: string): PartCatalogPrintData {
+  return { company, title, parts: parts.map((part) => ({ id: part.id, nameAr: part.nameAr, oemNumber: part.oemNumber, brandName: part.brandName, category: part.category, barcode: part.barcode, stockQuantity: part.stockQuantity, sellPriceRetail: part.sellPriceRetail, chassisCodes: part.chassisCodes })) };
 }
 
 function InventoryExportMenu({ filters }: { filters: InventoryClientProps["filters"] }) {

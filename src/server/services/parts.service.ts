@@ -146,9 +146,9 @@ export async function searchParts(
   if (input.brandId) and.push({ brandId: input.brandId });
   if (input.lowStockOnly) {
     // Column-to-column comparison; Prisma's query builder cannot express it, so
-    // it is pushed down as a raw filter rather than materialising a large
-    // `IN (...)` id list that then has to be planned twice.
-    and.push({ id: { in: await lowStockPartIds(input.pageSize * input.page + input.pageSize) } });
+    // it is pushed down as a raw filter. Printing deliberately expands this
+    // prefilter to the same guarded upper bound as the final unpaginated query.
+    and.push({ id: { in: await lowStockPartIds(input.isForPrint ? 10_000 : input.pageSize * input.page + input.pageSize) } });
   }
   if (and.length) where.AND = and;
 
@@ -157,14 +157,14 @@ export async function searchParts(
       where,
       include: partInclude,
       orderBy: [{ isActive: "desc" }, { nameAr: "asc" }],
-      skip: (input.page - 1) * input.pageSize,
-      take: input.pageSize,
+      skip: input.isForPrint ? undefined : (input.page - 1) * input.pageSize,
+      take: input.isForPrint ? 10_000 : input.pageSize,
     }),
     prisma.partItem.count({ where }),
   ]);
 
   const duplicates = await getDuplicateMetadata(rows);
-  return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.pageSize };
+  return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.isForPrint ? rows.length : input.pageSize };
 }
 
 /**

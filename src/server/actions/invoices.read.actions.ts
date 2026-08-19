@@ -1,13 +1,23 @@
 "use server";
 
 import { can, requirePermission } from "@/lib/auth";
+import { z } from "zod";
 import { getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
-import { getInvoiceDetail, type InvoiceDetail } from "@/server/services/invoices.service";
+import { getInvoiceDetail, listInvoices, type InvoiceDetail } from "@/server/services/invoices.service";
 import { getStockLedger } from "@/server/services/parts.service";
 import { prisma } from "@/lib/prisma";
 import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
 import { normalizeSearchTerm } from "@/lib/search-utils";
+
+const invoicePrintFiltersSchema = z.object({
+  query: z.string().trim().max(100).optional(),
+  type: z.enum(["SALE", "PURCHASE"]).optional(),
+  status: z.enum(["PAID", "PARTIAL", "CREDIT"]).optional(),
+  includeVoided: z.boolean().default(false),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
 
 /**
  * Read-only lookups used by drawers and modals.
@@ -15,6 +25,17 @@ import { normalizeSearchTerm } from "@/lib/search-utils";
  * Kept separate from the mutating action files so the read/write split stays
  * obvious, and each one still enforces its own permission.
  */
+
+export async function getInvoicesForPrintAction(raw: unknown) {
+  try {
+    await requirePermission("invoice.read");
+    const filters = invoicePrintFiltersSchema.parse(raw ?? {});
+    const result = await listInvoices({ ...filters, page: 1, pageSize: 100, isForPrint: true });
+    return ok({ rows: result.rows, total: result.total, capped: result.total > result.rows.length });
+  } catch (error) {
+    return toActionError(error, "getInvoicesForPrintAction");
+  }
+}
 
 export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionResult<InvoiceDetail>> {
   try {

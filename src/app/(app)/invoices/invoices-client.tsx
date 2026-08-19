@@ -30,9 +30,11 @@ import type { InvoiceDetail } from "@/server/services/invoices.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { createInvoiceReturnAction, purgePurchaseInvoiceAction, purgeSalesInvoiceAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
 import { settleInvoiceAction } from "@/server/actions/treasury.actions";
-import { getInvoiceDetailAction } from "@/server/actions/invoices.read.actions";
+import { getInvoiceDetailAction, getInvoicesForPrintAction } from "@/server/actions/invoices.read.actions";
 import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
+import { UniversalPrintModal } from "@/components/print/universal-print-modal";
+import { FilteredInvoiceListPrintDocument } from "@/components/print/templates/filtered-invoice-list-print-document";
 
 interface InvoicesClientProps {
   rows: InvoiceListRow[];
@@ -60,6 +62,9 @@ export function InvoicesClient({
   const [query, setQuery] = useState(filters.query);
   const [detail, setDetail] = useState<InvoiceDetail | null>(null);
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
+  const [registerPrintRows, setRegisterPrintRows] = useState<InvoiceListRow[] | null>(null);
+  const [registerPrintLoading, setRegisterPrintLoading] = useState(false);
+  const [registerPrintError, setRegisterPrintError] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
   const [settlementTarget, setSettlementTarget] = useState<InvoiceListRow | null>(null);
@@ -88,6 +93,15 @@ export function InvoicesClient({
     if (res.success) setDetail(res.data);
   };
 
+  const openFilteredPrint = async () => {
+    setRegisterPrintError(null);
+    setRegisterPrintLoading(true);
+    const result = await getInvoicesForPrintAction({ query: filters.query || undefined, type: filters.type === "SALE" || filters.type === "PURCHASE" ? filters.type : undefined, status: filters.status === "PAID" || filters.status === "PARTIAL" || filters.status === "CREDIT" ? filters.status : undefined, includeVoided: filters.includeVoided });
+    setRegisterPrintLoading(false);
+    if (!result.success) { setRegisterPrintError(result.error); return; }
+    setRegisterPrintRows(result.data.rows);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -102,8 +116,10 @@ export function InvoicesClient({
             </p>
           </div>
         </div>
+        <Button variant="outline" onClick={() => void openFilteredPrint()} loading={registerPrintLoading} disabled={total === 0}><Printer size={16}/> طباعة جميع النتائج ({formatInt(total)})</Button>
       </div>
 
+      {registerPrintError ? <Alert variant="error">{registerPrintError}</Alert> : null}
       <Card>
         <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-4">
           <form
@@ -265,6 +281,7 @@ export function InvoicesClient({
       ) : null}
 
       {printInvoiceId ? <InvoicePrintDialog invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} /> : null}
+      {registerPrintRows ? <UniversalPrintModal documentType="invoice" title="معاينة وطباعة سجل الفواتير" description="تُطبع جميع الفواتير المطابقة للفلاتر الحالية عبر كل الصفحات، مع إجماليات المجموعة المصفاة." filteredResultCount={registerPrintRows.length} onClose={() => setRegisterPrintRows(null)} showBalanceToggle={false} showPartMetaToggle={false} renderDocument={(options) => <FilteredInvoiceListPrintDocument rows={registerPrintRows} company={company} filters={filters} options={options}/>} /> : null}
 
       {settlementTarget ? <InvoiceSettlementModal invoice={settlementTarget} treasuries={treasuries} onClose={() => setSettlementTarget(null)} onDone={() => { setSettlementTarget(null); setDetail(null); router.refresh(); }} /> : null}
 

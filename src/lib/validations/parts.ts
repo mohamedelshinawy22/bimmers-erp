@@ -126,6 +126,7 @@ export const searchPartsSchema = z.object({
   lowStockOnly: z.boolean().default(false),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),
+  isForPrint: z.boolean().default(false),
 });
 
 export type SearchPartsInput = z.infer<typeof searchPartsSchema>;

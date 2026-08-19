@@ -198,4 +198,8 @@
   .print-format-thermal_80, .print-thermal-80mm { width: 76mm !important; max-width: 76mm !important; padding: 2mm !important; font-size: 11px !important; margin: 0 auto !important; }
   .print-format-thermal_80 #printable-area, .print-format-thermal_80 .print-thermal-80mm { width: 76mm !important; min-height: 0 !important; padding: 2mm !important; }
   .break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
+  .universal-print-root table thead, #printable-area table thead { display: table-header-group !important; }
+  .universal-print-root table tfoot, #printable-area table tfoot { display: table-footer-group !important; }
+  .universal-print-root table tr, #printable-area table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+  .universal-invoice-register { width: 100% !important; color: #000 !important; background: #fff !important; }
 }

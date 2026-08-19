@@ -15,6 +15,7 @@ import {
   createPartSchema,
   masterCatalogCreateSchema,
   updatePartSchema,
+  searchPartsSchema,
   type AdjustStockInput,
   type CreateBinInput,
   type CreatePartInput,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/validations/parts";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { adjustStock } from "@/server/services/stock.service";
+import { searchParts } from "@/server/services/parts.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
 
@@ -313,6 +315,17 @@ export async function adjustStockAction(
     return ok({ balanceAfter: result.balanceAfter, averageCostAfter: result.averageCostAfter });
   } catch (error) {
     return toActionError(error, "adjustStockAction");
+  }
+}
+
+export async function getPartsForPrintAction(raw: unknown) {
+  try {
+    await requirePermission("part.read");
+    const filters = searchPartsSchema.parse(raw ?? {});
+    const result = await searchParts({ ...filters, page: 1, pageSize: 100, isForPrint: true });
+    return ok({ rows: result.rows, total: result.total, capped: result.total > result.rows.length });
+  } catch (error) {
+    return toActionError(error, "getPartsForPrintAction");
   }
 }
 

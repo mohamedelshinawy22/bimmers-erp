@@ -37,6 +37,7 @@ export async function listInvoices(options: {
   to?: Date;
   page?: number;
   pageSize?: number;
+  isForPrint?: boolean;
 } = {}): Promise<{ rows: InvoiceListRow[]; total: number; page: number; pageSize: number }> {
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
@@ -64,8 +65,8 @@ export async function listInvoices(options: {
     prisma.invoice.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
+      skip: options.isForPrint ? undefined : (page - 1) * pageSize,
+      take: options.isForPrint ? 10_000 : pageSize,
       select: {
         id: true,
         invoiceNumber: true,
@@ -123,7 +124,7 @@ export async function listInvoices(options: {
     })),
     total,
     page,
-    pageSize,
+    pageSize: options.isForPrint ? invoices.length : pageSize,
   };
 }
 

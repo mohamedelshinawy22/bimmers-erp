@@ -20,6 +20,7 @@ interface UniversalPrintModalProps {
   renderDocument: (options: UniversalPrintOptions) => ReactNode;
   showBalanceToggle?: boolean;
   showPartMetaToggle?: boolean;
+  filteredResultCount?: number;
 }
 
 const validTemplates: UniversalPrintTemplate[] = ["modern", "classic", "thermal-80mm"];
@@ -32,6 +33,7 @@ export function UniversalPrintModal({
   renderDocument,
   showBalanceToggle = true,
   showPartMetaToggle = true,
+  filteredResultCount,
 }: UniversalPrintModalProps) {
   const [template, setTemplate] = useState<UniversalPrintTemplate>("modern");
   const [showBalance, setShowBalance] = useState(true);
@@ -78,6 +80,7 @@ export function UniversalPrintModal({
     >
       <div className="space-y-4" dir="rtl">
         {message ? <Alert variant="success">{message}</Alert> : null}
+        {filteredResultCount !== undefined ? <div className="flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100"><span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400"/><span>سيتم طباعة كافة النتائج المصفاة: <strong>{filteredResultCount.toLocaleString("ar-EG")} سجل</strong> (يشمل جميع الصفحات)</span></div> : null}
         <section className="grid gap-2 sm:grid-cols-3">
           {UNIVERSAL_PRINT_TEMPLATES.map((item) => <button key={item.value} type="button" onClick={() => setTemplate(item.value)} className={`rounded-xl border p-3 text-right transition-colors ${template === item.value ? "border-bmw-blue bg-bmw-blue/15 text-white" : "border-bmw-cardBorder bg-bmw-carbon text-bmw-silver hover:border-bmw-blue/60"}`}><p className="font-bold">{item.label}</p><p className="mt-1 text-[11px] opacity-80">{item.description}</p></button>)}
         </section>
