@@ -1,4 +1,4 @@
-import type { ThermalBarcodeProfile } from "@/lib/thermal-barcode-profile";
+import { fontCssForThermalFamily, googleFontUrlForThermalFamily, type ThermalBarcodeProfile } from "@/lib/thermal-barcode-profile";
 
 export interface ThermalLabelData {
   companyName?: string;
@@ -14,6 +14,13 @@ export interface ThermalLabelData {
   barcodeHeightMm?: number;
   barcodeDensity?: number;
   fontSize?: "sm" | "md" | "lg";
+  fontFamily?: ThermalBarcodeProfile["fontFamily"];
+  companyNameFontSizePt?: number;
+  partNameFontSizePt?: number;
+  oemFontSizePt?: number;
+  priceFontSizePt?: number;
+  barcodeTextSizePt?: number;
+  fontWeight?: ThermalBarcodeProfile["fontWeight"];
   symbology?: ThermalBarcodeProfile["symbology"];
   enabledFields: {
     showLogo: boolean;
@@ -52,23 +59,32 @@ async function vectorCode(value: string, symbology: ThermalBarcodeProfile["symbo
   return svg.outerHTML;
 }
 
-const fontPoint = (size: ThermalLabelData["fontSize"]) => size === "lg" ? "9pt" : size === "sm" ? "6.5pt" : "7.5pt";
+const legacyFontPoint = (size: ThermalLabelData["fontSize"]) => size === "lg" ? 9 : size === "sm" ? 6.5 : 7.5;
+const clamp = (value: number | undefined, min: number, max: number, fallback: number) => Math.min(max, Math.max(min, Number(value) || fallback));
+const printWeight = (value: ThermalLabelData["fontWeight"]) => value === "NORMAL" ? 400 : value === "BOLD" ? 700 : 800;
 
 async function labelHtml(data: ThermalLabelData): Promise<string> {
   const widthMm = Math.min(150, Math.max(20, Number(data.widthMm) || 50));
   const heightMm = Math.min(180, Math.max(15, Number(data.heightMm) || 25));
-  const barcodeHeightMm = Math.min(14, Math.max(4, Number(data.barcodeHeightMm) || 9));
-  const density = Math.min(2, Math.max(0.5, Number(data.barcodeDensity) || 1.2));
+  const barcodeHeightMm = Math.min(16, Math.max(4, Number(data.barcodeHeightMm) || 9));
+  const density = Math.min(2, Math.max(0.8, Number(data.barcodeDensity) || 1.2));
   const symbology = data.symbology ?? "CODE128";
   const logo = validLogoUrl(data.logoUrl);
   const copyCount = Math.min(200, Math.max(1, Math.trunc(Number(data.copies) || 1)));
   const field = data.enabledFields;
   const showLogo = field.showLogo && !!logo;
   const showCompanyName = field.showCompanyName && !!data.companyName?.trim();
-  const effectiveBarcodeHeightMm = !showLogo ? Math.min(14, barcodeHeightMm + 2) : barcodeHeightMm;
+  const effectiveBarcodeHeightMm = !showLogo ? Math.min(16, barcodeHeightMm + 2) : barcodeHeightMm;
   const barcode = field.barcodeLines && data.barcodeValue ? await vectorCode(data.barcodeValue.trim(), symbology, effectiveBarcodeHeightMm, density) : "";
-  const header = showLogo || showCompanyName ? `<div class="header-row">${showLogo ? `<img src="${escapeHtml(logo)}" class="logo" alt="" />` : ""}${showCompanyName ? `<span class="company-title">${escapeHtml(data.companyName)}</span>` : ""}</div>` : "";
-  const one = `<section class="label-page ${showLogo ? "" : "no-logo"}" style="width:${widthMm}mm;height:${heightMm}mm;max-width:${widthMm}mm;max-height:${heightMm}mm" dir="rtl">${header}${field.partName ? `<div class="part-name" style="font-size:${fontPoint(data.fontSize)}">${escapeHtml(data.partName)}</div>` : ""}<div class="middle-row">${field.oemNumber ? `<span class="oem-num" dir="ltr">${escapeHtml(data.oemNumber)}</span>` : ""}${field.brandChassis && data.brandAndChassis ? `<span class="chassis-tag">${escapeHtml(data.brandAndChassis)}</span>` : ""}</div>${field.price && data.price != null ? `<div class="price-row">${escapeHtml(Number(data.price).toLocaleString("en-US", { maximumFractionDigits: 2 }))} ج.م</div>` : ""}${barcode ? `<div class="barcode-wrapper" style="max-height:${effectiveBarcodeHeightMm}mm">${barcode}</div>` : ""}${field.barcodeText && data.barcodeValue ? `<div class="barcode-text" dir="ltr">${escapeHtml(data.barcodeValue)}</div>` : ""}</section>`;
+  const fontFamily = data.fontFamily ?? "Cairo";
+  const fontWeight = printWeight(data.fontWeight);
+  const companySize = clamp(data.companyNameFontSizePt, 6, 14, 8);
+  const partSize = clamp(data.partNameFontSizePt, 7, 16, legacyFontPoint(data.fontSize));
+  const oemSize = clamp(data.oemFontSizePt, 6, 14, 8);
+  const priceSize = clamp(data.priceFontSizePt, 6, 14, 8.5);
+  const barcodeTextSize = clamp(data.barcodeTextSizePt, 5, 10, 6.5);
+  const header = showLogo || showCompanyName ? `<div class="header-row">${showLogo ? `<img src="${escapeHtml(logo)}" class="logo" alt="" />` : ""}${showCompanyName ? `<span class="company-title" style="font-size:${companySize}pt;font-weight:${fontWeight}">${escapeHtml(data.companyName)}</span>` : ""}</div>` : "";
+  const one = `<section class="label-page ${showLogo ? "" : "no-logo"}" style="width:${widthMm}mm;height:${heightMm}mm;max-width:${widthMm}mm;max-height:${heightMm}mm;font-family:${escapeHtml(fontCssForThermalFamily(fontFamily))};font-weight:${fontWeight}" dir="rtl">${header}${field.partName ? `<div class="part-name" style="font-size:${partSize}pt;font-weight:${fontWeight}">${escapeHtml(data.partName)}</div>` : ""}<div class="middle-row">${field.oemNumber ? `<span class="oem-num" style="font-size:${oemSize}pt;font-weight:${fontWeight}" dir="ltr">${escapeHtml(data.oemNumber)}</span>` : ""}${field.brandChassis && data.brandAndChassis ? `<span class="chassis-tag">${escapeHtml(data.brandAndChassis)}</span>` : ""}</div>${field.price && data.price != null ? `<div class="price-row" style="font-size:${priceSize}pt;font-weight:${fontWeight}">${escapeHtml(Number(data.price).toLocaleString("en-US", { maximumFractionDigits: 2 }))} ج.م</div>` : ""}${barcode ? `<div class="barcode-wrapper" style="max-height:${effectiveBarcodeHeightMm}mm">${barcode}</div>` : ""}${field.barcodeText && data.barcodeValue ? `<div class="barcode-text" style="font-size:${barcodeTextSize}pt;font-weight:${fontWeight}" dir="ltr">${escapeHtml(data.barcodeValue)}</div>` : ""}</section>`;
   return Array.from({ length: copyCount }, () => one).join("");
 }
 
@@ -81,6 +97,8 @@ export async function printThermalLabelsViaIframe(input: ThermalLabelData | Ther
   if (!first) throw new Error("لا توجد ملصقات للطباعة.");
   const widthMm = Math.min(150, Math.max(20, Number(first.widthMm) || 50));
   const heightMm = Math.min(180, Math.max(15, Number(first.heightMm) || 25));
+  const fontFamily = first.fontFamily ?? "Cairo";
+  const fontLink = googleFontUrlForThermalFamily(fontFamily);
   const iframe = document.createElement("iframe");
   iframe.setAttribute("title", "طباعة ملصقات الباركود الحرارية");
   iframe.setAttribute("aria-hidden", "true");
@@ -89,7 +107,7 @@ export async function printThermalLabelsViaIframe(input: ThermalLabelData | Ther
   const doc = iframe.contentWindow?.document;
   if (!doc) { iframe.remove(); throw new Error("تعذر إنشاء مستند الطباعة المعزول."); }
   const cleanup = () => window.setTimeout(() => iframe.remove(), 1000);
-  const allHtml = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/><title>طباعة ملصقات الباركود</title><style>@page{size:${widthMm}mm ${heightMm}mm;margin:0!important}*{box-sizing:border-box!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{margin:0!important;padding:0!important;width:${widthMm}mm!important;background:#ffffff!important;color:#000000!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif!important}.label-page{page-break-after:always!important;break-after:page!important;page-break-inside:avoid!important;break-inside:avoid!important;display:flex!important;flex-direction:column!important;justify-content:space-between!important;align-items:center!important;text-align:center!important;padding:1.5mm 1mm!important;background:#ffffff!important;color:#000000!important;overflow:hidden!important}.label-page:last-child{page-break-after:auto!important;break-after:auto!important}.header-row{display:flex;align-items:center;justify-content:center;gap:2mm;max-height:4.5mm;min-height:0}.logo{max-height:4mm;width:auto;max-width:18mm;object-fit:contain;filter:grayscale(1) contrast(3)}.company-title{font-size:7pt;font-weight:800;color:#000000}.part-name{font-weight:900;color:#000000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;line-height:1.1}.label-page.no-logo .part-name{line-height:1.28;padding-block:.35mm}.middle-row{display:flex;justify-content:space-between;align-items:center;gap:1mm;width:100%;padding:0 1mm}.oem-num{font-size:8pt;font-weight:900;font-family:monospace;color:#000000;letter-spacing:.3px}.chassis-tag{font-size:6.5pt;font-weight:800;color:#000000;border:.3mm solid #000000;padding:0 1mm;border-radius:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price-row{font-size:8pt;font-weight:900;color:#000000}.barcode-wrapper{display:flex;align-items:center;justify-content:center;width:100%;overflow:hidden}.barcode-wrapper svg{display:block;max-width:96%;height:auto;shape-rendering:crispEdges}.barcode-text{font-size:6.5pt;font-family:monospace;font-weight:800;color:#000000;letter-spacing:.5px;line-height:1}</style></head><body>${html.join("")}</body></html>`;
+  const allHtml = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/><title>طباعة ملصقات الباركود</title>${fontLink ? `<link rel="stylesheet" href="${fontLink}"/>` : ""}<style>@page{size:${widthMm}mm ${heightMm}mm;margin:0!important}*{box-sizing:border-box!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{margin:0!important;padding:0!important;width:${widthMm}mm!important;background:#ffffff!important;color:#000000!important;font-family:${fontCssForThermalFamily(fontFamily)}!important}.label-page{page-break-after:always!important;break-after:page!important;page-break-inside:avoid!important;break-inside:avoid!important;display:flex!important;flex-direction:column!important;justify-content:space-between!important;align-items:center!important;text-align:center!important;padding:1.5mm 1mm!important;background:#ffffff!important;color:#000000!important;overflow:hidden!important}.label-page:last-child{page-break-after:auto!important;break-after:auto!important}.header-row{display:flex;align-items:center;justify-content:center;gap:2mm;max-height:4.5mm;min-height:0}.logo{max-height:4mm;width:auto;max-width:18mm;object-fit:contain;filter:grayscale(1) contrast(3)}.company-title{font-size:7pt;font-weight:800;color:#000000}.part-name{font-weight:900;color:#000000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;line-height:1.1}.label-page.no-logo .part-name{line-height:1.28;padding-block:.35mm}.middle-row{display:flex;justify-content:space-between;align-items:center;gap:1mm;width:100%;padding:0 1mm}.oem-num{font-size:8pt;font-weight:900;font-family:monospace;color:#000000;letter-spacing:.3px}.chassis-tag{font-size:6.5pt;font-weight:800;color:#000000;border:.3mm solid #000000;padding:0 1mm;border-radius:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price-row{font-size:8pt;font-weight:900;color:#000000}.barcode-wrapper{display:flex;align-items:center;justify-content:center;width:100%;overflow:hidden}.barcode-wrapper svg{display:block;max-width:96%;height:auto;shape-rendering:crispEdges}.barcode-text{font-size:6.5pt;font-family:monospace;font-weight:800;color:#000000;letter-spacing:.5px;line-height:1}</style></head><body>${html.join("")}</body></html>`;
   doc.open(); doc.write(allHtml); doc.close();
   await new Promise<void>((resolve) => window.setTimeout(resolve, 400));
   await doc.fonts?.ready;
