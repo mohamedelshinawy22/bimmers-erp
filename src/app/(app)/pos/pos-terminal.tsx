@@ -30,6 +30,7 @@ import { holdSaleAction } from "@/server/actions/held-sales.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { QuickPartModal } from "@/components/pos/quick-part-modal";
 import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
+import { POSAccountCombobox } from "./components/pos-account-combobox";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -115,6 +116,7 @@ export function PosTerminal({
   const [paidInput, setPaidInput] = useState("");
   const [notes, setNotes] = useState("");
   const [overrideMinPrice, setOverrideMinPrice] = useState(false);
+  const [pricingMessage, setPricingMessage] = useState<string | null>(null);
 
   const [vehicles, setVehicles] = useState<AccountVehicle[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -137,10 +139,20 @@ export function PosTerminal({
   }, [initialDraft]);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const accountSearchRef = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
 
   const account = useMemo(() => terminalAccounts.find((a) => a.id === accountId), [terminalAccounts, accountId]);
   const isWholesale = account?.defaultPriceTier === "WHOLESALE";
+
+  const selectAccount = useCallback((nextAccount: PosAccount) => {
+    setTerminalAccounts((current) => current.some((accountItem) => accountItem.id === nextAccount.id) ? current.map((accountItem) => accountItem.id === nextAccount.id ? nextAccount : accountItem) : [nextAccount, ...current]);
+    setAccountId(nextAccount.id);
+    setVehicleId("");
+    const nextWholesale = nextAccount.defaultPriceTier === "WHOLESALE";
+    setCart((current) => current.map((line) => ({ ...line, unitPrice: nextWholesale ? line.part.sellPriceWholesale : line.part.sellPriceRetail })));
+    setPricingMessage(nextWholesale ? "تم تطبيق أسعار الجملة على بنود السلة حسب شريحة العميل." : "تم تطبيق أسعار القطاعي على بنود السلة حسب شريحة العميل.");
+  }, []);
 
   // Vehicles are fetched per selected account rather than embedded in the page
   // payload for every account up front.
@@ -321,6 +333,10 @@ export function PosTerminal({
       if (event.key === "F9" && !checkoutOpen) {
         event.preventDefault();
         if (canCheckout) setCheckoutOpen(true);
+      }
+      if (event.key === "F7" || (event.altKey && event.key.toLowerCase() === "a")) {
+        event.preventDefault();
+        accountSearchRef.current?.focus();
       }
       if (event.key === "F8") {
         event.preventDefault();
@@ -551,7 +567,7 @@ export function PosTerminal({
         </Card>
       </div>
 
-      {quickAccountOpen ? <QuickAccountModal onClose={() => setQuickAccountOpen(false)} onCreated={(created) => { setTerminalAccounts((current) => [...current, { ...created, vehicleCount: 0 }]); setAccountId(created.id); setVehicleId(""); setQuickAccountOpen(false); }} /> : null}
+      {quickAccountOpen ? <QuickAccountModal onClose={() => setQuickAccountOpen(false)} onCreated={(created) => { selectAccount({ ...created, vehicleCount: 0 }); setQuickAccountOpen(false); }} /> : null}
       {quickPartOpen ? <QuickPartModal initialName={query} onClose={() => setQuickPartOpen(false)} onCreated={(part) => { addToCart(part); setQuickPartOpen(false); }} /> : null}
 
       {/* ══ Totals / customer ══ */}
@@ -563,23 +579,10 @@ export function PosTerminal({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Field label="الحساب" required>
-              <Select
-                value={accountId}
-                onChange={(e) => {
-                  setAccountId(e.target.value);
-                  setVehicleId("");
-                }}
-              >
-                <option value="">— اختر الحساب —</option>
-                {terminalAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.accountNumber})
-                  </option>
-                ))}
-              </Select>
-              <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => setQuickAccountOpen(true)}><Plus size={14}/> حساب سريع</Button>
+            <Field label="الحساب" required hint="ابحث بالاسم أو الكود أو الهاتف أو الشريحة. F7 أو Alt+A للتركيز، ثم الأسهم وEnter للاختيار.">
+              <POSAccountCombobox ref={accountSearchRef} accounts={terminalAccounts} selectedId={accountId} onSelect={selectAccount} onQuickCreate={() => setQuickAccountOpen(true)} onMoveToPartSearch={() => searchRef.current?.focus()} />
             </Field>
+            {pricingMessage ? <Alert variant="success">{pricingMessage}</Alert> : null}
 
             {account ? (
               <div className="space-y-1 rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-xs">

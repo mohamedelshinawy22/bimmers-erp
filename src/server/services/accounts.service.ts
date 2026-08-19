@@ -123,6 +123,7 @@ export async function getPosAccounts(limit = 500) {
       accountNumber: true,
       name: true,
       type: true,
+      phone: true,
       creditLimit: true,
       currentBalance: true,
       defaultPriceTier: true,
@@ -135,6 +136,7 @@ export async function getPosAccounts(limit = 500) {
     accountNumber: a.accountNumber,
     name: a.name,
     type: a.type,
+    phone: a.phone,
     creditLimit: num(a.creditLimit),
     currentBalance: num(a.currentBalance),
     defaultPriceTier: a.defaultPriceTier,
@@ -143,6 +145,48 @@ export async function getPosAccounts(limit = 500) {
 }
 
 export type PosAccount = Awaited<ReturnType<typeof getPosAccounts>>[number];
+
+/** Lightweight account search for POS dropdowns when the local account cache is insufficient. */
+export async function searchPosAccounts(query: string, limit = 30): Promise<PosAccount[]> {
+  const term = query.trim();
+  if (!term) return getPosAccounts(Math.min(limit, 100));
+  const { variations } = normalizeSearchTerm(term);
+  const accounts = await prisma.account.findMany({
+    where: {
+      isActive: true,
+      type: { in: ["CUSTOMER", "WORKSHOP_BMW"] },
+      OR: variations.flatMap((value) => [
+        { name: { contains: value } },
+        { accountNumber: { contains: value, mode: "insensitive" as const } },
+        { phone: { contains: value } },
+      ]),
+    },
+    orderBy: [{ name: "asc" }],
+    take: Math.min(50, Math.max(1, limit)),
+    select: {
+      id: true,
+      accountNumber: true,
+      name: true,
+      type: true,
+      phone: true,
+      creditLimit: true,
+      currentBalance: true,
+      defaultPriceTier: true,
+      _count: { select: { vehicles: true } },
+    },
+  });
+  return accounts.map((account) => ({
+    id: account.id,
+    accountNumber: account.accountNumber,
+    name: account.name,
+    type: account.type,
+    phone: account.phone,
+    creditLimit: num(account.creditLimit),
+    currentBalance: num(account.currentBalance),
+    defaultPriceTier: account.defaultPriceTier,
+    vehicleCount: account._count.vehicles,
+  }));
+}
 
 export interface AccountVehicle {
   id: string;
