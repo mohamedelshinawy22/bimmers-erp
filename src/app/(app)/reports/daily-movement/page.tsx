@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import { useRouter } from "next/navigation";
 import { Download, FileText, Printer, RefreshCw, Search } from "lucide-react";
 import { UniversalDateTimePicker, type DateRangeValue } from "@/components/ui/universal-date-time-picker";
@@ -55,19 +56,32 @@ export default function DailyMovementPage() {
     return register as DetailRow[];
   }, [data, tab]);
 
-  const exportCsv = () => {
-    const reportRows = tab === "ملخص" ? (data?.operations ?? []).map((row) => [row.label, String(row.count), String(row.total), String(row.paid), String(row.remaining)]) : rows.map((row) => [row.reference, new Date(row.at).toLocaleString("ar-EG"), row.party, row.description, String(row.total), String(row.paid), String(row.remaining), row.treasury, row.warehouse, row.user]);
-    const headings = tab === "ملخص" ? ["نوع الحركة", "عدد المستندات", "الإجمالي", "نقدي", "آجل"] : ["المستند", "التاريخ والوقت", "الطرف", "البيان", "الإجمالي", "نقدي", "آجل", "الخزينة", "المخزن", "المستخدم المسؤول"];
-    const csv = `\uFEFF${[headings, ...reportRows].map((line) => line.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n")}`;
-    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `تقرير-الحركة-${tab}-${range?.from?.slice(0, 10) ?? ""}.csv`; link.click(); URL.revokeObjectURL(link.href);
+  const exportExcel = () => {
+    if (!data) return;
+    const workbook = XLSX.utils.book_new();
+    if (tab === "ملخص") {
+      const operations = XLSX.utils.aoa_to_sheet([["نوع الحركة", "عدد المستندات", "الإجمالي", "نقدي", "آجل"], ...data.operations.map((row) => [row.label, row.count, row.total, row.paid, row.remaining])]);
+      operations["!cols"] = [22, 16, 18, 18, 18].map((wch) => ({ wch }));
+      XLSX.utils.book_append_sheet(workbook, operations, "ملخص العمليات");
+      const liquidity = XLSX.utils.aoa_to_sheet([["البيان", "المبلغ"], ...data.treasurySummary.map((row) => [row.label, row.amount])]);
+      liquidity["!cols"] = [28, 18].map((wch) => ({ wch }));
+      XLSX.utils.book_append_sheet(workbook, liquidity, "حركة الخزينة");
+    } else {
+      const detail = XLSX.utils.aoa_to_sheet([["#", "التاريخ والوقت", "رقم المستند", "الطرف الثاني", "البيان", "الإجمالي", "المدفوع نقداً", "الآجل", "الخزينة", "المخزن", "المستخدم المسؤول"], ...rows.map((row, index) => [index + 1, new Date(row.at).toLocaleString("ar-EG"), row.reference, row.party, row.description, row.total, row.paid, row.remaining, row.treasury, row.warehouse, row.user])]);
+      detail["!cols"] = [7, 22, 20, 24, 36, 16, 16, 16, 18, 18, 24].map((wch) => ({ wch }));
+      XLSX.utils.book_append_sheet(workbook, detail, tab.slice(0, 31));
+    }
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const link = document.createElement("a"); link.href = url; link.download = `bimmer_daily_movement_${tab}_${range?.from?.slice(0, 10) ?? ""}.xlsx`; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   };
 
-  const openDocument = (row: DetailRow) => { if (row.documentId) router.push(`/invoices?search=${encodeURIComponent(row.reference)}`); };
+  const openDocument = (row: DetailRow) => { if (row.documentId) router.push(`/invoices?q=${encodeURIComponent(row.reference)}`); };
   const options = data?.filterOptions;
   const printData: DailyReportPrintData | null = data && company && range?.from && range?.to ? { company, period: { from: range.from, to: range.to }, filters: { operator: options?.users.find((user) => user.id === operatorId)?.fullName, warehouse: warehouseName || undefined, treasury: options?.treasuries.find((treasury) => treasury.id === treasuryId)?.name }, operations: data.operations, treasurySummary: data.treasurySummary, detailRows: Object.values(data.drillDowns).flat() as DailyReportPrintData["detailRows"] } : null;
 
   return <main className="space-y-5" dir="rtl">
-    <header className="no-print flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">تقرير الحركة اليومية</h1><p className="text-sm text-bmw-muted">ملخص مالي وتشغيلي مدقق بحسب الوقت، المستخدم، المخزن، والخزينة.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="subtle" onClick={() => void load()} disabled={loading}><RefreshCw size={16} className={loading ? "animate-spin" : ""} />تحديث</Button><Button type="button" variant="outline" onClick={exportCsv} disabled={!data}><Download size={16} />تصدير CSV</Button><Button type="button" onClick={() => setPrintOpen(true)} disabled={!printData}><Printer size={16} />طباعة التقرير</Button></div></header>
+    <header className="no-print flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">تقرير الحركة اليومية</h1><p className="text-sm text-bmw-muted">ملخص مالي وتشغيلي مدقق بحسب الوقت، المستخدم، المخزن، والخزينة.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="subtle" onClick={() => void load()} disabled={loading}><RefreshCw size={16} className={loading ? "animate-spin" : ""} />تحديث</Button><Button type="button" variant="outline" onClick={exportExcel} disabled={!data}><Download size={16} />تصدير إكسيل</Button><Button type="button" onClick={() => setPrintOpen(true)} disabled={!printData}><Printer size={16} />طباعة التقرير</Button></div></header>
 
     <Card className="no-print"><CardHeader><CardTitle><Search size={17} className="text-bmw-blue" /> نطاق التقرير</CardTitle><Button size="sm" onClick={() => void load()} loading={loading}>عرض التقرير</Button></CardHeader><CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"><div className="xl:col-span-2"><UniversalDateTimePicker value={range} onChange={setRange} syncToUrl storageKey="bimmererp:daily-movement-range" /></div><Field label="المستخدم / الكاشير"><Select value={operatorId} onChange={(event) => setOperatorId(event.target.value)}><option value="">الكل</option>{options?.users.map((user) => <option key={user.id} value={user.id}>{user.fullName} (@{user.username})</option>)}</Select></Field><Field label="المخزن"><Select value={warehouseName} onChange={(event) => setWarehouseName(event.target.value)}><option value="">كل المخازن</option>{options?.warehouses.map((warehouse) => <option key={warehouse} value={warehouse}>{warehouse}</option>)}</Select></Field><Field label="الخزينة"><Select value={treasuryId} onChange={(event) => setTreasuryId(event.target.value)}><option value="">كل الخزائن</option>{options?.treasuries.map((treasury) => <option key={treasury.id} value={treasury.id}>{treasury.name}</option>)}</Select></Field></CardContent></Card>
 
