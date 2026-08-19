@@ -170,6 +170,15 @@ export const createUserSchema = z.object({
   role: z.enum(["SUPER_ADMIN", "MANAGER", "CASHIER", "STOREKEEPER"]),
 });
 
+const companyLogoSchema = z.string().trim().max(2_800_000, "حجم ملف الشعار يتجاوز الحد المسموح به (2MB).").default("").refine((value) => {
+  if (!value) return true;
+  if (/^https?:\/\//i.test(value)) return true;
+  const match = value.match(/^data:image\/(png|jpeg|jpg|webp|svg\+xml);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) return false;
+  // Base64 expands by roughly 4/3. Keep the source image at or below 2MB.
+  return Math.floor((match[2]?.length ?? 0) * 0.75) <= 2 * 1024 * 1024;
+}, "الشعار يجب أن يكون رابطاً آمناً أو صورة PNG/JPG/SVG/WebP لا تتجاوز 2MB.");
+
 export const companyProfileSettingsSchema = z.object({
   companyName: z.string().trim().min(2, "اسم المنشأة مطلوب").max(160),
   commercialName: z.string().trim().max(160).default(""),
@@ -178,7 +187,7 @@ export const companyProfileSettingsSchema = z.object({
   address: z.string().trim().max(500).default(""),
   phonePrimary: z.string().trim().max(40).default(""),
   phoneSecondary: z.string().trim().max(40).default(""),
-  logoUrl: z.string().trim().max(1000).default(""),
+  logoUrl: companyLogoSchema,
   footerNote: z.string().trim().max(1000).default(""),
 });
 

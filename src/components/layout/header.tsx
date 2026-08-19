@@ -11,30 +11,25 @@ import { HotkeyBadges } from "./hotkeys-listener";
 
 interface HeaderProps {
   user: { fullName: string; username: string; role: Role };
+  branding: { name: string; logoUrl?: string | null };
 }
 
-export function Header({ user }: HeaderProps) {
+export function Header({ user, branding }: HeaderProps) {
   const [pending, startTransition] = useTransition();
 
   return (
     <header className="no-print sticky top-0 z-40 flex items-center justify-between gap-4 border-b border-bmw-cardBorder bg-bmw-carbon/80 px-6 py-4 backdrop-blur-md">
       <div className="flex items-center gap-4">
-        <Link href="/" className="flex items-center gap-3 lg:hidden">
-          <div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 p-2 text-bmw-blue">
-            <Car size={22} />
+        <Link href="/" className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 text-bmw-blue">{branding.logoUrl ? <img src={branding.logoUrl} alt={`شعار ${branding.name}`} className="h-8 w-auto max-w-10 object-contain" /> : <Car size={22} />}</div>
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 truncate text-lg font-bold tracking-wide text-white">
+              {branding.name || "BimmerERP"}
+              <span className="hidden rounded-full bg-bmw-mRed px-2 py-0.5 font-mono text-[10px] font-normal text-white sm:inline">M-POWER OS</span>
+            </h1>
+            <p className="hidden text-xs text-bmw-muted sm:block">نظام إدارة المخازن والحسابات المتكامل لقطع غيار BMW الجديدة</p>
           </div>
         </Link>
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-bold tracking-wide text-white">
-            BimmerERP
-            <span className="rounded-full bg-bmw-mRed px-2 py-0.5 font-mono text-[10px] font-normal text-white">
-              M-POWER OS
-            </span>
-          </h1>
-          <p className="hidden text-xs text-bmw-muted sm:block">
-            نظام إدارة المخازن والحسابات المتكامل لقطع غيار BMW الجديدة
-          </p>
-        </div>
       </div>
 
       <HotkeyBadges />

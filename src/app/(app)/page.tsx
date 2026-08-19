@@ -11,6 +11,7 @@ import {
   TrendingDown,
   TrendingUp,
   Warehouse,
+  Building2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, KpiCard } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,7 @@ import {
   getSalesTrend,
   getTopSellingParts,
 } from "@/server/services/dashboard.service";
+import { getCompanyProfile } from "@/server/services/settings.service";
 
 export const metadata = { title: "لوحة القيادة" };
 // Cockpit numbers must reflect the last committed transaction, never a cache.
@@ -81,17 +83,19 @@ const QUICK_ACTIONS = [
 const CHASSIS_QUICK = ["E36", "E46", "E90", "F30", "G20", "E39", "E60", "F10", "G30"] as const;
 
 export default async function DashboardCockpit() {
-  const [metrics, recent, trend, topParts] = await Promise.all([
+  const [metrics, recent, trend, topParts, company] = await Promise.all([
     getDashboardMetrics(),
     getRecentInvoices(8),
     getSalesTrend(7),
     getTopSellingParts(5),
+    getCompanyProfile(),
   ]);
 
   const peak = Math.max(...trend.map((t) => t.total), 1);
 
   return (
     <div className="space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-4"><div className="flex items-center gap-3">{company.logoUrl ? <img src={company.logoUrl} alt={`شعار ${company.name}`} className="h-12 w-auto max-w-24 rounded-lg border border-bmw-cardBorder bg-white object-contain p-1" /> : <div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 p-3 text-bmw-blue"><Building2 size={24} /></div>}<div><h1 className="text-lg font-bold text-white">{company.name}</h1><p className="text-xs text-bmw-muted">{company.commercialName || "لوحة القيادة التشغيلية"}</p></div></div><p className="text-xs text-bmw-muted">مؤشرات المخزون والمبيعات والسيولة المباشرة</p></header>
       {/* KPI performance counters */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard

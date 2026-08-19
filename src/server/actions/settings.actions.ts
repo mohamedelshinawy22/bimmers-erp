@@ -41,7 +41,8 @@ export async function updateCompanySettingsAction(raw: CompanyProfileSettingsInp
       if (count) await writeAudit(tx, { tableName: "SystemSetting", recordId: "COMPANY_PROFILE", action: "UPDATE", oldData: before, newData: entries, performedBy: user.id });
       return count;
     });
-    for (const path of ["/settings", "/invoices", "/pos", "/accounts", "/inventory"]) revalidatePath(path);
+    for (const path of ["/settings", "/", "/invoices", "/pos", "/accounts", "/inventory"]) revalidatePath(path);
+    revalidatePath("/", "layout");
     return ok({ updated });
   } catch (error) {
     return toActionError(error, "updateCompanySettingsAction");

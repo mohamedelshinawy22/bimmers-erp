@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Printer, Save, SlidersHorizontal } from "lucide-react";
+import { Building2, ImagePlus, Printer, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
@@ -43,6 +43,7 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.key, i.value]))),
@@ -72,6 +73,28 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
       setSuccess(result.data.updated ? "تم حفظ بيانات المنشأة والطباعة بنجاح." : "بيانات المنشأة محفوظة بالفعل.");
       router.refresh();
     });
+  };
+
+  const saveLogo = (logoUrl: string) => {
+    const nextProfile = { ...profile, logoUrl };
+    setProfile(nextProfile); setError(null); setSuccess(null);
+    startTransition(async () => {
+      const result = await updateCompanySettingsAction(nextProfile);
+      if (!result.success) { setError(result.error); return; }
+      setSuccess(logoUrl ? "تم تحديث وحفظ لوجو المنشأة بنجاح." : "تمت إزالة لوجو المنشأة بنجاح.");
+      router.refresh();
+    });
+  };
+
+  const handleLogoFile = (file?: File) => {
+    if (!file) return;
+    const allowed = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+    if (!allowed.includes(file.type)) { setError("يرجى اختيار صورة PNG أو JPG أو SVG أو WebP فقط."); return; }
+    if (file.size > 2 * 1024 * 1024) { setError("حجم الشعار يجب ألا يتجاوز 2MB."); return; }
+    const reader = new FileReader();
+    reader.onerror = () => setError("تعذر قراءة ملف الشعار. حاول استخدام صورة أخرى.");
+    reader.onload = () => { const dataUrl = typeof reader.result === "string" ? reader.result : ""; if (dataUrl) saveLogo(dataUrl); };
+    reader.readAsDataURL(file);
   };
 
   const submit = () => {
@@ -131,7 +154,7 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
             <Field label="الهاتف الرئيسي"><Input value={profile.phonePrimary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phonePrimary: event.target.value }))} dir="ltr" className="text-left" /></Field>
             <Field label="الهاتف الثانوي"><Input value={profile.phoneSecondary} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, phoneSecondary: event.target.value }))} dir="ltr" className="text-left" /></Field>
             <Field label="العنوان الرئيسي / الفروع" className="sm:col-span-2"><Textarea rows={2} value={profile.address} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, address: event.target.value }))} /></Field>
-            <Field label="رابط الشعار" hint="اختياري — يستخدم في رأس الفاتورة"><Input value={profile.logoUrl} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, logoUrl: event.target.value }))} placeholder="https://…" dir="ltr" className="text-left" /></Field>
+            <div className="sm:col-span-2"><Field label="شعار المنشأة" hint="PNG / JPG / SVG / WebP حتى 2MB — يظهر في الطباعة والنظام"><input ref={logoInputRef} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => { handleLogoFile(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={!canWrite} /><div onDragOver={(event) => { if (canWrite) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (canWrite) handleLogoFile(event.dataTransfer.files?.[0]); }} onClick={() => canWrite && logoInputRef.current?.click()} className={`mt-1 flex min-h-32 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed p-4 transition-colors ${canWrite ? "border-bmw-blue/50 bg-bmw-blue/5 hover:bg-bmw-blue/10" : "border-bmw-cardBorder bg-bmw-carbon/40"}`}><div className="flex items-center gap-3">{profile.logoUrl ? <img src={profile.logoUrl} alt="معاينة شعار المنشأة" className="h-20 w-28 rounded-lg border border-bmw-cardBorder bg-white object-contain p-1" /> : <div className="flex h-20 w-28 items-center justify-center rounded-lg border border-bmw-cardBorder bg-bmw-carbon text-bmw-muted"><ImagePlus size={28} /></div>}<div><p className="font-bold text-white">{profile.logoUrl ? "معاينة الشعار الحالي" : "ارفع شعار المنشأة"}</p><p className="mt-1 text-xs text-bmw-muted">اسحب الصورة هنا أو انقر للاختيار. يتم الحفظ فوراً بشكل آمن.</p>{profile.logoUrl ? <p className="mt-1 text-[10px] text-emerald-400">سيظهر في الفواتير وكشوف الحسابات والواجهة الرئيسية.</p> : null}</div></div>{canWrite && profile.logoUrl ? <Button type="button" variant="danger" size="sm" onClick={(event) => { event.stopPropagation(); saveLogo(""); }} disabled={pending}><Trash2 size={14} />إزالة</Button> : canWrite ? <span className="rounded-lg border border-bmw-blue/30 px-3 py-2 text-xs text-bmw-blue"><Upload size={14} className="ml-1 inline" />اختيار ملف</span> : null}</div></Field></div><Field label="رابط الشعار" hint="اختياري — يمكنك أيضاً لصق رابط صورة آمن"><Input value={profile.logoUrl} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, logoUrl: event.target.value }))} placeholder="https://…" dir="ltr" className="text-left" /></Field>
             <Field label="رسالة التذييل / شروط الضمان" className="sm:col-span-2"><Textarea rows={3} value={profile.footerNote} disabled={!canWrite} onChange={(event) => setProfile((current) => ({ ...current, footerNote: event.target.value }))} placeholder="شكراً لتعاملكم معنا" /></Field>
           </div>
           {canWrite ? <Button onClick={saveProfile} loading={pending}><Printer size={16} /> حفظ بيانات المنشأة</Button> : null}

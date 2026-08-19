@@ -46,18 +46,16 @@ const NAV: Array<{
   { href: "/settings", label: "الإعدادات", icon: SlidersHorizontal, hotkey: null, permission: "settings.read" },
 ];
 
-export function Sidebar({ role }: { role: Role }) {
+export function Sidebar({ role, branding }: { role: Role; branding: { name: string; logoUrl?: string | null } }) {
   const pathname = usePathname();
   const items = NAV.filter((item) => item.permission === null || can(role, item.permission));
 
   return (
     <aside className="no-print sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-l border-bmw-cardBorder bg-bmw-carbon lg:flex">
       <div className="flex items-center gap-3 border-b border-bmw-cardBorder px-5 py-[17px]">
-        <div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 p-2 text-bmw-blue">
-          <Car size={22} />
-        </div>
-        <div>
-          <p className="text-sm font-bold tracking-wide text-white">BimmerERP</p>
+        <div className="flex h-11 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 text-bmw-blue">{branding.logoUrl ? <img src={branding.logoUrl} alt={`شعار ${branding.name}`} className="h-9 w-auto max-w-11 object-contain" /> : <Car size={22} />}</div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold tracking-wide text-white">{branding.name || "BimmerERP"}</p>
           <p className="font-mono text-[10px] text-bmw-muted">M-POWER OS</p>
         </div>
       </div>
