@@ -11,14 +11,27 @@ export const thermalBarcodeProfileSchema = z.object({
   lineDensity: z.enum(["THIN", "STANDARD", "BOLD"]),
   fontScale: z.enum(["SMALL", "MEDIUM", "LARGE"]),
   toggles: z.object({
-    company: z.boolean(),
+    // `company` is retained as a read-only legacy input so profiles saved before
+    // the header split automatically migrate without losing their intended output.
+    company: z.boolean().optional(),
+    showLogo: z.boolean().optional(),
+    showCompanyName: z.boolean().optional(),
     partName: z.boolean(),
     oem: z.boolean(),
     fitment: z.boolean(),
     price: z.boolean(),
     barcode: z.boolean(),
     barcodeText: z.boolean(),
-  }),
+  }).transform((toggles) => ({
+    showLogo: toggles.showLogo ?? toggles.company ?? true,
+    showCompanyName: toggles.showCompanyName ?? toggles.company ?? true,
+    partName: toggles.partName,
+    oem: toggles.oem,
+    fitment: toggles.fitment,
+    price: toggles.price,
+    barcode: toggles.barcode,
+    barcodeText: toggles.barcodeText,
+  })),
 });
 
 export type ThermalBarcodeProfile = z.infer<typeof thermalBarcodeProfileSchema>;
@@ -31,7 +44,7 @@ export const DEFAULT_THERMAL_BARCODE_PROFILE: ThermalBarcodeProfile = {
   barcodeHeightMm: 9,
   lineDensity: "STANDARD",
   fontScale: "MEDIUM",
-  toggles: { company: true, partName: true, oem: true, fitment: true, price: true, barcode: true, barcodeText: true },
+  toggles: { showLogo: true, showCompanyName: true, partName: true, oem: true, fitment: true, price: true, barcode: true, barcodeText: true },
 };
 
 export const THERMAL_LABEL_PRESETS = [
