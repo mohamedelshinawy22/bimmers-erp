@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Barcode,
   Boxes,
   Car,
   LayoutDashboard,
@@ -41,6 +42,7 @@ const NAV: Array<{
   { href: "/audit", label: "سجل التدقيق", icon: ShieldCheck, hotkey: null, permission: "audit.read" },
   { href: "/users", label: "المستخدمون والصلاحيات", icon: ShieldCheck, hotkey: null, permission: "user.manage" },
   { href: "/settings", label: "الإعدادات", icon: SlidersHorizontal, hotkey: null, permission: "settings.read" },
+  { href: "/settings/barcode", label: "طباعة الباركود الحرارية", icon: Barcode, hotkey: null, permission: "barcode.manage" },
 ];
 
 export function Sidebar({ role, branding }: { role: Role; branding: { name: string; logoUrl?: string | null } }) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  Barcode,
   Banknote,
   CreditCard,
   MapPin,
@@ -30,6 +31,7 @@ import { holdSaleAction } from "@/server/actions/held-sales.actions";
 import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { QuickPartModal } from "@/components/pos/quick-part-modal";
 import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
+import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { POSAccountCombobox } from "./components/pos-account-combobox";
 
 /**
@@ -122,6 +124,7 @@ export function PosTerminal({
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<InvoiceResult | null>(null);
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
+  const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const isEditMode = Boolean(initialDraft);
 
@@ -478,9 +481,14 @@ export function PosTerminal({
               </Badge>
             </CardTitle>
             {cart.length > 0 ? (
-              <Button variant="ghost" size="sm" onClick={resetInvoice}>
-                <Trash2 size={14} /> إفراغ
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => setBarcodePrintOpen(true)} title="طباعة ملصقات الأصناف الحرارية">
+                  <Barcode size={14} /> ملصقات
+                </Button>
+                <Button variant="ghost" size="sm" onClick={resetInvoice}>
+                  <Trash2 size={14} /> إفراغ
+                </Button>
+              </div>
             ) : null}
           </CardHeader>
 
@@ -860,6 +868,7 @@ export function PosTerminal({
         ) : null}
       </Modal>
       {printInvoiceId ? <PosInvoicePrintDialog invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} /> : null}
+      {barcodePrintOpen ? <BarcodePrintModal parts={cart.map((line) => ({ id: line.part.id, nameAr: line.part.nameAr, oemNumber: line.part.oemNumber, brandName: line.part.brandName, chassisCodes: [], sellPriceRetail: line.unitPrice }))} company={{ name: companyName }} onClose={() => setBarcodePrintOpen(false)} /> : null}
     </div>
   );
 }

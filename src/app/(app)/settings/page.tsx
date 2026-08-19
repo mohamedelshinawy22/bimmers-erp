@@ -22,7 +22,10 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Link href="/inventory?import=1" className="flex items-center justify-between rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 px-4 py-3 text-sm font-bold text-bmw-blue hover:bg-bmw-blue/20">استيراد بيانات من إكسيل <span>←</span></Link>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Link href="/inventory?import=1" className="flex items-center justify-between rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 px-4 py-3 text-sm font-bold text-bmw-blue hover:bg-bmw-blue/20">استيراد بيانات من إكسيل <span>←</span></Link>
+        {can(user.role, "barcode.manage") ? <Link href="/settings/barcode" className="flex items-center justify-between rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/20">إعدادات طباعة الباركود الحرارية <span>←</span></Link> : null}
+      </div>
       <SettingsForm
         groups={groups}
         canWrite={can(user.role, "settings.write")}

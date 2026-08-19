@@ -3,163 +3,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
-import { Barcode, Minus, Plus, Printer, SlidersHorizontal } from "lucide-react";
+import { Barcode, Minus, Plus, Printer, Settings2, SlidersHorizontal } from "lucide-react";
+import { getThermalBarcodeProfileAction, saveThermalBarcodeProfileAction } from "@/server/actions/barcode.actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
-import { Modal } from "@/components/ui/modal";
+import { Alert, Modal } from "@/components/ui/modal";
 import { CURRENCY, formatMoney } from "@/lib/utils";
+import { DEFAULT_THERMAL_BARCODE_PROFILE, lineWidthForDensity, THERMAL_LABEL_PRESETS, type ThermalBarcodeProfile } from "@/lib/thermal-barcode-profile";
 
-export type BarcodeLabelPart = {
-  id: string;
-  nameAr: string;
-  oemNumber: string;
-  barcode?: string | null;
-  brandName?: string | null;
-  chassisCodes?: string[];
-  sellPriceRetail?: number | null;
-};
-
-type Symbology = "CODE128" | "EAN13" | "QR";
-type FontScale = "SMALL" | "MEDIUM" | "LARGE";
-type PresetId = "50X25" | "38X25" | "40X30" | "50X30" | "A4_24" | "A4_30" | "CUSTOM";
-
-type LabelPreset = { id: PresetId; label: string; width: number; height: number; columns?: number; rows?: number };
-
-const PRESETS: LabelPreset[] = [
-  { id: "50X25", label: "50 مم × 25 مم — قياسي", width: 50, height: 25 },
-  { id: "38X25", label: "38 مم × 25 مم — مدمج", width: 38, height: 25 },
-  { id: "40X30", label: "40 مم × 30 مم — متوسط", width: 40, height: 30 },
-  { id: "50X30", label: "50 مم × 30 مم — تفصيلي", width: 50, height: 30 },
-  { id: "A4_24", label: "A4 — 24 ملصق (3 × 8)", width: 59, height: 34, columns: 3, rows: 8 },
-  { id: "A4_30", label: "A4 — 30 ملصق (3 × 10)", width: 59, height: 27, columns: 3, rows: 10 },
-  { id: "CUSTOM", label: "مخصص — العرض × الارتفاع", width: 50, height: 25 },
-];
-
+export type BarcodeLabelPart = { id: string; nameAr: string; oemNumber: string; barcode?: string | null; brandName?: string | null; chassisCodes?: string[]; sellPriceRetail?: number | null };
+type PrintMode = "quick" | "designer";
+const LOCAL_PROFILE_KEY = "bimmererp:thermal-barcode-profile:v1";
 const scale = { SMALL: 0.82, MEDIUM: 1, LARGE: 1.18 } as const;
-const BARCODE_PREFERENCES_KEY = "bimmererp:barcode-label-preferences:v1";
 
-type BarcodePreferences = {
-  presetId: PresetId;
-  customWidth: number;
-  customHeight: number;
-  symbology: Symbology;
-  fontScale: FontScale;
-  barcodeHeightMm: number;
-  lineWidth: number;
-  toggles: { company: boolean; partName: boolean; oem: boolean; fitment: boolean; price: boolean; barcode: boolean; barcodeText: boolean };
-};
+function codeFor(value: string, symbology: ThermalBarcodeProfile["symbology"]) { if (symbology !== "EAN13") return value || "000000000000"; return value.replace(/\D/g, "").slice(0, 12).padEnd(12, "0"); }
+function VectorBarcode({ value, profile }: { value: string; profile: ThermalBarcodeProfile }) { const ref = useRef<SVGSVGElement | null>(null); useEffect(() => { if (!ref.current || profile.symbology === "QR") return; const fallback = () => JsBarcode(ref.current!, "000000000000", { format: "CODE128", displayValue: false, height: Math.max(18, profile.barcodeHeightMm * 3.78), width: lineWidthForDensity(profile.lineDensity), margin: 0, background: "#ffffff", lineColor: "#000000" }); try { JsBarcode(ref.current, codeFor(value, profile.symbology), { format: profile.symbology, displayValue: false, height: Math.max(18, profile.barcodeHeightMm * 3.78), width: lineWidthForDensity(profile.lineDensity), margin: 0, background: "#ffffff", lineColor: "#000000" }); } catch { fallback(); } }, [value, profile]); return <svg ref={ref} className="universal-thermal-barcode h-auto w-full" style={{ shapeRendering: "crispEdges" }} role="img" aria-label="باركود متجهي"/>; }
+function ThermalLabel({ part, company, profile }: { part: BarcodeLabelPart; company: { name: string; logoUrl?: string | null }; profile: ThermalBarcodeProfile }) { const code = part.barcode || part.oemNumber; const fitment = [part.brandName, ...(part.chassisCodes ?? []).slice(0, 3)].filter(Boolean).join(" | "); const t = profile.toggles; return <article className="universal-thermal-label" dir="rtl" style={{ width: `${profile.widthMm}mm`, height: `${profile.heightMm}mm`, fontSize: `${scale[profile.fontScale]}em` }}>{t.company ? <div className="thermal-company">{company.logoUrl ? <img src={company.logoUrl} alt=""/> : null}<span>{company.name}</span></div> : null}{t.partName ? <p className="thermal-part-name">{part.nameAr || "صنف بدون اسم"}</p> : null}{t.oem ? <p className="thermal-oem" dir="ltr">{part.oemNumber || "—"}</p> : null}{t.fitment && fitment ? <p className="thermal-fitment">{fitment}</p> : null}{t.barcode ? <div className="thermal-code">{profile.symbology === "QR" ? <QRCodeSVG value={code || "—"} level="M" includeMargin={false} size={Math.max(42, Math.min(110, profile.barcodeHeightMm * 6))} style={{ shapeRendering: "crispEdges" }}/> : <VectorBarcode value={code} profile={profile}/>} {t.barcodeText ? <p className="thermal-human" dir="ltr">{code || "—"}</p> : null}</div> : null}{t.price ? <p className="thermal-price">{formatMoney(part.sellPriceRetail ?? 0)} {CURRENCY}</p> : null}</article>; }
 
-function isPresetId(value: unknown): value is PresetId { return PRESETS.some((preset) => preset.id === value); }
-function isSymbology(value: unknown): value is Symbology { return value === "CODE128" || value === "EAN13" || value === "QR"; }
-function isFontScale(value: unknown): value is FontScale { return value === "SMALL" || value === "MEDIUM" || value === "LARGE"; }
-function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number) { const numeric = Number(value); return Number.isFinite(numeric) ? Math.max(minimum, Math.min(maximum, numeric)) : fallback; }
-
-function printableCode(value: string, symbology: Symbology) {
-  const fallback = "000000000000";
-  if (symbology !== "EAN13") return value || fallback;
-  const digits = value.replace(/\D/g, "").slice(0, 12);
-  return digits.padEnd(12, "0");
+export function BarcodePrintModal({ parts, company, onClose, mode = "quick", profileOverride }: { parts: BarcodeLabelPart[]; company: { name: string; logoUrl?: string | null }; onClose: () => void; mode?: PrintMode; profileOverride?: ThermalBarcodeProfile }) {
+  const [profile, setProfile] = useState<ThermalBarcodeProfile>(profileOverride ?? DEFAULT_THERMAL_BARCODE_PROFILE); const [ready, setReady] = useState(Boolean(profileOverride)); const [rendering, setRendering] = useState(false); const [saving, setSaving] = useState(false); const [error, setError] = useState(""); const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(parts.map((part) => [part.id, 1])));
+  useEffect(() => { if (profileOverride) { setProfile(profileOverride); setReady(true); return; } let active = true; try { const cached = window.localStorage.getItem(LOCAL_PROFILE_KEY); if (cached) setProfile((current) => ({ ...current, ...JSON.parse(cached), toggles: { ...current.toggles, ...JSON.parse(cached).toggles } })); } catch {} void getThermalBarcodeProfileAction().then((result) => { if (!active) return; if (result.success) { setProfile(result.data); try { window.localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(result.data)); } catch {} } setReady(true); }); return () => { active = false; }; }, [profileOverride]);
+  const labels = useMemo(() => parts.flatMap((part) => Array.from({ length: Math.max(0, Math.min(200, Math.trunc(counts[part.id] ?? 1))) }, (_, index) => ({ part, index }))), [parts, counts]);
+  const update = <K extends keyof ThermalBarcodeProfile>(key: K, value: ThermalBarcodeProfile[K]) => setProfile((current) => ({ ...current, [key]: value }));
+  const selectPreset = (id: ThermalBarcodeProfile["presetId"]) => { const preset = THERMAL_LABEL_PRESETS.find((item) => item.id === id); setProfile((current) => ({ ...current, presetId: id, ...(preset ? { widthMm: preset.widthMm, heightMm: preset.heightMm } : {}) })); };
+  const saveProfile = async () => { setSaving(true); setError(""); const result = await saveThermalBarcodeProfileAction(profile); if (!result.success) setError(result.error); else { try { window.localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile)); } catch {} } setSaving(false); };
+  const print = () => { if (!labels.length) return; setRendering(true); requestAnimationFrame(() => { window.setTimeout(async () => { try { await window.document.fonts?.ready; const images = Array.from(window.document.querySelectorAll<HTMLImageElement>("#universal-barcode-print-root img")); await Promise.all(images.map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => { image.addEventListener("load", () => resolve(), { once: true }); image.addEventListener("error", () => resolve(), { once: true }); }))); window.print(); } finally { window.setTimeout(() => setRendering(false), 800); } }, 350); }); };
+  const css = `@media print { @page { size:${profile.widthMm}mm ${profile.heightMm}mm; margin:0mm !important; } html, body { margin:0 !important; padding:0 !important; background:#ffffff !important; color:#000000 !important; width:${profile.widthMm}mm !important; height:${profile.heightMm}mm !important; overflow:visible !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; } body * { visibility:hidden !important; } #universal-barcode-print-root, #universal-barcode-print-root * { visibility:visible !important; } #universal-barcode-print-root { position:absolute !important; left:0 !important; top:0 !important; width:${profile.widthMm}mm !important; margin:0 !important; padding:0 !important; display:block !important; background:#ffffff !important; } .universal-thermal-label { width:${profile.widthMm}mm !important; height:${profile.heightMm}mm !important; max-width:${profile.widthMm}mm !important; max-height:${profile.heightMm}mm !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; display:flex !important; flex-direction:column !important; justify-content:space-between !important; align-items:center !important; text-align:center !important; padding:1.2mm 1mm !important; box-sizing:border-box !important; background:#ffffff !important; color:#000000 !important; overflow:hidden !important; } .universal-thermal-label * { color:#000000 !important; background:transparent !important; font-family:system-ui,-apple-system,sans-serif !important; } .universal-thermal-label svg { shape-rendering:crispEdges !important; max-width:95% !important; } .universal-thermal-label img { filter:grayscale(1) contrast(3) !important; } .universal-thermal-label:last-child { page-break-after:auto !important; break-after:auto !important; } }`;
+  const content = <>{labels.map(({ part, index }) => <ThermalLabel key={`${part.id}-${index}`} part={part} company={company} profile={profile}/>)}</>;
+  return <Modal open onClose={onClose} title={mode === "quick" ? "طباعة ملصقات حرارية" : "ضبط وطباعة الملصقات الحرارية"} description={mode === "quick" ? "يتم استخدام ملف الطابعة الحرارية المحفوظ. عدّل عدد النسخ ثم اطبع فوراً." : "اضبط ملف الطابعة المشترك ثم احفظه لتستخدمه كل محطات العمل."} size="xl" footer={<><Button variant="ghost" onClick={onClose} disabled={rendering || saving}>إغلاق</Button>{mode === "designer" ? <Button variant="outline" onClick={() => void saveProfile()} loading={saving}>حفظ ملف الطابعة</Button> : <Button variant="ghost" onClick={() => window.location.assign("/settings/barcode")}><Settings2 size={16}/> ضبط الإعدادات</Button>}<Button onClick={print} disabled={!labels.length || rendering || !ready}>{rendering ? <SlidersHorizontal size={16} className="animate-spin"/> : <Printer size={16}/>} {rendering ? "يتم تجهيز الطباعة…" : "طباعة فورية"}</Button></>}><style>{css}</style>{error ? <Alert variant="error">{error}</Alert> : null}<div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]" dir="rtl">{mode === "designer" ? <Designer profile={profile} onUpdate={update} onPreset={selectPreset}/> : <Copies parts={parts} counts={counts} setCounts={setCounts}/>}<section className="space-y-3"><div className="rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-3"><p className="mb-2 flex items-center gap-2 text-sm font-bold text-white"><Barcode size={16} className="text-bmw-blue"/> معاينة حرارية عالية التباين</p><div className="flex min-h-[270px] items-center justify-center overflow-auto rounded-xl bg-white p-8"><ThermalLabel part={parts[0] ?? { id: "sample", nameAr: "فانوس أمامي BMW F30", oemNumber: "63117259567", brandName: "BMW", chassisCodes: ["F30", "G20"], sellPriceRetail: 1250 }} company={company} profile={profile}/></div></div>{mode === "designer" ? <Copies parts={parts} counts={counts} setCounts={setCounts}/> : <p className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon/50 p-3 text-xs text-bmw-muted">المقاس: <b className="text-white">{profile.widthMm} × {profile.heightMm} مم</b> · الترميز: <b className="text-white">{profile.symbology}</b> · الكثافة: <b className="text-white">{profile.lineDensity}</b></p>}</section></div><div id="universal-barcode-print-root" aria-hidden="true" className="pointer-events-none fixed -left-[10000px] top-0 h-px w-px overflow-hidden opacity-0">{rendering ? content : null}</div></Modal>;
 }
-
-function VectorBarcode({ value, symbology, heightMm, lineWidth, showText }: { value: string; symbology: Exclude<Symbology, "QR">; heightMm: number; lineWidth: number; showText: boolean }) {
-  const ref = useRef<SVGSVGElement | null>(null);
-  useEffect(() => {
-    if (!ref.current) return;
-    try {
-      JsBarcode(ref.current, printableCode(value, symbology), {
-        format: symbology,
-        displayValue: false,
-        height: Math.max(22, heightMm * 3.78),
-        width: Math.max(0.7, lineWidth),
-        margin: 0,
-        background: "#ffffff",
-        lineColor: "#000000",
-      });
-    } catch {
-      JsBarcode(ref.current, "000000000000", { format: "CODE128", displayValue: false, height: Math.max(22, heightMm * 3.78), width: Math.max(0.7, lineWidth), margin: 0 });
-    }
-  }, [value, symbology, heightMm, lineWidth]);
-  return <div className="min-w-0 text-center" dir="ltr"><svg ref={ref} className="h-auto w-full max-w-full" role="img" aria-label="باركود متجهي" />{showText ? <p className="mt-0.5 truncate font-mono text-[0.7em] tracking-wide">{value || "—"}</p> : null}</div>;
-}
-
-function BarcodeLabel({ part, company, widthMm, heightMm, showCompany, showPartName, showOem, showFitment, showPrice, showBarcode, showBarcodeText, symbology, fontScale, barcodeHeightMm, lineWidth, className = "" }: {
-  part: BarcodeLabelPart; company: { name: string; logoUrl?: string | null }; widthMm: number; heightMm: number; showCompany: boolean; showPartName: boolean; showOem: boolean; showFitment: boolean; showPrice: boolean; showBarcode: boolean; showBarcodeText: boolean; symbology: Symbology; fontScale: FontScale; barcodeHeightMm: number; lineWidth: number; className?: string;
-}) {
-  const code = part.barcode || part.oemNumber;
-  const fitment = [part.brandName, ...(part.chassisCodes ?? []).slice(0, 3)].filter(Boolean).join(" | ");
-  const dense = heightMm <= 25;
-  return <article className={`barcode-designer-label bg-white text-black ${className}`} dir="rtl" style={{ width: `${widthMm}mm`, height: `${heightMm}mm`, fontSize: `${scale[fontScale]}em` }}>
-    {showCompany ? <div className="flex min-h-0 items-center justify-center gap-1 border-b border-black/20 pb-0.5 text-center text-[0.64em] font-bold leading-tight">{company.logoUrl ? <img src={company.logoUrl} alt="" className="h-3 w-auto max-w-8 object-contain" /> : null}<span className="truncate">{company.name}</span></div> : null}
-    {showPartName ? <p className={`mt-0.5 overflow-hidden text-center font-bold leading-tight ${dense ? "line-clamp-1 text-[0.78em]" : "line-clamp-2 text-[0.84em]"}`}>{part.nameAr || "صنف بدون اسم"}</p> : null}
-    {showOem ? <p className="mt-0.5 text-center font-mono text-[0.86em] font-black tracking-wide" dir="ltr">{part.oemNumber || "—"}</p> : null}
-    {showFitment && fitment ? <p className="mt-0.5 truncate text-center text-[0.63em] leading-tight">{fitment}</p> : null}
-    {showBarcode ? <div className="mt-auto pt-0.5">{symbology === "QR" ? <div className="flex justify-center"><QRCodeSVG value={code || part.oemNumber || "—"} size={Math.max(42, Math.min(92, heightMm * 2.7))} level="M" includeMargin={false} /></div> : <VectorBarcode value={code} symbology={symbology} heightMm={barcodeHeightMm} lineWidth={lineWidth} showText={showBarcodeText} />}</div> : null}
-    {showPrice ? <p className="mt-0.5 text-center text-[0.88em] font-black">{formatMoney(part.sellPriceRetail ?? 0)} {CURRENCY}</p> : null}
-  </article>;
-}
-
-export function BarcodePrintModal({ parts, company, onClose }: { parts: BarcodeLabelPart[]; company: { name: string; logoUrl?: string | null }; onClose: () => void }) {
-  const [presetId, setPresetId] = useState<PresetId>("50X25");
-  const [customWidth, setCustomWidth] = useState(50);
-  const [customHeight, setCustomHeight] = useState(25);
-  const [symbology, setSymbology] = useState<Symbology>("CODE128");
-  const [fontScale, setFontScale] = useState<FontScale>("MEDIUM");
-  const [barcodeHeightMm, setBarcodeHeightMm] = useState(9);
-  const [lineWidth, setLineWidth] = useState(1.15);
-  const [isRendering, setIsRendering] = useState(false);
-  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(parts.map((part) => [part.id, 1])));
-  const [toggles, setToggles] = useState({ company: true, partName: true, oem: true, fitment: true, price: true, barcode: true, barcodeText: true });
-  const [preferencesReady, setPreferencesReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(BARCODE_PREFERENCES_KEY);
-      if (!raw) return;
-      const stored = JSON.parse(raw) as Partial<BarcodePreferences>;
-      if (isPresetId(stored.presetId)) setPresetId(stored.presetId);
-      setCustomWidth(boundedNumber(stored.customWidth, 50, 20, 150));
-      setCustomHeight(boundedNumber(stored.customHeight, 25, 15, 120));
-      if (isSymbology(stored.symbology)) setSymbology(stored.symbology);
-      if (isFontScale(stored.fontScale)) setFontScale(stored.fontScale);
-      setBarcodeHeightMm(boundedNumber(stored.barcodeHeightMm, 9, 4, 18));
-      setLineWidth(boundedNumber(stored.lineWidth, 1.15, 0.7, 2.2));
-      if (stored.toggles && typeof stored.toggles === "object") setToggles((current) => ({ ...current, ...Object.fromEntries(Object.entries(current).map(([key, value]) => [key, typeof stored.toggles?.[key as keyof typeof current] === "boolean" ? stored.toggles[key as keyof typeof current] : value])) }));
-    } catch (preferenceError) {
-      console.warn("[BARCODE_PREFERENCES_READ_ERROR]", preferenceError);
-    } finally { setPreferencesReady(true); }
-  }, []);
-
-  useEffect(() => {
-    if (!preferencesReady) return;
-    const preferences: BarcodePreferences = { presetId, customWidth, customHeight, symbology, fontScale, barcodeHeightMm, lineWidth, toggles };
-    try { window.localStorage.setItem(BARCODE_PREFERENCES_KEY, JSON.stringify(preferences)); }
-    catch (preferenceError) { console.warn("[BARCODE_PREFERENCES_WRITE_ERROR]", preferenceError); }
-  }, [preferencesReady, presetId, customWidth, customHeight, symbology, fontScale, barcodeHeightMm, lineWidth, toggles]);
-
-  const preset = PRESETS.find((item) => item.id === presetId) ?? PRESETS[0]!;
-  const widthMm = presetId === "CUSTOM" ? Math.max(20, Math.min(150, customWidth)) : preset.width;
-  const heightMm = presetId === "CUSTOM" ? Math.max(15, Math.min(120, customHeight)) : preset.height;
-  const labels = useMemo(() => parts.flatMap((part) => Array.from({ length: Math.max(0, Math.min(100, Math.trunc(counts[part.id] ?? 1))) }, (_, index) => ({ part, index }))), [parts, counts]);
-  const isSheet = Boolean(preset.columns && preset.rows);
-  const pageSize = isSheet ? "A4 portrait" : `${widthMm}mm ${heightMm}mm`;
-  const css = `@media print { @page { size: ${pageSize}; margin: ${isSheet ? "7mm" : "0"}; } body * { visibility: hidden !important; } #barcode-print-stage, #barcode-print-stage * { visibility: visible !important; } #barcode-print-stage { display: block !important; position: fixed !important; inset: 0 !important; width: auto !important; height: auto !important; overflow: visible !important; background: white !important; z-index: 2147483647 !important; } #barcode-print-stage .barcode-designer-label { box-sizing: border-box !important; overflow: hidden !important; border: 0.15mm solid #222 !important; break-inside: avoid !important; } #barcode-print-stage .barcode-label-roll { page-break-after: always !important; break-after: page !important; } #barcode-print-stage .barcode-label-roll:last-child { page-break-after: auto !important; break-after: auto !important; } #barcode-print-stage .barcode-sheet-grid { display: grid !important; grid-template-columns: repeat(${preset.columns ?? 1}, ${widthMm}mm) !important; grid-auto-rows: ${heightMm}mm !important; gap: 0 !important; align-content: start !important; } }`;
-  const toggle = (key: keyof typeof toggles) => setToggles((current) => ({ ...current, [key]: !current[key] }));
-  const print = () => {
-    if (!labels.length) return;
-    setIsRendering(true);
-    requestAnimationFrame(() => {
-      window.setTimeout(async () => {
-        try { await document.fonts?.ready; window.print(); } finally { window.setTimeout(() => setIsRendering(false), 250); }
-      }, 350);
-    });
-  };
-  const shared = { company, widthMm, heightMm, showCompany: toggles.company, showPartName: toggles.partName, showOem: toggles.oem, showFitment: toggles.fitment, showPrice: toggles.price, showBarcode: toggles.barcode, showBarcodeText: toggles.barcodeText, symbology, fontScale, barcodeHeightMm, lineWidth };
-  return <Modal open onClose={onClose} title="مصمم وطباعة ملصقات الباركود" description="اضبط المقاس والحقول ثم راجع الملصق المتجهي قبل الإرسال للطباعة." size="xl" footer={<><Button variant="ghost" onClick={onClose} disabled={isRendering}>إغلاق</Button><Button onClick={print} disabled={!labels.length || isRendering}>{isRendering ? <SlidersHorizontal size={16} className="animate-spin" /> : <Printer size={16} />}{isRendering ? "يتم تجهيز SVG للطباعة…" : `طباعة ${labels.length} ملصق`}</Button></>}>
-    <style>{css}</style>
-    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]" dir="rtl">
-      <section className="space-y-3 rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-3"><div className="flex items-center gap-2 font-bold text-white"><Barcode size={17} className="text-bmw-blue" /> إعدادات الملصق</div><Field label="مقاس الملصق"><Select value={presetId} onChange={(event) => setPresetId(event.target.value as PresetId)}>{PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></Field>{presetId === "CUSTOM" ? <div className="grid grid-cols-2 gap-2"><Field label="العرض مم"><Input type="number" min={20} max={150} value={customWidth} onChange={(event) => setCustomWidth(Number(event.target.value) || 20)} /></Field><Field label="الارتفاع مم"><Input type="number" min={15} max={120} value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value) || 15)} /></Field></div> : null}<div className="grid grid-cols-2 gap-2"><Field label="نوع الباركود"><Select value={symbology} onChange={(event) => setSymbology(event.target.value as Symbology)}><option value="CODE128">CODE128</option><option value="EAN13">EAN-13</option><option value="QR">QR Code</option></Select></Field><Field label="حجم الخط"><Select value={fontScale} onChange={(event) => setFontScale(event.target.value as FontScale)}><option value="SMALL">صغير</option><option value="MEDIUM">متوسط</option><option value="LARGE">كبير</option></Select></Field></div><label className="grid gap-1 text-xs text-bmw-muted">ارتفاع الباركود: {barcodeHeightMm} مم<Input type="range" min={4} max={18} step={1} value={barcodeHeightMm} onChange={(event) => setBarcodeHeightMm(Number(event.target.value))} /></label><label className="grid gap-1 text-xs text-bmw-muted">سماكة الخطوط: {lineWidth.toFixed(2)}<Input type="range" min={0.7} max={2.2} step={0.05} value={lineWidth} onChange={(event) => setLineWidth(Number(event.target.value))} /></label><div className="grid grid-cols-2 gap-2 rounded-xl border border-bmw-cardBorder bg-bmw-black/20 p-2 text-xs">{([['company','اسم المنشأة / الشعار'],['partName','اسم الصنف'],['oem','رقم OEM'],['fitment','الماركة والتوافق'],['price','السعر والعملة'],['barcode','الباركود'],['barcodeText','الكود أسفل الخطوط']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-1.5"><input type="checkbox" checked={toggles[key]} onChange={() => toggle(key)} />{label}</label>)}</div></section>
-      <section className="space-y-3"><div className="rounded-2xl border border-bmw-cardBorder bg-bmw-black/20 p-4"><p className="mb-3 text-sm font-bold text-white">معاينة حية بالحجم النسبي</p><div className="flex min-h-[260px] items-center justify-center overflow-auto rounded-xl bg-[radial-gradient(#475569_1px,transparent_1px)] bg-[size:10px_10px] p-8"><BarcodeLabel part={parts[0] ?? { id: "sample", nameAr: "فانوس أمامي BMW F30", oemNumber: "63117259567", brandName: "BMW", chassisCodes: ["F30", "G20"], sellPriceRetail: 1250 }} {...shared} /></div></div><div className="rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-3"><p className="mb-2 text-sm font-bold text-white">عدد النسخ لكل صنف</p><div className="max-h-44 space-y-1 overflow-auto">{parts.map((part) => <div key={part.id} className="flex items-center justify-between gap-2 rounded-lg bg-bmw-black/20 p-2 text-xs"><span className="min-w-0 truncate">{part.nameAr} <b className="font-mono text-bmw-blue">{part.oemNumber}</b></span><div className="flex items-center gap-1"><button type="button" onClick={() => setCounts((current) => ({ ...current, [part.id]: Math.max(0, (current[part.id] ?? 1) - 1) }))} className="rounded bg-bmw-card p-1"><Minus size={13}/></button><span className="w-7 text-center tabular">{counts[part.id] ?? 1}</span><button type="button" onClick={() => setCounts((current) => ({ ...current, [part.id]: Math.min(100, (current[part.id] ?? 1) + 1) }))} className="rounded bg-bmw-card p-1"><Plus size={13}/></button></div></div>)}</div></div></section>
-    </div>
-    <div id="barcode-print-stage" aria-hidden="true" className="pointer-events-none fixed -left-[10000px] top-0 h-px w-px overflow-hidden opacity-0">{isSheet ? <div className="barcode-sheet-grid">{labels.map(({ part, index }) => <BarcodeLabel key={`${part.id}-${index}`} part={part} {...shared} />)}</div> : labels.map(({ part, index }) => <div key={`${part.id}-${index}`} className="barcode-label-roll"><BarcodeLabel part={part} {...shared} /></div>)}</div>
-  </Modal>;
-}
+function Copies({ parts, counts, setCounts }: { parts: BarcodeLabelPart[]; counts: Record<string, number>; setCounts: React.Dispatch<React.SetStateAction<Record<string, number>>> }) { return <section className="rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-3"><p className="mb-2 text-sm font-bold text-white">عدد النسخ لكل صنف</p><div className="max-h-48 space-y-1 overflow-auto">{parts.map((part) => <div key={part.id} className="flex items-center justify-between gap-2 rounded-lg bg-bmw-black/20 p-2 text-xs"><span className="min-w-0 truncate">{part.nameAr} <b className="font-mono text-bmw-blue">{part.oemNumber}</b></span><div className="flex items-center gap-1"><button type="button" onClick={() => setCounts((current) => ({ ...current, [part.id]: Math.max(0, (current[part.id] ?? 1) - 1) }))} className="rounded bg-bmw-card p-1"><Minus size={13}/></button><span className="w-7 text-center tabular">{counts[part.id] ?? 1}</span><button type="button" onClick={() => setCounts((current) => ({ ...current, [part.id]: Math.min(200, (current[part.id] ?? 1) + 1) }))} className="rounded bg-bmw-card p-1"><Plus size={13}/></button></div></div>)}</div></section>; }
+function Designer({ profile, onUpdate, onPreset }: { profile: ThermalBarcodeProfile; onUpdate: <K extends keyof ThermalBarcodeProfile>(key: K, value: ThermalBarcodeProfile[K]) => void; onPreset: (value: ThermalBarcodeProfile["presetId"]) => void }) { const toggle = (key: keyof ThermalBarcodeProfile["toggles"]) => onUpdate("toggles", { ...profile.toggles, [key]: !profile.toggles[key] }); return <section className="space-y-3 rounded-2xl border border-bmw-cardBorder bg-bmw-carbon/60 p-3"><div className="flex items-center gap-2 font-bold text-white"><Settings2 size={17} className="text-bmw-blue"/> ملف الطابعة الحرارية</div><Field label="مقاس الملصق"><Select value={profile.presetId} onChange={(event) => onPreset(event.target.value as ThermalBarcodeProfile["presetId"])}>{THERMAL_LABEL_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="CUSTOM">مخصص — العرض × الارتفاع</option></Select></Field>{profile.presetId === "CUSTOM" ? <div className="grid grid-cols-2 gap-2"><Field label="العرض مم"><Input type="number" min={20} max={150} value={profile.widthMm} onChange={(event) => onUpdate("widthMm", Math.max(20, Math.min(150, Number(event.target.value) || 20)))}/></Field><Field label="الارتفاع مم"><Input type="number" min={15} max={180} value={profile.heightMm} onChange={(event) => onUpdate("heightMm", Math.max(15, Math.min(180, Number(event.target.value) || 15)))}/></Field></div> : null}<div className="grid grid-cols-2 gap-2"><Field label="نوع الباركود"><Select value={profile.symbology} onChange={(event) => onUpdate("symbology", event.target.value as ThermalBarcodeProfile["symbology"])}><option value="CODE128">CODE128</option><option value="EAN13">EAN-13</option><option value="QR">QR Code</option></Select></Field><Field label="حجم الخط"><Select value={profile.fontScale} onChange={(event) => onUpdate("fontScale", event.target.value as ThermalBarcodeProfile["fontScale"])}><option value="SMALL">صغير</option><option value="MEDIUM">متوسط</option><option value="LARGE">كبير</option></Select></Field></div><label className="grid gap-1 text-xs text-bmw-muted">ارتفاع الباركود: {profile.barcodeHeightMm} مم<Input type="range" min={4} max={14} value={profile.barcodeHeightMm} onChange={(event) => onUpdate("barcodeHeightMm", Number(event.target.value))}/></label><Field label="كثافة خطوط الباركود"><Select value={profile.lineDensity} onChange={(event) => onUpdate("lineDensity", event.target.value as ThermalBarcodeProfile["lineDensity"])}><option value="THIN">رفيع — 0.8px</option><option value="STANDARD">قياسي — 1.2px</option><option value="BOLD">عريض — 1.6px</option></Select></Field><div className="grid grid-cols-2 gap-2 rounded-xl border border-bmw-cardBorder bg-bmw-black/20 p-2 text-xs">{([['company','اسم المنشأة / الشعار'],['partName','اسم الصنف'],['oem','رقم OEM'],['fitment','الماركة والتوافق'],['price','سعر البيع'],['barcode','خطوط الباركود'],['barcodeText','الكود أسفل الخطوط']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-1.5"><input type="checkbox" checked={profile.toggles[key]} onChange={() => toggle(key)}/>{label}</label>)}</div></section>; }
