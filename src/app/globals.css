@@ -175,10 +175,10 @@
     print-color-adjust: exact !important;
   }
   body * { visibility: hidden !important; }
-  #printable-area, #printable-area *, .invoice-print-root, .invoice-print-root *, .universal-print-root, .universal-print-root * {
+  #printable-area, #printable-area *, .invoice-print-root, .invoice-print-root *, .universal-print-root, .universal-print-root *, #report-print-area, #report-print-area * {
     visibility: visible !important;
   }
-  #printable-area, .invoice-print-root, .universal-print-root {
+  #printable-area, .invoice-print-root, .universal-print-root, #report-print-area {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
@@ -198,8 +198,9 @@
   .print-format-thermal_80, .print-thermal-80mm { width: 76mm !important; max-width: 76mm !important; padding: 2mm !important; font-size: 11px !important; margin: 0 auto !important; }
   .print-format-thermal_80 #printable-area, .print-format-thermal_80 .print-thermal-80mm { width: 76mm !important; min-height: 0 !important; padding: 2mm !important; }
   .break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
-  .universal-print-root table thead, #printable-area table thead { display: table-header-group !important; }
-  .universal-print-root table tfoot, #printable-area table tfoot { display: table-footer-group !important; }
-  .universal-print-root table tr, #printable-area table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+  .universal-print-root table thead, #printable-area table thead, #report-print-area table thead { display: table-header-group !important; }
+  .universal-print-root table tfoot, #printable-area table tfoot, #report-print-area table tfoot { display: table-footer-group !important; }
+  .universal-print-root table tr, #printable-area table tr, #report-print-area table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+  #report-print-area { height: auto !important; min-height: 100% !important; overflow: visible !important; opacity: 1 !important; }
   .universal-invoice-register { width: 100% !important; color: #000 !important; background: #fff !important; }
 }
