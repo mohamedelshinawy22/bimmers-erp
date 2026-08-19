@@ -10,10 +10,13 @@ import { SalesA5Template } from "./templates/sales-a5-template";
 import { EInvoiceTemplate } from "./templates/e-invoice-template";
 import { SalesReturnTemplate } from "./templates/SalesReturnTemplate";
 import { PurchaseReturnTemplate } from "./templates/PurchaseReturnTemplate";
+import { ModernInvoiceTemplate } from "./templates/modern-invoice-template";
+import { ClassicInvoiceTemplate } from "./templates/classic-invoice-template";
 
-interface PrintContainerProps { data: InvoicePrintData; format: InvoicePrintFormat; autoPrint?: boolean; onAfterPrint?: () => void; }
+export type InvoiceTemplateChoice = "modern" | "classic" | "thermal-80mm";
+interface PrintContainerProps { data: InvoicePrintData; format: InvoicePrintFormat; template?: InvoiceTemplateChoice; showBalance?: boolean; showPartMeta?: boolean; autoPrint?: boolean; onAfterPrint?: () => void; }
 
-export function PrintContainer({ data, format, autoPrint = false, onAfterPrint }: PrintContainerProps) {
+export function PrintContainer({ data, format, template, showBalance = true, showPartMeta = true, autoPrint = false, onAfterPrint }: PrintContainerProps) {
   useEffect(() => {
     if (!autoPrint) return;
     let active = true;
@@ -29,6 +32,6 @@ export function PrintContainer({ data, format, autoPrint = false, onAfterPrint }
     void print();
     return () => { active = false; window.removeEventListener("afterprint", after); };
   }, [autoPrint, onAfterPrint, data.invoice.id, format]);
-  const documentNode = format === "THERMAL_80" ? <SalesThermalTemplate data={data} /> : format === "THERMAL_57" ? <Sales57mmTemplate data={data} /> : format === "A5" ? <SalesA5Template data={data} /> : format === "E_INVOICE" ? <EInvoiceTemplate data={data} /> : data.invoice.type === "SALE_RETURN" ? <SalesReturnTemplate data={data} /> : data.invoice.type === "PURCHASE_RETURN" ? <PurchaseReturnTemplate data={data} /> : data.invoice.type === "PURCHASE" ? <PurchaseInvoiceTemplate data={data} /> : <SalesA4Template data={data} />;
+  const documentNode = template === "modern" ? <ModernInvoiceTemplate data={data} showBalance={showBalance} showPartMeta={showPartMeta} /> : template === "classic" ? <ClassicInvoiceTemplate data={data} showBalance={showBalance} showPartMeta={showPartMeta} /> : template === "thermal-80mm" ? <SalesThermalTemplate data={data} /> : format === "THERMAL_80" ? <SalesThermalTemplate data={data} /> : format === "THERMAL_57" ? <Sales57mmTemplate data={data} /> : format === "A5" ? <SalesA5Template data={data} /> : format === "E_INVOICE" ? <EInvoiceTemplate data={data} /> : data.invoice.type === "SALE_RETURN" ? <SalesReturnTemplate data={data} /> : data.invoice.type === "PURCHASE_RETURN" ? <PurchaseReturnTemplate data={data} /> : data.invoice.type === "PURCHASE" ? <PurchaseInvoiceTemplate data={data} /> : <SalesA4Template data={data} />;
   return <div className={`invoice-print-root print-format-${format.toLowerCase()}`}>{documentNode}</div>;
 }

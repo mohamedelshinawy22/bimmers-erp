@@ -3,10 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { getInvoicePrintDataAction } from "@/server/actions/invoice-print.actions";
 import type { InvoicePrintData, InvoicePrintFormat } from "@/lib/invoice-print-types";
+import type { InvoiceTemplateChoice } from "@/components/print/print-container";
+
+const TEMPLATE_STORAGE_KEY = "bimmererp:preferred-invoice-template";
+const FORMAT_STORAGE_KEY = "bimmererp:preferred-invoice-paper";
+const validTemplates: InvoiceTemplateChoice[] = ["modern", "classic", "thermal-80mm"];
+const validFormats: InvoicePrintFormat[] = ["A4_STANDARD", "A5", "THERMAL_80", "THERMAL_57", "E_INVOICE"];
 
 export function useInvoicePrint(invoiceId?: string) {
   const [data, setData] = useState<InvoicePrintData | null>(null);
-  const [format, setFormat] = useState<InvoicePrintFormat>("A4_STANDARD");
+  const [format, setFormat] = useState<InvoicePrintFormat>(() => { if (typeof window === "undefined") return "A4_STANDARD"; const saved = window.localStorage.getItem(FORMAT_STORAGE_KEY) as InvoicePrintFormat | null; return saved && validFormats.includes(saved) ? saved : "A4_STANDARD"; });
+  const [template, setTemplate] = useState<InvoiceTemplateChoice>(() => { if (typeof window === "undefined") return "modern"; const saved = window.localStorage.getItem(TEMPLATE_STORAGE_KEY) as InvoiceTemplateChoice | null; return saved && validTemplates.includes(saved) ? saved : "modern"; });
   const [state, setState] = useState<"idle" | "loading" | "ready" | "printing" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const prepare = useCallback(async () => {
@@ -25,5 +32,6 @@ export function useInvoicePrint(invoiceId?: string) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [invoiceId, print]);
-  return { data, format, setFormat, state, error, prepare, print, closePreview, onAfterPrint: () => setState("ready") };
+  const setDefaultTemplate = useCallback((nextTemplate: InvoiceTemplateChoice, nextFormat: InvoicePrintFormat) => { window.localStorage.setItem(TEMPLATE_STORAGE_KEY, nextTemplate); window.localStorage.setItem(FORMAT_STORAGE_KEY, nextFormat); setTemplate(nextTemplate); setFormat(nextFormat); }, []);
+  return { data, format, setFormat, template, setTemplate, setDefaultTemplate, state, error, prepare, print, closePreview, onAfterPrint: () => setState("ready") };
 }

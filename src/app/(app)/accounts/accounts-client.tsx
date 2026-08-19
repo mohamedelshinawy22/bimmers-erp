@@ -11,6 +11,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
+import type { CompanyProfile } from "@/server/services/settings.service";
 import { createAccountAction, createVehicleAction, deleteAccountsAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
@@ -30,7 +31,7 @@ interface AccountsClientProps {
   };
   canWrite: boolean;
   canViewStatement: boolean;
-  companyName: string;
+  company: CompanyProfile;
   canTransact: boolean;
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   totals: { receivables: number; payables: number; workshops: number };
@@ -53,7 +54,7 @@ export function AccountsClient({
   options,
   canWrite,
   canViewStatement,
-  companyName,
+  company,
   canTransact,
   treasuries,
   totals,
@@ -341,7 +342,7 @@ export function AccountsClient({
         <EditAccountModal key={editAccount.id} account={editAccount} onClose={() => setEditAccount(null)} />
       ) : null}
       {statementFor ? (
-        <StatementModal key={statementFor.id} account={statementFor} companyName={companyName} onClose={() => setStatementFor(null)} />
+        <StatementModal key={statementFor.id} account={statementFor} company={company} onClose={() => setStatementFor(null)} />
       ) : null}
       {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
       {deleteTarget ? <DeleteAccountsModal accounts={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
@@ -752,7 +753,7 @@ interface DetailedLedgerData {
   rows: Array<{ id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null }>;
 }
 
-function StatementModal({ account, companyName, onClose }: { account: AccountRow; companyName: string; onClose: () => void }) {
+function StatementModal({ account, company, onClose }: { account: AccountRow; company: CompanyProfile; onClose: () => void }) {
   const router = useRouter();
   const [data, setData] = useState<DetailedLedgerData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -788,7 +789,7 @@ function StatementModal({ account, companyName, onClose }: { account: AccountRow
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `كشف-حساب-${data.account.accountNumber}.csv`; link.click(); URL.revokeObjectURL(url);
   };
-  const printData: AccountStatementPrintData | null = data ? { companyName, accountName: data.account.name, accountNumber: data.account.accountNumber, phone: data.account.phone, from: data.filters.from ?? undefined, to: data.filters.to ?? undefined, openingBalance: data.openingBalance, debit: data.totalDebit, credit: data.totalCredit, closingBalance: data.closingBalance, rows: data.rows.map((row) => ({ id: row.id, createdAt: row.createdAt, reference: row.reference, type: row.typeLabel, debit: row.debit, credit: row.credit, runningBalance: row.runningBalance, treasury: row.treasuryName, note: row.note })) } : null;
+  const printData: AccountStatementPrintData | null = data ? { companyName: company.name, companyAddress: company.address, companyPhone: [company.phonePrimary, company.phoneSecondary].filter(Boolean).join(" - "), companyTaxNumber: company.taxNumber, companyCommercialRegister: company.commercialRegister, companyLogoUrl: company.logoUrl, accountName: data.account.name, accountNumber: data.account.accountNumber, phone: data.account.phone, from: data.filters.from ?? undefined, to: data.filters.to ?? undefined, openingBalance: data.openingBalance, debit: data.totalDebit, credit: data.totalCredit, closingBalance: data.closingBalance, rows: data.rows.map((row) => ({ id: row.id, createdAt: row.createdAt, reference: row.reference, type: row.typeLabel, debit: row.debit, credit: row.credit, runningBalance: row.runningBalance, treasury: row.treasuryName, note: row.note })) } : null;
 
   return <>
     <Modal open onClose={onClose} title={`كشف حساب تفصيلي — ${account.name}`} description={`${account.accountNumber} • الرصيد الحالي ${formatMoney(account.currentBalance)} ${CURRENCY}`} size="xl" footer={<><Button variant="ghost" onClick={onClose}>إغلاق</Button><Button variant="outline" onClick={exportCsv} disabled={!data}><Download size={15} /> تصدير CSV</Button><Button variant="outline" onClick={() => setPrintRequested(true)} disabled={!printData}><Printer size={15} /> طباعة A4</Button></>}>

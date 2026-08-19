@@ -189,5 +189,11 @@
     background: #fff !important;
     color: #000 !important;
   }
-  .no-print, header, nav, aside, .modal-backdrop, button { display: none !important; }
+  /* Only suppress application chrome; invoice and statement headers inside the print target must remain visible. */
+  .no-print, body > header, body > nav, body > aside, .modal-backdrop, #printable-area button, .invoice-print-root > button { display: none !important; }
+  .modern-invoice-print, .classic-invoice-print, .statement-modern-print { break-inside: avoid; page-break-inside: avoid; }
+  .modern-invoice-print table tr, .classic-invoice-print table tr, .statement-modern-print table tr { break-inside: avoid; page-break-inside: avoid; }
+  .modern-invoice-print thead, .classic-invoice-print thead, .statement-modern-print thead { display: table-header-group; }
+  .print-format-thermal_80 { width: 80mm !important; padding: 2mm !important; }
+  .print-format-thermal_80 #printable-area { width: 80mm !important; min-height: 0 !important; padding: 2mm !important; }
 }

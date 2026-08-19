@@ -31,9 +31,7 @@ import type { CompanyProfile } from "@/server/services/settings.service";
 import { createInvoiceReturnAction, purgePurchaseInvoiceAction, purgeSalesInvoiceAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
 import { settleInvoiceAction } from "@/server/actions/treasury.actions";
 import { getInvoiceDetailAction } from "@/server/actions/invoices.read.actions";
-import { useInvoicePrint } from "@/hooks/use-invoice-print";
-import { PrintContainer } from "@/components/print/print-container";
-import { PRINT_FORMATS, type InvoicePrintFormat } from "@/lib/invoice-print-types";
+import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 
 interface InvoicesClientProps {
@@ -517,32 +515,7 @@ function InvoiceActionMenu({ invoice, canVoid, canSettle, onDetail, onEdit, onPr
 }
 
 function InvoicePrintDialog({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
-  const { data, error, format, setFormat, state, prepare, print, onAfterPrint } = useInvoicePrint(invoiceId);
-  useEffect(() => { void prepare(); }, [prepare]);
-  const loading = state === "loading" || state === "printing";
-
-  return <>
-    <Modal
-      open
-      onClose={onClose}
-      title="اختيار تنسيق الطباعة"
-      description="اختر مقاس المستند قبل فتح معاينة الطباعة."
-      size="sm"
-      footer={<><Button variant="ghost" onClick={onClose} disabled={loading}>إغلاق</Button><Button onClick={() => void print()} loading={loading} disabled={!data}><Printer size={15} /> طباعة الآن</Button></>}
-    >
-      <div className="space-y-4">
-        {state === "loading" ? <Alert variant="info">جاري تجهيز بيانات الطباعة…</Alert> : null}
-        {error ? <Alert variant="error">{error}</Alert> : null}
-        {data ? <>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {PRINT_FORMATS.map((option) => <button key={option.value} type="button" onClick={() => setFormat(option.value as InvoicePrintFormat)} className={`rounded-xl border px-3 py-3 text-right text-sm transition-colors ${format === option.value ? "border-bmw-blue bg-bmw-blue/15 text-white" : "border-bmw-cardBorder bg-bmw-carbon text-bmw-silver hover:border-bmw-blue/60"}`}>{option.label}</button>)}
-          </div>
-          <Alert variant="info">الفاتورة: <span className="font-mono font-bold">{data.invoice.invoiceNumber}</span> — {data.account.name}</Alert>
-        </> : null}
-      </div>
-    </Modal>
-    {data && state === "printing" ? <PrintContainer data={data} format={format} autoPrint onAfterPrint={onAfterPrint} /> : null}
-  </>;
+  return <InvoicePrintPreviewModal invoiceId={invoiceId} onClose={onClose} />;
 }
 
 function InvoiceSettlementModal({ invoice, treasuries, onClose, onDone }: { invoice: InvoiceListRow; treasuries: Array<{ id: string; name: string }>; onClose: () => void; onDone: () => void }) {

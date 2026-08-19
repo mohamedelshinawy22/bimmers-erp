@@ -51,7 +51,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       options={options}
       canWrite={can(user.role, "account.write")}
       canViewStatement={can(user.role, "account.viewStatement")}
-      companyName={company.name}
+      company={company}
       canTransact={can(user.role, "treasury.transact")}
       treasuries={treasuries.map((treasury) => ({ ...treasury, currentBalance: num(treasury.currentBalance) }))}
       totals={{
