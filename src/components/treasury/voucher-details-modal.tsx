@@ -42,15 +42,16 @@ export function VoucherDetailsModal({ voucherId, onClose, onChanged }: { voucher
 
   useEffect(() => { void load(); }, [voucherId]);
   const closeAfterChange = () => { onChanged(); onClose(); };
+  const resolvedVoucherId = data?.voucher.id ?? voucherId;
   const save = () => startTransition(async () => {
     setError(null);
-    const result = await updateVoucherAction({ voucherId, amount: Number(amount), treasuryId, description, paymentMethod, createdAt: createdAt ? new Date(createdAt).toISOString() : undefined });
+    const result = await updateVoucherAction({ voucherId: resolvedVoucherId, amount: Number(amount), treasuryId, description, paymentMethod, createdAt: createdAt ? new Date(createdAt).toISOString() : undefined });
     if (!result.success) { setError(result.error); return; }
     closeAfterChange();
   });
   const voidVoucher = () => startTransition(async () => {
     setError(null);
-    const result = await voidVoucherAction({ voucherId, reason: voidReason });
+    const result = await voidVoucherAction({ voucherId: resolvedVoucherId, reason: voidReason });
     if (!result.success) { setError(result.error); return; }
     closeAfterChange();
   });

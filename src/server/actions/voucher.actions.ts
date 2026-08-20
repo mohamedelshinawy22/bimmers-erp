@@ -12,6 +12,10 @@ import { prisma, type TxClient } from "@/lib/prisma";
 import { assertTreasuryAccess, getUserAccess, hasApplicationPermission } from "@/lib/user-permissions";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
+const voucherLookupSchema = z.union([
+  z.string().trim().min(1, "معرف السند مطلوب."),
+  z.object({ id: z.string().trim().min(1).optional(), reference: z.string().trim().min(1).optional(), voucherId: z.string().trim().min(1).optional() }).refine((value) => Boolean(value.id || value.reference || value.voucherId), "معرف السند مطلوب."),
+]);
 const voucherIdSchema = z.object({ voucherId: z.string().uuid() });
 const updateVoucherSchema = z.object({ voucherId: z.string().uuid(), amount: z.coerce.number().finite().positive().max(99_999_999.99), treasuryId: z.string().uuid(), description: z.string().trim().min(2, "بيان السند مطلوب.").max(500), paymentMethod: z.string().trim().max(80).optional().or(z.literal("")), createdAt: z.string().datetime().optional() });
 const voidVoucherSchema = z.object({ voucherId: z.string().uuid(), reason: z.string().trim().min(3, "سبب الإلغاء مطلوب.").max(500) });
@@ -54,6 +58,11 @@ async function updateInvoiceSettlement(tx: TxClient, voucher: { invoiceId: strin
   await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount, remainingAmount, paymentStatus: paidAmount.eq(0) ? "CREDIT" : remainingAmount.eq(0) ? "PAID" : "PARTIAL" } });
 }
 
+function extractVoucherIdentifier(raw: z.infer<typeof voucherLookupSchema>): string {
+  if (typeof raw === "string") return raw.trim();
+  return (raw.id || raw.reference || raw.voucherId || "").trim();
+}
+
 function revalidateVoucherConsumers() {
   for (const path of ["/", "/treasury", "/accounts", "/invoices", "/reports/daily-movement"]) revalidatePath(path);
 }
@@ -61,9 +70,9 @@ function revalidateVoucherConsumers() {
 export async function getVoucherDetailsAction(raw: unknown): Promise<ActionResult<{ voucher: { id: string; transactionNumber: string; type: "RECEIPT" | "PAYMENT"; amount: number; description: string; paymentMethod: string | null; createdAt: string; status: string; voidedAt: string | null; voidedByUser: string | null; voidReason: string | null; account: { id: string; name: string; accountNumber: string } | null; treasury: { id: string; name: string; currentBalance: number }; invoiceNumber: string | null; createdByName: string | null }; treasuries: Array<{ id: string; name: string; currentBalance: number }>; canManage: boolean }>> {
   try {
     const user = await requirePermission("treasury.read");
-    const { voucherId } = voucherIdSchema.parse(raw);
+    const identifier = extractVoucherIdentifier(voucherLookupSchema.parse(raw));
     const access = await getUserAccess(user.id);
-    const voucher = await prisma.treasuryTransaction.findUnique({ where: { id: voucherId }, include: { account: { select: { id: true, name: true, accountNumber: true } }, treasury: { select: { id: true, name: true, currentBalance: true } }, invoice: { select: { invoiceNumber: true } } } });
+    const voucher = await prisma.treasuryTransaction.findFirst({ where: { OR: [{ id: identifier }, { transactionNumber: identifier }] }, include: { account: { select: { id: true, name: true, accountNumber: true } }, treasury: { select: { id: true, name: true, currentBalance: true } }, invoice: { select: { invoiceNumber: true } } } });
     if (!voucher || voucher.type === "TRANSFER") throw new BusinessRuleError("سند القبض أو الصرف غير موجود.");
     assertTreasuryAccess(access, voucher.treasuryId);
     const [createdBy, treasuries] = await Promise.all([
