@@ -13,6 +13,7 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from 
 import type { AccountRow } from "@/server/services/accounts.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { createAccountAction, createVehicleAction, deleteAccountsAction, updateAccountAction } from "@/server/actions/accounts.actions";
+import { exportAccountsToExcelAction } from "@/server/actions/account-excel.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
 import type { AccountStatementPrintData } from "@/components/print/templates/AccountStatementTemplate";
@@ -20,13 +21,14 @@ import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { StatementPrintDocument } from "@/components/print/templates/universal-document-templates";
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
+import { AccountImportModal } from "@/components/accounts/account-import-modal";
 
 interface AccountsClientProps {
   rows: AccountRow[];
   total: number;
   page: number;
   pageSize: number;
-  filters: { query: string; type: string; debtorsOnly: boolean };
+  filters: { query: string; type: string; debtorsOnly: boolean; balanceFilter: "ALL" | "DEBIT" | "CREDIT" | "ZERO" };
   options: {
     chassis: Array<{ id: string; code: string; series: string }>;
     engines: Array<{ id: string; code: string; displacement: string | null }>;
@@ -36,7 +38,7 @@ interface AccountsClientProps {
   company: CompanyProfile;
   canTransact: boolean;
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
-  totals: { receivables: number; payables: number; workshops: number };
+  totals: { receivables: number; payables: number; net: number; debitCount: number; creditCount: number; zeroCount: number; workshops: number };
 }
 
 const TYPE_TABS = [
@@ -71,15 +73,25 @@ export function AccountsClient({
   const [pdcFor, setPdcFor] = useState<AccountRow | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<AccountRow[] | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const displayedDebit = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
-  const displayedCredit = rows.filter((account) => account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
+  const displayedReceivables = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  const displayedPayables = rows.filter((account) => account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
+  const displayedNet = displayedPayables - displayedReceivables;
+  const exportExcel = async () => {
+    setExporting(true);
+    const result = await exportAccountsToExcelAction({ query: filters.query || undefined, type: filters.type || "ALL", balanceFilter: filters.balanceFilter, format: "XLSX" });
+    setExporting(false);
+    if (!result.success) return;
+    const binary = atob(result.data.base64); const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0)); const url = URL.createObjectURL(new Blob([bytes], { type: result.data.mimeType })); const link = document.createElement("a"); link.href = url; link.download = result.data.fileName; link.click(); URL.revokeObjectURL(url);
+  };
 
   const push = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams();
-    const merged = { q: filters.query, type: filters.type, debtors: filters.debtorsOnly ? "1" : "", ...patch };
+    const merged = { q: filters.query, type: filters.type, balance: filters.balanceFilter === "ALL" ? "" : filters.balanceFilter, ...patch };
     for (const [key, value] of Object.entries(merged)) {
       if (value) next.set(key, value);
     }
@@ -98,11 +110,7 @@ export function AccountsClient({
             <p className="text-xs text-bmw-muted">{formatInt(total)} حساب مسجّل</p>
           </div>
         </div>
-        {canWrite ? (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus size={16} /> حساب جديد
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">{canWrite ? <><Button variant="outline" onClick={() => setImportOpen(true)}><FileText size={16} /> استيراد إكسيل</Button><Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button><Button onClick={() => setAddOpen(true)}><Plus size={16} /> حساب جديد</Button></> : <Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>}</div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -137,13 +145,14 @@ export function AccountsClient({
                 {tab.label}
               </Button>
             ))}
-            <Button
-              size="sm"
-              variant={filters.debtorsOnly ? "danger" : "outline"}
-              onClick={() => push({ debtors: filters.debtorsOnly ? null : "1" })}
-            >
-              <Wallet size={14} /> المدينون فقط
-            </Button>
+            <div className="flex flex-wrap items-center gap-1 rounded-xl border border-bmw-cardBorder bg-bmw-carbon/60 p-1">
+              {([[
+                "ALL", "كافة الأرصدة", "outline"],
+                ["DEBIT", `مدين — لنا (${totals.debitCount})`, "primary"],
+                ["CREDIT", `دائن — علينا (${totals.creditCount})`, "danger"],
+                ["ZERO", `متزن (${totals.zeroCount})`, "subtle"],
+              ] as const).map(([value, label, variant]) => <Button key={value} size="sm" variant={filters.balanceFilter === value ? variant : "outline"} onClick={() => push({ balance: value === "ALL" ? null : value, page: null })}><Wallet size={14} />{label}</Button>)}
+            </div>
           </div>
 
           <form
@@ -223,16 +232,16 @@ export function AccountsClient({
                     <span
                       className={`tabular font-bold ${
                         account.currentBalance < 0
-                          ? "text-bmw-mRed"
+                          ? "text-amber-400"
                           : account.currentBalance > 0
-                            ? "text-emerald-400"
+                            ? "text-purple-400"
                             : "text-bmw-muted"
                       }`}
                     >
                       {formatMoney(Math.abs(account.currentBalance))}
                     </span>
                     <span className="mr-1 text-[10px] text-bmw-muted">
-                      {account.currentBalance < 0 ? "عليه" : account.currentBalance > 0 ? "له" : ""}
+                      {account.currentBalance < 0 ? "مدين — لنا" : account.currentBalance > 0 ? "دائن — علينا" : "متزن"}
                     </span>
                   </TD>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
@@ -314,7 +323,7 @@ export function AccountsClient({
           </TBody>
         </Table>
 
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-card/95 px-4 py-3 text-xs backdrop-blur"><span className="text-bmw-muted">إجمالي الأرصدة المعروضة</span><div className="flex gap-4"><span className="tabular text-bmw-mRed">مدين / عليه: <b>{formatMoney(displayedDebit)} {CURRENCY}</b></span><span className="tabular text-emerald-400">دائن / له: <b>{formatMoney(displayedCredit)} {CURRENCY}</b></span></div></div>
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-card/95 px-4 py-3 text-xs backdrop-blur"><span className="text-bmw-muted">إجمالي الأرصدة المعروضة في الصفحة</span><div className="flex flex-wrap gap-4"><span className="tabular text-amber-400">مدين — لنا: <b>{formatMoney(displayedReceivables)} {CURRENCY}</b></span><span className="tabular text-purple-400">دائن — علينا: <b>{formatMoney(displayedPayables)} {CURRENCY}</b></span><span className="tabular text-white">صافي المركز: <b>{formatMoney(displayedNet)} {CURRENCY}</b></span></div></div>
 
         {pageCount > 1 ? (
           <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3">
@@ -340,6 +349,7 @@ export function AccountsClient({
       </Card>
 
       {canWrite ? <AddAccountModal open={addOpen} onClose={() => setAddOpen(false)} /> : null}
+      {importOpen ? <AccountImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
       {editAccount ? (
         <EditAccountModal key={editAccount.id} account={editAccount} onClose={() => setEditAccount(null)} />
       ) : null}

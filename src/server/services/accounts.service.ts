@@ -23,16 +23,19 @@ export interface AccountRow {
   openInvoiceCount: number;
 }
 
+export type AccountBalanceFilter = "ALL" | "DEBIT" | "CREDIT" | "ZERO";
+
 export async function listAccounts(options: {
   query?: string;
   type?: AccountType | "ALL";
+  /** Legacy alias retained for existing URLs. A negative balance is receivable from the account. */
   debtorsOnly?: boolean;
+  balanceFilter?: AccountBalanceFilter;
   page?: number;
   pageSize?: number;
-} = {}): Promise<{ rows: AccountRow[]; total: number; page: number; pageSize: number }> {
+} = {}): Promise<{ rows: AccountRow[]; total: number; page: number; pageSize: number; summary: { receivables: number; payables: number; net: number; debitCount: number; creditCount: number; zeroCount: number } }> {
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
-
   const and: Prisma.AccountWhereInput[] = [];
   if (options.query) {
     const { variations } = normalizeSearchTerm(options.query);
@@ -44,63 +47,52 @@ export async function listAccounts(options: {
     ]) });
   }
   if (options.type && options.type !== "ALL") and.push({ type: options.type });
-  if (options.debtorsOnly) and.push({ currentBalance: { lt: 0 } });
+  const baseWhere: Prisma.AccountWhereInput = and.length ? { AND: and } : {};
+  const balanceFilter: AccountBalanceFilter = options.debtorsOnly ? "DEBIT" : options.balanceFilter ?? "ALL";
+  const balanceWhere: Prisma.AccountWhereInput = balanceFilter === "DEBIT" ? { currentBalance: { lt: 0 } } : balanceFilter === "CREDIT" ? { currentBalance: { gt: 0 } } : balanceFilter === "ZERO" ? { currentBalance: { equals: 0 } } : {};
+  const where: Prisma.AccountWhereInput = balanceFilter === "ALL" ? baseWhere : { AND: [baseWhere, balanceWhere] };
 
-  const where: Prisma.AccountWhereInput = and.length ? { AND: and } : {};
-
-  const [accounts, total] = await Promise.all([
+  const [accounts, total, allScopedBalances, debitCount, creditCount, zeroCount] = await Promise.all([
     prisma.account.findMany({
       where,
       orderBy: [{ currentBalance: "asc" }, { name: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
-      include: {
-        // `invoices` deliberately omitted: the lifetime count was aggregated on
-        // every page load and never rendered. Open invoices come from the single
-        // groupBy below.
-        _count: { select: { vehicles: true } },
-      },
+      include: { _count: { select: { vehicles: true } } },
     }),
     prisma.account.count({ where }),
+    prisma.account.findMany({ where: baseWhere, select: { currentBalance: true } }),
+    prisma.account.count({ where: { AND: [baseWhere, { currentBalance: { lt: 0 } }] } }),
+    prisma.account.count({ where: { AND: [baseWhere, { currentBalance: { gt: 0 } }] } }),
+    prisma.account.count({ where: { AND: [baseWhere, { currentBalance: { equals: 0 } }] } }),
   ]);
 
   const openCounts = await prisma.invoice.groupBy({
     by: ["accountId"],
-    where: {
-      accountId: { in: accounts.map((a) => a.id) },
-      isVoided: false,
-      paymentStatus: { in: ["CREDIT", "PARTIAL"] },
-    },
+    where: { accountId: { in: accounts.map((a) => a.id) }, isVoided: false, paymentStatus: { in: ["CREDIT", "PARTIAL"] } },
     _count: { _all: true },
   });
   const openMap = new Map(openCounts.map((o) => [o.accountId, o._count._all]));
+  const displayedBalances = allScopedBalances.filter((account) => balanceFilter === "ALL" || (balanceFilter === "DEBIT" && account.currentBalance.lt(0)) || (balanceFilter === "CREDIT" && account.currentBalance.gt(0)) || (balanceFilter === "ZERO" && account.currentBalance.eq(0)));
+  const summary = displayedBalances.reduce((result, account) => {
+    const balance = num(account.currentBalance);
+    if (balance < 0) result.receivables += Math.abs(balance);
+    if (balance > 0) result.payables += balance;
+    result.net += balance;
+    return result;
+  }, { receivables: 0, payables: 0, net: 0, debitCount, creditCount, zeroCount });
 
   return {
     rows: accounts.map((a) => {
       const balance = num(a.currentBalance);
       const limit = num(a.creditLimit);
       const debt = balance < 0 ? Math.abs(balance) : 0;
-      return {
-        id: a.id,
-        accountNumber: a.accountNumber,
-        name: a.name,
-        type: a.type,
-        phone: a.phone,
-        email: a.email,
-        taxNumber: a.taxNumber,
-        creditLimit: limit,
-        currentBalance: balance,
-        debt,
-        creditUtilizationPercent: limit > 0 ? Math.min(999, (debt / limit) * 100) : null,
-        defaultPriceTier: a.defaultPriceTier,
-        isActive: a.isActive,
-        vehicleCount: a._count.vehicles,
-        openInvoiceCount: openMap.get(a.id) ?? 0,
-      };
+      return { id: a.id, accountNumber: a.accountNumber, name: a.name, type: a.type, phone: a.phone, email: a.email, taxNumber: a.taxNumber, creditLimit: limit, currentBalance: balance, debt, creditUtilizationPercent: limit > 0 ? Math.min(999, (debt / limit) * 100) : null, defaultPriceTier: a.defaultPriceTier, isActive: a.isActive, vehicleCount: a._count.vehicles, openInvoiceCount: openMap.get(a.id) ?? 0 };
     }),
     total,
     page,
     pageSize,
+    summary,
   };
 }
 

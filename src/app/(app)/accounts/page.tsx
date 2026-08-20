@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const VALID_TYPES: AccountType[] = ["CUSTOMER", "WORKSHOP_BMW", "SUPPLIER", "EXPENSE"];
 
 interface PageProps {
-  searchParams: { q?: string; type?: string; debtors?: string; page?: string };
+  searchParams: { q?: string; type?: string; debtors?: string; balance?: string; page?: string };
 }
 
 export default async function AccountsPage({ searchParams }: PageProps) {
@@ -24,18 +24,11 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   const type = VALID_TYPES.includes(rawType as AccountType) ? (rawType as AccountType) : "ALL";
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
   const debtorsOnly = searchParams.debtors === "1";
+  const balanceFilter = searchParams.balance === "DEBIT" || searchParams.balance === "CREDIT" || searchParams.balance === "ZERO" ? searchParams.balance : "ALL";
 
-  const [result, options, receivablesAgg, payablesAgg, workshops, company, treasuries] = await Promise.all([
-    listAccounts({ query: searchParams.q, type, debtorsOnly, page, pageSize: 25 }),
+  const [result, options, workshops, company, treasuries] = await Promise.all([
+    listAccounts({ query: searchParams.q, type, debtorsOnly, balanceFilter, page, pageSize: 25 }),
     getVehicleFormOptions(),
-    prisma.account.aggregate({
-      where: { type: { in: ["CUSTOMER", "WORKSHOP_BMW"] }, currentBalance: { lt: 0 } },
-      _sum: { currentBalance: true },
-    }),
-    prisma.account.aggregate({
-      where: { type: "SUPPLIER", currentBalance: { gt: 0 } },
-      _sum: { currentBalance: true },
-    }),
     prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }),
     getCompanyProfile(),
     prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
@@ -47,7 +40,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       total={result.total}
       page={result.page}
       pageSize={result.pageSize}
-      filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly }}
+      filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter }}
       options={options}
       canWrite={can(user.role, "account.write")}
       canViewStatement={can(user.role, "account.viewStatement")}
@@ -55,8 +48,12 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       canTransact={can(user.role, "treasury.transact")}
       treasuries={treasuries.map((treasury) => ({ ...treasury, currentBalance: num(treasury.currentBalance) }))}
       totals={{
-        receivables: Math.abs(num(receivablesAgg._sum.currentBalance)),
-        payables: num(payablesAgg._sum.currentBalance),
+        receivables: result.summary.receivables,
+        payables: result.summary.payables,
+        net: result.summary.net,
+        debitCount: result.summary.debitCount,
+        creditCount: result.summary.creditCount,
+        zeroCount: result.summary.zeroCount,
         workshops,
       }}
     />
