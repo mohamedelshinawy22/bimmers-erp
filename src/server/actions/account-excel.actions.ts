@@ -109,16 +109,40 @@ export async function exportAccountsToExcelAction(raw: unknown): Promise<ActionR
 export async function downloadAccountsImportTemplateAction(): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string }>> {
   try {
     await requirePermission("account.write");
-    const rows = [
-      { "كود الحساب": "", "اسم الحساب": "ورشة النخبة لصيانة BMW", "نوع الحساب": "ورشة BMW", "رقم الهاتف": "01000000001", "الرقم الضريبي / السجل": "", "حد الائتمان": 50000, "شريحة التسعير": "جملة", "الرصيد الافتتاحي": -12500, "العنوان": "القاهرة", "التصنيف": "ورش" },
-      { "كود الحساب": "", "اسم الحساب": "أحمد محمد", "نوع الحساب": "عميل", "رقم الهاتف": "01000000002", "الرقم الضريبي / السجل": "", "حد الائتمان": 10000, "شريحة التسعير": "قطاعي", "الرصيد الافتتاحي": -2500, "العنوان": "الجيزة", "التصنيف": "" },
-      { "كود الحساب": "", "اسم الحساب": "شركة قطع غيار أوروبا", "نوع الحساب": "مورد", "رقم الهاتف": "01000000003", "الرقم الضريبي / السجل": "123456789", "حد الائتمان": 0, "شريحة التسعير": "جملة", "الرصيد الافتتاحي": 8000, "العنوان": "مدينة نصر", "التصنيف": "موردون" },
-    ];
-    const sheet = XLSX.utils.json_to_sheet(rows);
-    sheet["!cols"] = [16, 32, 16, 18, 20, 18, 15, 18, 35, 18].map((wch) => ({ wch }));
-    const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, "نموذج الحسابات");
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    return ok({ fileName: "bimmer_accounts_template.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
+    const topHeader = ["رقم الحساب", "اسم الحساب", "الرصيد الحالى", "", "شيكات وأقساط", "", "طبيعة الحساب", "التصنيف", "كود الحساب", "بيانات الاتصال", "", "نسبة الخصم", "سعر البيع", "تاريخ المراجعة", "آخر بيع", "", "آخر قبض", ""];
+    const subHeader = ["", "", "عليه - مدين", "له - دائن", "عليه - مدين", "له - دائن", "", "", "", "موبايل", "عنوان", "", "", "", "التاريخ", "الإجمالى", "التاريخ", "القيمة"];
+    const emptyRows = Array.from({ length: 100 }, () => Array.from({ length: 18 }, () => ""));
+    const totalRowNumber = emptyRows.length + 3;
+    const totals = ["", "الإجمالى", { f: `SUM(C3:C${totalRowNumber - 1})` }, { f: `SUM(D3:D${totalRowNumber - 1})` }, { f: `SUM(E3:E${totalRowNumber - 1})` }, { f: `SUM(F3:F${totalRowNumber - 1})` }, "", "", "", "", "", "", "", "", "", { f: `SUM(P3:P${totalRowNumber - 1})` }, "", { f: `SUM(R3:R${totalRowNumber - 1})` }];
+    const sheet = XLSX.utils.aoa_to_sheet([topHeader, subHeader, ...emptyRows, totals]);
+    sheet["!merges"] = [
+      "A1:A2", "B1:B2", "C1:D1", "E1:F1", "G1:G2", "H1:H2", "I1:I2", "J1:K1", "L1:L2", "M1:M2", "N1:N2", "O1:P1", "Q1:R1",
+    ].map((range) => XLSX.utils.decode_range(range));
+    sheet["!cols"] = [14, 32, 16, 16, 16, 16, 16, 18, 16, 18, 32, 14, 14, 16, 16, 16, 16, 16].map((wch) => ({ wch }));
+    sheet["!rows"] = [{ hpt: 28 }, { hpt: 24 }];
+    sheet["!freeze"] = { xSplit: 0, ySplit: 2, topLeftCell: "A3", activePane: "bottomLeft", state: "frozen" };
+    sheet["!autofilter"] = { ref: `A2:R${totalRowNumber - 1}` };
+    for (let col = 0; col < 18; col += 1) {
+      for (const row of [0, 1]) {
+        const address = XLSX.utils.encode_cell({ r: row, c: col });
+        if (!sheet[address]) sheet[address] = { t: "s", v: "" };
+        sheet[address].s = { fill: { fgColor: { rgb: row === 0 ? "1F4E78" : "D9EAF7" } }, font: { bold: true, color: { rgb: row === 0 ? "FFFFFF" : "1F1F1F" } }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: { top: { style: "thin", color: { rgb: "9FBAD0" } }, bottom: { style: "thin", color: { rgb: "9FBAD0" } }, left: { style: "thin", color: { rgb: "9FBAD0" } }, right: { style: "thin", color: { rgb: "9FBAD0" } } } };
+      }
+    }
+    for (const column of [2, 3, 4, 5, 11, 12, 15, 17]) {
+      for (let row = 2; row <= totalRowNumber - 1; row += 1) {
+        const address = XLSX.utils.encode_cell({ r: row, c: column });
+        if (!sheet[address]) sheet[address] = { t: "n", v: 0 };
+        sheet[address].z = "#,##0.00";
+      }
+    }
+    const totalAddress = XLSX.utils.encode_cell({ r: totalRowNumber - 1, c: 1 });
+    sheet[totalAddress].s = { fill: { fgColor: { rgb: "E2F0D9" } }, font: { bold: true }, alignment: { horizontal: "center" } };
+    const workbook = XLSX.utils.book_new();
+    workbook.Workbook = { Views: [{ RTL: true }] };
+    XLSX.utils.book_append_sheet(workbook, sheet, "نموذج الحسابات");
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true });
+    return ok({ fileName: "نموذج_الحسابات_القياسي.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
   } catch (error) { return toActionError(error, "downloadAccountsImportTemplateAction"); }
 }
 
