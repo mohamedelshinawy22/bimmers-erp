@@ -165,6 +165,49 @@ export async function createPurchaseReturnAction(raw: CreateInvoiceReturnInput):
 }
 
 const purgeReturnSchema = z.object({ invoiceId: z.string().uuid() });
+const deleteCancelledInvoiceSchema = z.object({ invoiceId: z.string().uuid(), reason: z.string().trim().max(500).optional().or(z.literal("")) });
+const bulkDeleteCancelledInvoicesSchema = z.object({ invoiceIds: z.array(z.string().uuid()).min(1).max(100), reason: z.string().trim().max(500).optional().or(z.literal("")) });
+
+export async function deleteCancelledInvoiceAction(raw: { invoiceId: string; reason?: string }): Promise<ActionResult<{ invoiceNumber: string }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = deleteCancelledInvoiceSchema.parse(raw);
+    const invoice = await prisma.invoice.findUnique({ where: { id: input.invoiceId }, select: { id: true, type: true, isVoided: true } });
+    if (!invoice) return { success: false, error: "الفاتورة غير موجودة." };
+    if (!invoice.isVoided) return { success: false, error: "لا يمكن حذف الفاتورة مباشرة؛ يجب إلغاؤها أولاً لضمان سلامة الحسابات والمخزون." };
+    if (invoice.type !== "SALE" && invoice.type !== "PURCHASE") return { success: false, error: "هذه العملية متاحة لفواتير البيع والشراء الملغاة فقط." };
+    const result = await purgeInvoice(invoice.id, invoice.type, { id: user.id, canSellBelowMin: true, canOverrideDiscount: true, purgeReason: input.reason || "حذف نهائي لفاتورة ملغاة" });
+    await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/pos", "/treasury", "/accounts", "/reports/daily-movement"]);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "deleteCancelledInvoiceAction");
+  }
+}
+
+export async function bulkDeleteCancelledInvoicesAction(raw: { invoiceIds: string[]; reason?: string }): Promise<ActionResult<{ deleted: string[]; failed: Array<{ id: string; error: string }> }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = bulkDeleteCancelledInvoicesSchema.parse(raw);
+    const invoices = await prisma.invoice.findMany({ where: { id: { in: input.invoiceIds } }, select: { id: true, type: true, isVoided: true } });
+    const found = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+    const invalid = input.invoiceIds.filter((id) => { const invoice = found.get(id); return !invoice || !invoice.isVoided || (invoice.type !== "SALE" && invoice.type !== "PURCHASE"); });
+    if (invalid.length) return { success: false, error: "تتضمن القائمة فواتير غير موجودة أو غير ملغاة؛ لا يمكن تنفيذ الحذف الجماعي." };
+    const deleted: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    for (const invoice of invoices) {
+      try {
+        const result = await purgeInvoice(invoice.id, invoice.type as "SALE" | "PURCHASE", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true, purgeReason: input.reason || "حذف جماعي لفواتير ملغاة" });
+        deleted.push(result.invoiceNumber);
+      } catch (error) {
+        failed.push({ id: invoice.id, error: error instanceof Error ? error.message : "تعذر حذف الفاتورة." });
+      }
+    }
+    if (deleted.length) await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/pos", "/treasury", "/accounts", "/reports/daily-movement"]);
+    return ok({ deleted, failed });
+  } catch (error) {
+    return toActionError(error, "bulkDeleteCancelledInvoicesAction");
+  }
+}
 
 export async function purgeSalesInvoiceAction(raw: { invoiceId: string }): Promise<ActionResult<{ invoiceNumber: string }>> {
   try {

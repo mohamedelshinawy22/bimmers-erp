@@ -52,6 +52,8 @@ export interface InvoiceActor {
   maxDiscountValue?: number;
   /** Resource scope checked before any cash movement is posted. */
   canUseTreasury?: (treasuryId: string) => boolean;
+  /** Optional reason recorded when a voided invoice is permanently purged. */
+  purgeReason?: string;
 }
 
 export interface InvoiceResult {
@@ -1147,7 +1149,7 @@ export async function purgeInvoice(
       recordId: invoice.id,
       action: "DELETE",
       oldData: { invoiceNumber: invoice.invoiceNumber, type: invoice.type, isVoided: invoice.isVoided, itemCount: invoice.items.length },
-      newData: { purged: true, stockAndBalanceReversed: !invoice.isVoided },
+      newData: { purged: true, stockAndBalanceReversed: !invoice.isVoided, purgeReason: actor.purgeReason || "حذف نهائي بواسطة مستخدم مخول" },
       performedBy: actor.id,
     });
     return { invoiceNumber: invoice.invoiceNumber };
