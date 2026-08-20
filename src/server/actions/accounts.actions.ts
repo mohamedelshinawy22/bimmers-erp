@@ -1,10 +1,11 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission } from "@/lib/auth";
+import { requirePermission, requireUser } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { formatMoney, money } from "@/lib/utils";
@@ -19,7 +20,7 @@ import {
   type UpdateAccountInput,
 } from "@/lib/validations/accounts";
 import { nextAccountNumber } from "@/server/services/numbering.service";
-import { TX_OPTIONS } from "@/server/services/tx";
+import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
 const ACCOUNT_PREFIX: Record<CreateAccountInput["type"], string> = {
   CUSTOMER: "ACC",
@@ -224,6 +225,119 @@ export async function createVehicleAction(
   }
 }
 
+
+const accountIdSchema = z.object({ accountId: z.string().uuid() });
+const archiveAccountSchema = accountIdSchema.extend({ reason: z.string().trim().max(500).optional().or(z.literal("")) });
+const forceDeleteAccountSchema = accountIdSchema.extend({ reason: z.string().trim().min(5, "اكتب سبباً لا يقل عن ٥ أحرف للحذف الإجباري.").max(500) });
+
+export async function getAccountDeletionImpactAction(raw: { accountId: string }): Promise<ActionResult<{ accountName: string; accountNumber: string; currentBalance: number; isActive: boolean; status: string; impact: { invoices: number; activeInvoices: number; voidedInvoices: number; transactions: number; activeTransactions: number; voidedTransactions: number; vehicles: number; checks: number; activeChecks: number; installmentPlans: number; activeInstallmentPlans: number; heldSales: number; activeHeldSales: number }; canDirectDelete: boolean; canForceCleanup: boolean }>> {
+  try {
+    await requirePermission("account.write");
+    const input = accountIdSchema.parse(raw);
+    const [account, invoices, activeInvoices, transactions, activeTransactions, vehicles, checks, activeChecks, installmentPlans, activeInstallmentPlans, heldSales, activeHeldSales] = await Promise.all([
+      prisma.account.findUnique({ where: { id: input.accountId }, select: { name: true, accountNumber: true, currentBalance: true, isActive: true, status: true } }),
+      prisma.invoice.count({ where: { accountId: input.accountId } }),
+      prisma.invoice.count({ where: { accountId: input.accountId, isVoided: false } }),
+      prisma.treasuryTransaction.count({ where: { accountId: input.accountId } }),
+      prisma.treasuryTransaction.count({ where: { accountId: input.accountId, status: { not: "VOIDED" } } }),
+      prisma.customerVehicle.count({ where: { accountId: input.accountId } }),
+      prisma.accountCheck.count({ where: { accountId: input.accountId } }),
+      prisma.accountCheck.count({ where: { accountId: input.accountId, status: { notIn: ["CANCELLED", "VOIDED"] } } }),
+      prisma.installmentPlan.count({ where: { accountId: input.accountId } }),
+      prisma.installmentPlan.count({ where: { accountId: input.accountId, status: { notIn: ["CANCELLED", "VOIDED"] } } }),
+      prisma.heldSale.count({ where: { accountId: input.accountId } }),
+      prisma.heldSale.count({ where: { accountId: input.accountId, status: { not: "CANCELLED" } } }),
+    ]);
+    if (!account) throw new BusinessRuleError("الحساب غير موجود.");
+    const currentBalance = Number(account.currentBalance);
+    const voidedInvoices = invoices - activeInvoices;
+    const voidedTransactions = transactions - activeTransactions;
+    const canDirectDelete = currentBalance === 0 && invoices === 0 && transactions === 0 && vehicles === 0 && checks === 0 && installmentPlans === 0 && heldSales === 0;
+    const canForceCleanup = currentBalance === 0 && activeInvoices === 0 && activeTransactions === 0 && activeChecks === 0 && activeInstallmentPlans === 0 && activeHeldSales === 0;
+    return ok({ accountName: account.name, accountNumber: account.accountNumber, currentBalance, isActive: account.isActive, status: account.status, impact: { invoices, activeInvoices, voidedInvoices, transactions, activeTransactions, voidedTransactions, vehicles, checks, activeChecks, installmentPlans, activeInstallmentPlans, heldSales, activeHeldSales }, canDirectDelete, canForceCleanup });
+  } catch (error) {
+    return toActionError(error, "getAccountDeletionImpactAction");
+  }
+}
+
+export async function archiveAccountAction(raw: { accountId: string; reason?: string }): Promise<ActionResult<{ id: string }>> {
+  try {
+    const user = await requirePermission("account.write");
+    const input = archiveAccountSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const account = await tx.account.findUnique({ where: { id: input.accountId } });
+      if (!account) throw new BusinessRuleError("الحساب غير موجود.");
+      if (!account.currentBalance.eq(0)) throw new BusinessRuleError("لا يمكن أرشفة حساب له رصيد مفتوح. سوِّ الرصيد أولاً للحفاظ على المتابعة المحاسبية.");
+      const archived = await tx.account.update({ where: { id: account.id }, data: { isActive: false, status: "INACTIVE" } });
+      await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "UPDATE", oldData: account, newData: { event: "ACCOUNT_ARCHIVED", isActive: false, status: "INACTIVE", reason: input.reason || "أرشفة حساب يحتفظ بسجل تاريخي" }, performedBy: user.id });
+      return { id: archived.id };
+    }, TX_OPTIONS));
+    revalidatePath("/accounts");
+    revalidatePath("/pos");
+    revalidatePath("/invoices");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "archiveAccountAction");
+  }
+}
+
+export async function deleteAccountCascadeAction(raw: { accountId: string; reason: string }): Promise<ActionResult<{ accountNumber: string; removed: { invoices: number; transactions: number; vehicles: number; checks: number; installmentPlans: number; heldSales: number } }>> {
+  try {
+    const user = await requireUser();
+    if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("الحذف الإجباري متاح لمدير النظام فقط.");
+    const input = forceDeleteAccountSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Account" WHERE "id" = ${input.accountId} FOR UPDATE`;
+      const account = await tx.account.findUnique({ where: { id: input.accountId } });
+      if (!account) throw new BusinessRuleError("الحساب غير موجود.");
+      if (!account.currentBalance.eq(0)) throw new BusinessRuleError("لا يمكن الحذف الإجباري لحساب له رصيد. سوِّ الرصيد أولاً ثم أعد المحاولة.");
+
+      const [invoices, transactions, vehicles, checks, installmentPlans, heldSales, activeInvoices, activeTransactions, activeChecks, activeInstallmentPlans, activeHeldSales] = await Promise.all([
+        tx.invoice.findMany({ where: { accountId: account.id }, select: { id: true, returnOfId: true, isVoided: true } }),
+        tx.treasuryTransaction.findMany({ where: { accountId: account.id }, select: { id: true, status: true } }),
+        tx.customerVehicle.count({ where: { accountId: account.id } }),
+        tx.accountCheck.findMany({ where: { accountId: account.id }, select: { id: true, status: true } }),
+        tx.installmentPlan.findMany({ where: { accountId: account.id }, select: { id: true, status: true } }),
+        tx.heldSale.findMany({ where: { accountId: account.id }, select: { id: true, status: true } }),
+        tx.invoice.count({ where: { accountId: account.id, isVoided: false } }),
+        tx.treasuryTransaction.count({ where: { accountId: account.id, status: { not: "VOIDED" } } }),
+        tx.accountCheck.count({ where: { accountId: account.id, status: { notIn: ["CANCELLED", "VOIDED"] } } }),
+        tx.installmentPlan.count({ where: { accountId: account.id, status: { notIn: ["CANCELLED", "VOIDED"] } } }),
+        tx.heldSale.count({ where: { accountId: account.id, status: { not: "CANCELLED" } } }),
+      ]);
+      if (activeInvoices || activeTransactions || activeChecks || activeInstallmentPlans || activeHeldSales) {
+        throw new BusinessRuleError("لا يمكن الحذف الإجباري لأن الحساب يحتوي على مستندات أو سندات أو شيكات أو أقساط أو مسودات نشطة. استخدم الأرشفة للحفاظ على سلامة القيود.");
+      }
+
+      const invoiceIds = invoices.map((invoice) => invoice.id);
+      if (invoiceIds.length) {
+        await tx.heldSale.updateMany({ where: { accountId: account.id, invoiceId: { in: invoiceIds } }, data: { invoiceId: null } });
+        await tx.stockMovement.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+        await tx.treasuryTransaction.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+        const returnInvoiceIds = invoices.filter((invoice) => invoice.returnOfId).map((invoice) => invoice.id);
+        const originalInvoiceIds = invoices.filter((invoice) => !invoice.returnOfId).map((invoice) => invoice.id);
+        if (returnInvoiceIds.length) await tx.invoice.deleteMany({ where: { id: { in: returnInvoiceIds } } });
+        if (originalInvoiceIds.length) await tx.invoice.deleteMany({ where: { id: { in: originalInvoiceIds } } });
+      }
+      await tx.heldSale.deleteMany({ where: { accountId: account.id, status: "CANCELLED" } });
+      await tx.treasuryTransaction.deleteMany({ where: { accountId: account.id, status: "VOIDED" } });
+      await tx.accountCheck.deleteMany({ where: { accountId: account.id, status: { in: ["CANCELLED", "VOIDED"] } } });
+      await tx.installmentPlan.deleteMany({ where: { accountId: account.id, status: { in: ["CANCELLED", "VOIDED"] } } });
+      await tx.customerVehicle.deleteMany({ where: { accountId: account.id } });
+      await tx.account.delete({ where: { id: account.id } });
+      await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "DELETE", oldData: { accountNumber: account.accountNumber, name: account.name, currentBalance: account.currentBalance }, newData: { event: "ACCOUNT_FORCE_DELETE_TEST_DATA", reason: input.reason, removed: { invoices: invoices.length, transactions: transactions.length, vehicles, checks: checks.length, installmentPlans: installmentPlans.length, heldSales: heldSales.length } }, performedBy: user.id });
+      return { accountNumber: account.accountNumber, removed: { invoices: invoices.length, transactions: transactions.length, vehicles, checks: checks.length, installmentPlans: installmentPlans.length, heldSales: heldSales.length } };
+    }, TX_OPTIONS));
+    revalidatePath("/accounts");
+    revalidatePath("/pos");
+    revalidatePath("/invoices");
+    revalidatePath("/inventory");
+    revalidatePath("/treasury");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "deleteAccountCascadeAction");
+  }
+}
 
 export async function deleteAccountsAction(raw: { accountIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
   try {

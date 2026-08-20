@@ -12,7 +12,7 @@ import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/tab
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { createAccountAction, createVehicleAction, deleteAccountsAction, updateAccountAction } from "@/server/actions/accounts.actions";
+import { archiveAccountAction, createAccountAction, createVehicleAction, deleteAccountCascadeAction, deleteAccountsAction, getAccountDeletionImpactAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { exportAccountsToExcelAction } from "@/server/actions/account-excel.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
@@ -35,6 +35,7 @@ interface AccountsClientProps {
     engines: Array<{ id: string; code: string; displacement: string | null }>;
   };
   canWrite: boolean;
+  canForceCleanup: boolean;
   canViewStatement: boolean;
   company: CompanyProfile;
   canTransact: boolean;
@@ -58,6 +59,7 @@ export function AccountsClient({
   filters,
   options,
   canWrite,
+  canForceCleanup,
   canViewStatement,
   company,
   canTransact,
@@ -358,7 +360,7 @@ export function AccountsClient({
         <StatementModal key={statementFor.id} account={statementFor} company={company} onClose={() => setStatementFor(null)} />
       ) : null}
       {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
-      {deleteTarget ? <DeleteAccountsModal accounts={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
+      {deleteTarget ? <DeleteAccountsModal accounts={deleteTarget} canForceCleanup={canForceCleanup} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {vehicleFor ? (
         <AddVehicleModal
           key={vehicleFor.id}
@@ -848,11 +850,36 @@ function AccountVoucherModal({ account, type, treasuries, onClose }: { account: 
   </Modal>;
 }
 
-function DeleteAccountsModal({ accounts, onClose, onDone }: { accounts: AccountRow[]; onClose: () => void; onDone: () => void }) {
+type AccountDeletionImpact = {
+  accountName: string;
+  accountNumber: string;
+  currentBalance: number;
+  isActive: boolean;
+  status: string;
+  impact: { invoices: number; activeInvoices: number; voidedInvoices: number; transactions: number; activeTransactions: number; voidedTransactions: number; vehicles: number; checks: number; activeChecks: number; installmentPlans: number; activeInstallmentPlans: number; heldSales: number; activeHeldSales: number };
+  canDirectDelete: boolean;
+  canForceCleanup: boolean;
+};
+
+function DeleteAccountsModal({ accounts, canForceCleanup, onClose, onDone }: { accounts: AccountRow[]; canForceCleanup: boolean; onClose: () => void; onDone: () => void }) {
+  const [impacts, setImpacts] = useState<Record<string, AccountDeletionImpact>>({});
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [pending, startTransition] = useTransition();
-  const submit = () => startTransition(async () => { const result = await deleteAccountsAction({ accountIds: accounts.map((account) => account.id) }); if (!result.success) { setError(result.error); return; } onDone(); });
-  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي للحسابات" description={`سيُفحص ${accounts.length} حساباً قبل الحذف.`} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">لا يمكن حذف أي حساب له رصيد أو فواتير أو سندات أو شيكات أو بيانات تشغيلية. أزل أو سوِّ هذه الارتباطات أولاً.</Alert><div className="max-h-32 overflow-auto rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 text-xs">{accounts.map((account) => <p key={account.id}>{account.accountNumber} — {account.name}</p>)}</div></div></Modal>;
+  useEffect(() => { let active = true; void (async () => { setLoading(true); setError(null); const results = await Promise.all(accounts.map((account) => getAccountDeletionImpactAction({ accountId: account.id }))); if (!active) return; const next: Record<string, AccountDeletionImpact> = {}; const errors: string[] = []; results.forEach((result, index) => { if (result.success) next[accounts[index]!.id] = result.data; else errors.push(result.error); }); setImpacts(next); if (errors.length) setError(errors.join(" — ")); setLoading(false); })(); return () => { active = false; }; }, [accounts]);
+  const values = accounts.map((account) => impacts[account.id]).filter((impact): impact is AccountDeletionImpact => Boolean(impact));
+  const directDeleteAllowed = values.length === accounts.length && values.every((impact) => impact.canDirectDelete);
+  const forceCandidate = accounts.length === 1 ? values[0] : undefined;
+  const archive = () => startTransition(async () => { setError(null); for (const account of accounts) { const result = await archiveAccountAction({ accountId: account.id, reason }); if (!result.success) { setError(result.error); return; } } onDone(); });
+  const directDelete = () => startTransition(async () => { setError(null); const result = await deleteAccountsAction({ accountIds: accounts.map((account) => account.id) }); if (!result.success) { setError(result.error); return; } onDone(); });
+  const forceDelete = () => { if (!forceCandidate || confirmation.trim().toUpperCase() !== forceCandidate.accountNumber.toUpperCase()) { setError("اكتب كود الحساب كما يظهر أدناه لتأكيد الحذف الإجباري."); return; } startTransition(async () => { setError(null); const result = await deleteAccountCascadeAction({ accountId: accounts[0]!.id, reason }); if (!result.success) { setError(result.error); return; } onDone(); }); };
+  return <Modal open onClose={onClose} title="فحص تبعيات الحساب قبل الحذف" description="يقرأ هذا الفحص جميع الارتباطات التاريخية، لا كشف اليوم فقط." size="lg" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button>{directDeleteAllowed ? <Button variant="danger" onClick={directDelete} loading={pending}><Trash2 size={15} /> حذف مباشر آمن</Button> : null}</>}><div className="space-y-4">{error ? <Alert variant="error">{error}</Alert> : null}{loading ? <Alert variant="info">جاري فحص الفواتير والسندات والسيارات والشيكات والأقساط…</Alert> : null}{values.map((impact) => <section key={impact.accountNumber} className="space-y-3 rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-bold text-white">{impact.accountNumber} — {impact.accountName}</p><p className="text-xs text-bmw-muted">الحالة: {impact.isActive ? "نشط" : "مؤرشف / معطل"} • الرصيد: {formatMoney(impact.currentBalance)} {CURRENCY}</p></div><Badge variant={impact.canDirectDelete ? "success" : impact.canForceCleanup ? "warning" : "danger"}>{impact.canDirectDelete ? "قابل للحذف المباشر" : impact.canForceCleanup ? "تبعيات ملغاة فقط" : "تبعيات نشطة"}</Badge></div><div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><ImpactCell label="الفواتير المرتبطة" value={impact.impact.invoices} hint={impact.impact.activeInvoices ? `${impact.impact.activeInvoices} نشطة` : `${impact.impact.voidedInvoices} ملغاة`} tone={impact.impact.activeInvoices ? "text-bmw-mRed" : undefined} /><ImpactCell label="السندات والتحصيلات" value={impact.impact.transactions} hint={impact.impact.activeTransactions ? `${impact.impact.activeTransactions} نشطة` : `${impact.impact.voidedTransactions} ملغاة`} tone={impact.impact.activeTransactions ? "text-bmw-mRed" : undefined} /><ImpactCell label="السيارات المسجلة" value={impact.impact.vehicles} /><ImpactCell label="الشيكات" value={impact.impact.checks} hint={impact.impact.activeChecks ? `${impact.impact.activeChecks} نشطة` : "ملغاة / لا يوجد"} tone={impact.impact.activeChecks ? "text-bmw-mRed" : undefined} /><ImpactCell label="خطط الأقساط" value={impact.impact.installmentPlans} hint={impact.impact.activeInstallmentPlans ? `${impact.impact.activeInstallmentPlans} نشطة` : "ملغاة / لا يوجد"} tone={impact.impact.activeInstallmentPlans ? "text-bmw-mRed" : undefined} /><ImpactCell label="مسودات البيع" value={impact.impact.heldSales} hint={impact.impact.activeHeldSales ? `${impact.impact.activeHeldSales} نشطة` : "ملغاة / لا يوجد"} tone={impact.impact.activeHeldSales ? "text-bmw-mRed" : undefined} /><ImpactCell label="الرصيد الدفتري" value={formatMoney(impact.currentBalance)} hint={CURRENCY} tone={impact.currentBalance !== 0 ? "text-bmw-mRed" : "text-emerald-400"} /></div></section>)}{!loading && !directDeleteAllowed ? <><Alert variant="warning">الخيار الموصى به محاسبياً: أرشفة وتعطيل الحساب. سيختفي من شاشات البيع والبحث مع بقاء السجل التاريخي والقيود المرجعية سليمة.</Alert><Field label="سبب الأرشفة أو الحذف الإجباري" hint="اختياري للأرشفة، وإجباري للحذف الإجباري"><Textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="مثال: حساب تجريبي أو عميل متوقف" /></Field><Button className="w-full" variant="outline" onClick={archive} loading={pending} disabled={values.length !== accounts.length || values.some((impact) => impact.currentBalance !== 0)}><Users size={15} /> أرشفة وتعطيل الحسابات المحددة</Button></> : null}{canForceCleanup && forceCandidate?.canForceCleanup && !forceCandidate.canDirectDelete ? <div className="space-y-3 rounded-xl border border-bmw-mRed/50 bg-bmw-mRed/10 p-3"><Alert variant="warning">حذف إجباري مخصص للحسابات التجريبية: سيزيل فقط الفواتير والسندات والشيكات والأقساط والمسودات الملغاة، مع حذف السيارات المرتبطة. لا يعمل إذا وُجدت قيود نشطة أو رصيد مفتوح.</Alert><Field label={`اكتب كود الحساب للتأكيد: ${forceCandidate.accountNumber}`} required><Input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={forceCandidate.accountNumber} dir="ltr" /></Field><Button className="w-full" variant="danger" onClick={forceDelete} loading={pending} disabled={reason.trim().length < 5 || confirmation.trim().toUpperCase() !== forceCandidate.accountNumber.toUpperCase()}><Trash2 size={15} /> حذف إجباري وتنظيف السجلات التجريبية</Button></div> : null}</div></Modal>;
+}
+
+function ImpactCell({ label, value, hint, tone = "text-white" }: { label: string; value: string | number; hint?: string; tone?: string }) {
+  return <div className="rounded-lg border border-bmw-cardBorder bg-bmw-card p-2"><p className="text-[10px] text-bmw-muted">{label}</p><p className={`tabular mt-0.5 text-sm font-bold ${tone}`}>{value}</p>{hint ? <p className="mt-0.5 text-[10px] text-bmw-muted">{hint}</p> : null}</div>;
 }
 
 function AccountFormModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {

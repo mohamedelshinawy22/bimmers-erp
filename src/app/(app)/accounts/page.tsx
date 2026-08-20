@@ -43,6 +43,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter }}
       options={options}
       canWrite={can(user.role, "account.write")}
+      canForceCleanup={user.role === "SUPER_ADMIN"}
       canViewStatement={can(user.role, "account.viewStatement")}
       company={company}
       canTransact={can(user.role, "treasury.transact")}
