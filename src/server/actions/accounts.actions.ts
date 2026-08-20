@@ -228,6 +228,7 @@ export async function createVehicleAction(
 
 const accountIdSchema = z.object({ accountId: z.string().uuid() });
 const archiveAccountSchema = accountIdSchema.extend({ reason: z.string().trim().max(500).optional().or(z.literal("")) });
+const restoreAccountSchema = accountIdSchema.extend({ reason: z.string().trim().max(500).optional().or(z.literal("")) });
 const forceDeleteAccountSchema = accountIdSchema.extend({ reason: z.string().trim().min(5, "اكتب سبباً لا يقل عن ٥ أحرف للحذف الإجباري.").max(500) });
 
 export async function getAccountDeletionImpactAction(raw: { accountId: string }): Promise<ActionResult<{ accountName: string; accountNumber: string; currentBalance: number; isActive: boolean; status: string; impact: { invoices: number; activeInvoices: number; voidedInvoices: number; transactions: number; activeTransactions: number; voidedTransactions: number; vehicles: number; checks: number; activeChecks: number; installmentPlans: number; activeInstallmentPlans: number; heldSales: number; activeHeldSales: number }; canDirectDelete: boolean; canForceCleanup: boolean }>> {
@@ -278,6 +279,28 @@ export async function archiveAccountAction(raw: { accountId: string; reason?: st
     return ok(result);
   } catch (error) {
     return toActionError(error, "archiveAccountAction");
+  }
+}
+
+export async function restoreAccountAction(raw: { accountId: string; reason?: string }): Promise<ActionResult<{ id: string; name: string }>> {
+  try {
+    const user = await requireUser();
+    if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية استعادة الحسابات المؤرشفة متاحة لمدير النظام فقط.");
+    const input = restoreAccountSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const account = await tx.account.findUnique({ where: { id: input.accountId } });
+      if (!account) throw new BusinessRuleError("الحساب غير موجود.");
+      if (account.isActive && account.status === "ACTIVE") throw new BusinessRuleError("الحساب نشط بالفعل ولا يحتاج إلى استعادة.");
+      const restored = await tx.account.update({ where: { id: account.id }, data: { isActive: true, status: "ACTIVE" } });
+      await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "UPDATE", oldData: account, newData: { event: "ACCOUNT_REACTIVATED", isActive: true, status: "ACTIVE", reason: input.reason || "استعادة الحساب بواسطة مدير النظام" }, performedBy: user.id });
+      return { id: restored.id, name: restored.name };
+    }, TX_OPTIONS));
+    revalidatePath("/accounts");
+    revalidatePath("/pos");
+    revalidatePath("/invoices");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "restoreAccountAction");
   }
 }
 

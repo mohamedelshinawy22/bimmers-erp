@@ -31,6 +31,8 @@ export async function listAccounts(options: {
   /** Legacy alias retained for existing URLs. A negative balance is receivable from the account. */
   debtorsOnly?: boolean;
   balanceFilter?: AccountBalanceFilter;
+  /** Archived accounts are retained for historical reporting and are hidden by default. */
+  includeInactive?: boolean;
   page?: number;
   pageSize?: number;
 } = {}): Promise<{ rows: AccountRow[]; total: number; page: number; pageSize: number; summary: { receivables: number; payables: number; net: number; debitCount: number; creditCount: number; zeroCount: number } }> {
@@ -47,6 +49,7 @@ export async function listAccounts(options: {
     ]) });
   }
   if (options.type && options.type !== "ALL") and.push({ type: options.type });
+  if (!options.includeInactive) and.push({ isActive: true });
   const baseWhere: Prisma.AccountWhereInput = and.length ? { AND: and } : {};
   const balanceFilter: AccountBalanceFilter = options.debtorsOnly ? "DEBIT" : options.balanceFilter ?? "ALL";
   const balanceWhere: Prisma.AccountWhereInput = balanceFilter === "DEBIT" ? { currentBalance: { lt: 0 } } : balanceFilter === "CREDIT" ? { currentBalance: { gt: 0 } } : balanceFilter === "ZERO" ? { currentBalance: { equals: 0 } } : {};

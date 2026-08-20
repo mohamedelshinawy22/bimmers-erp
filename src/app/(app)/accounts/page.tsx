@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const VALID_TYPES: AccountType[] = ["CUSTOMER", "WORKSHOP_BMW", "SUPPLIER", "EXPENSE"];
 
 interface PageProps {
-  searchParams: { q?: string; type?: string; debtors?: string; balance?: string; page?: string };
+  searchParams: { q?: string; type?: string; debtors?: string; balance?: string; archived?: string; page?: string };
 }
 
 export default async function AccountsPage({ searchParams }: PageProps) {
@@ -25,9 +25,10 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
   const debtorsOnly = searchParams.debtors === "1";
   const balanceFilter = searchParams.balance === "DEBIT" || searchParams.balance === "CREDIT" || searchParams.balance === "ZERO" ? searchParams.balance : "ALL";
+  const includeInactive = searchParams.archived === "1";
 
   const [result, options, workshops, company, treasuries] = await Promise.all([
-    listAccounts({ query: searchParams.q, type, debtorsOnly, balanceFilter, page, pageSize: 25 }),
+    listAccounts({ query: searchParams.q, type, debtorsOnly, balanceFilter, includeInactive, page, pageSize: 25 }),
     getVehicleFormOptions(),
     prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }),
     getCompanyProfile(),
@@ -40,7 +41,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       total={result.total}
       page={result.page}
       pageSize={result.pageSize}
-      filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter }}
+      filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter, includeInactive }}
       options={options}
       canWrite={can(user.role, "account.write")}
       canForceCleanup={user.role === "SUPER_ADMIN"}

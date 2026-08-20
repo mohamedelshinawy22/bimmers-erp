@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { writeAudit } from "@/lib/audit";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
-import { requirePermission } from "@/lib/auth";
+import { requirePermission, requireUser } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
 import { money, num } from "@/lib/utils";
 import { prisma, type TxClient } from "@/lib/prisma";
@@ -19,6 +19,7 @@ const voucherLookupSchema = z.union([
 const voucherIdSchema = z.object({ voucherId: z.string().uuid() });
 const updateVoucherSchema = z.object({ voucherId: z.string().uuid(), amount: z.coerce.number().finite().positive().max(99_999_999.99), treasuryId: z.string().uuid(), description: z.string().trim().min(2, "بيان السند مطلوب.").max(500), paymentMethod: z.string().trim().max(80).optional().or(z.literal("")), createdAt: z.string().datetime().optional() });
 const voidVoucherSchema = z.object({ voucherId: z.string().uuid(), reason: z.string().trim().min(3, "سبب الإلغاء مطلوب.").max(500) });
+const restoreVoucherSchema = z.object({ voucherId: z.string().uuid(), reason: z.string().trim().max(500).optional().or(z.literal("")) });
 
 type LockedVoucherTreasury = { id: string; name: string; currentBalance: Prisma.Decimal; isActive: boolean };
 
@@ -67,7 +68,7 @@ function revalidateVoucherConsumers() {
   for (const path of ["/", "/treasury", "/accounts", "/invoices", "/reports/daily-movement"]) revalidatePath(path);
 }
 
-export async function getVoucherDetailsAction(raw: unknown): Promise<ActionResult<{ voucher: { id: string; transactionNumber: string; type: "RECEIPT" | "PAYMENT"; amount: number; description: string; paymentMethod: string | null; createdAt: string; status: string; voidedAt: string | null; voidedByUser: string | null; voidReason: string | null; account: { id: string; name: string; accountNumber: string } | null; treasury: { id: string; name: string; currentBalance: number }; invoiceNumber: string | null; createdByName: string | null }; treasuries: Array<{ id: string; name: string; currentBalance: number }>; canManage: boolean }>> {
+export async function getVoucherDetailsAction(raw: unknown): Promise<ActionResult<{ voucher: { id: string; transactionNumber: string; type: "RECEIPT" | "PAYMENT"; amount: number; description: string; paymentMethod: string | null; createdAt: string; status: string; voidedAt: string | null; voidedByUser: string | null; voidReason: string | null; account: { id: string; name: string; accountNumber: string } | null; treasury: { id: string; name: string; currentBalance: number }; invoiceNumber: string | null; createdByName: string | null }; treasuries: Array<{ id: string; name: string; currentBalance: number }>; canManage: boolean; canRestore: boolean }>> {
   try {
     const user = await requirePermission("treasury.read");
     const identifier = extractVoucherIdentifier(voucherLookupSchema.parse(raw));
@@ -79,7 +80,7 @@ export async function getVoucherDetailsAction(raw: unknown): Promise<ActionResul
       prisma.user.findUnique({ where: { id: voucher.createdByUser }, select: { fullName: true } }),
       prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
     ]);
-    return ok({ voucher: { id: voucher.id, transactionNumber: voucher.transactionNumber, type: voucher.type as "RECEIPT" | "PAYMENT", amount: num(voucher.amount), description: voucher.description, paymentMethod: voucher.category, createdAt: voucher.createdAt.toISOString(), status: voucher.status, voidedAt: voucher.voidedAt?.toISOString() ?? null, voidedByUser: voucher.voidedByUser, voidReason: voucher.voidReason, account: voucher.account, treasury: { id: voucher.treasury.id, name: voucher.treasury.name, currentBalance: num(voucher.treasury.currentBalance) }, invoiceNumber: voucher.invoice?.invoiceNumber ?? null, createdByName: createdBy?.fullName ?? null }, treasuries: treasuries.filter((treasury) => access.role === "SUPER_ADMIN" || access.allowedTreasuryIds.length === 0 || access.allowedTreasuryIds.includes(treasury.id)).map((treasury) => ({ id: treasury.id, name: treasury.name, currentBalance: num(treasury.currentBalance) })), canManage: hasApplicationPermission(access, "treasury.manage") });
+    return ok({ voucher: { id: voucher.id, transactionNumber: voucher.transactionNumber, type: voucher.type as "RECEIPT" | "PAYMENT", amount: num(voucher.amount), description: voucher.description, paymentMethod: voucher.category, createdAt: voucher.createdAt.toISOString(), status: voucher.status, voidedAt: voucher.voidedAt?.toISOString() ?? null, voidedByUser: voucher.voidedByUser, voidReason: voucher.voidReason, account: voucher.account, treasury: { id: voucher.treasury.id, name: voucher.treasury.name, currentBalance: num(voucher.treasury.currentBalance) }, invoiceNumber: voucher.invoice?.invoiceNumber ?? null, createdByName: createdBy?.fullName ?? null }, treasuries: treasuries.filter((treasury) => access.role === "SUPER_ADMIN" || access.allowedTreasuryIds.length === 0 || access.allowedTreasuryIds.includes(treasury.id)).map((treasury) => ({ id: treasury.id, name: treasury.name, currentBalance: num(treasury.currentBalance) })), canManage: hasApplicationPermission(access, "treasury.manage"), canRestore: user.role === "SUPER_ADMIN" });
   } catch (error) { return toActionError(error, "getVoucherDetailsAction"); }
 }
 
@@ -121,6 +122,35 @@ export async function updateVoucherAction(raw: unknown): Promise<ActionResult<{ 
     revalidateVoucherConsumers();
     return ok(result);
   } catch (error) { return toActionError(error, "updateVoucherAction"); }
+}
+
+export async function restoreCancelledVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {
+  try {
+    const user = await requireUser();
+    if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية استعادة السندات الملغاة متاحة لمدير النظام فقط.");
+    const input = restoreVoucherSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const voucher = await lockVoucher(tx, input.voucherId);
+      if (voucher.status !== "VOIDED") throw new BusinessRuleError("هذا السند نشط بالفعل ولا يحتاج إلى استعادة.");
+      if (voucher.type === "TRANSFER") throw new BusinessRuleError("لا يمكن استعادة تحويل خزينة من شاشة السندات.");
+      const treasuries = await lockVoucherTreasuries(tx, [voucher.treasuryId]);
+      const treasury = treasuries.get(voucher.treasuryId)!;
+      if (voucher.accountId) await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Account" WHERE "id" = ${voucher.accountId} FOR UPDATE`);
+      const account = voucher.accountId ? await tx.account.findUnique({ where: { id: voucher.accountId } }) : null;
+      if (voucher.accountId && !account) throw new BusinessRuleError("الحساب المرتبط بالسند غير موجود؛ لا يمكن إعادة مزامنة الرصيد.");
+      const amount = money(voucher.amount);
+      const treasuryNext = money(treasury.currentBalance.add(treasuryEffect(voucher.type as "RECEIPT" | "PAYMENT", amount)));
+      if (treasuryNext.lt(0)) throw new BusinessRuleError(`لا يمكن استعادة السند: رصيد خزينة "${treasury.name}" لا يكفي لإعادة تفعيل سند الصرف بمبلغ ${num(amount)}.`);
+      await tx.treasury.update({ where: { id: treasury.id }, data: { currentBalance: treasuryNext } });
+      if (account) await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.add(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount))) } });
+      await updateInvoiceSettlement(tx, voucher, amount);
+      const restored = await tx.treasuryTransaction.update({ where: { id: voucher.id }, data: { status: "ACTIVE", voidedAt: null, voidedByUser: null, voidReason: null } });
+      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: restored.id, action: "UPDATE", oldData: voucher, newData: { ...restored, event: "VOUCHER_RESTORED", reason: input.reason || "استعادة السند بواسطة مدير النظام", restoredTreasuryBalance: true, restoredAccountBalance: Boolean(account) }, performedBy: user.id });
+      return { id: restored.id, transactionNumber: restored.transactionNumber };
+    }, TX_OPTIONS));
+    revalidateVoucherConsumers();
+    return ok(result);
+  } catch (error) { return toActionError(error, "restoreCancelledVoucherAction"); }
 }
 
 export async function voidVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {

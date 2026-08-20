@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, ScrollText, Search, Trash2, UserRound, Users, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Car, Download, FileText, Pencil, Plus, Printer, RotateCcw, ScrollText, Search, Trash2, UserRound, Users, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/tab
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { archiveAccountAction, createAccountAction, createVehicleAction, deleteAccountCascadeAction, deleteAccountsAction, getAccountDeletionImpactAction, updateAccountAction } from "@/server/actions/accounts.actions";
+import { archiveAccountAction, createAccountAction, createVehicleAction, deleteAccountCascadeAction, deleteAccountsAction, getAccountDeletionImpactAction, restoreAccountAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { exportAccountsToExcelAction } from "@/server/actions/account-excel.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
@@ -29,7 +29,7 @@ interface AccountsClientProps {
   total: number;
   page: number;
   pageSize: number;
-  filters: { query: string; type: string; debtorsOnly: boolean; balanceFilter: "ALL" | "DEBIT" | "CREDIT" | "ZERO" };
+  filters: { query: string; type: string; debtorsOnly: boolean; balanceFilter: "ALL" | "DEBIT" | "CREDIT" | "ZERO"; includeInactive: boolean };
   options: {
     chassis: Array<{ id: string; code: string; series: string }>;
     engines: Array<{ id: string; code: string; displacement: string | null }>;
@@ -76,6 +76,7 @@ export function AccountsClient({
   const [pdcFor, setPdcFor] = useState<AccountRow | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<AccountRow[] | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<AccountRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
@@ -94,7 +95,7 @@ export function AccountsClient({
 
   const push = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams();
-    const merged = { q: filters.query, type: filters.type, balance: filters.balanceFilter === "ALL" ? "" : filters.balanceFilter, ...patch };
+    const merged = { q: filters.query, type: filters.type, balance: filters.balanceFilter === "ALL" ? "" : filters.balanceFilter, archived: filters.includeInactive ? "1" : "", ...patch };
     for (const [key, value] of Object.entries(merged)) {
       if (value) next.set(key, value);
     }
@@ -148,6 +149,7 @@ export function AccountsClient({
                 {tab.label}
               </Button>
             ))}
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-bmw-cardBorder bg-bmw-carbon/60 px-3 py-2 text-xs text-bmw-silver"><input type="checkbox" checked={filters.includeInactive} onChange={(event) => push({ archived: event.target.checked ? "1" : null, page: null })} /> إظهار الحسابات المعطلة / المؤرشفة</label>
             <div className="flex flex-wrap items-center gap-1 rounded-xl border border-bmw-cardBorder bg-bmw-carbon/60 p-1">
               {([[
                 "ALL", "كافة الأرصدة", "outline"],
@@ -208,7 +210,7 @@ export function AccountsClient({
                   <TD><input aria-label={`تحديد الحساب ${account.name}`} type="checkbox" checked={selectedIds.includes(account.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, account.id])] : current.filter((id) => id !== account.id))} /></TD>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-blue">{account.accountNumber}</TD>
                   <TD className="max-w-[220px]">
-                    <p className="truncate font-bold text-white">{account.name}</p>
+                    <div className="flex items-center gap-2"><p className="truncate font-bold text-white">{account.name}</p>{!account.isActive ? <Badge variant="muted">معطل / مؤرشف</Badge> : null}</div>
                     {account.taxNumber ? (
                       <p className="font-mono text-[10px] text-bmw-muted">ض: {account.taxNumber}</p>
                     ) : null}
@@ -285,6 +287,7 @@ export function AccountsClient({
                   </TD>
                   <TD>
                     <div className="flex items-center gap-1">
+                      {canForceCleanup && !account.isActive ? <button type="button" onClick={() => setRestoreTarget(account)} title="استعادة وتنشيط الحساب" className="rounded-lg p-1.5 text-emerald-400 transition-colors hover:bg-emerald-500/10"><RotateCcw size={15} /></button> : null}
                       {canWrite ? (
                         <button
                           type="button"
@@ -361,6 +364,7 @@ export function AccountsClient({
       ) : null}
       {voucherFor ? <AccountVoucherModal account={voucherFor.account} type={voucherFor.type} treasuries={treasuries} onClose={() => setVoucherFor(null)} /> : null}
       {deleteTarget ? <DeleteAccountsModal accounts={deleteTarget} canForceCleanup={canForceCleanup} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
+      {restoreTarget ? <RestoreAccountModal account={restoreTarget} onClose={() => setRestoreTarget(null)} onDone={() => { setRestoreTarget(null); router.refresh(); }} /> : null}
       {vehicleFor ? (
         <AddVehicleModal
           key={vehicleFor.id}
@@ -848,6 +852,14 @@ function AccountVoucherModal({ account, type, treasuries, onClose }: { account: 
       <Field label="البيان"><Textarea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`${type === "RECEIPT" ? "تحصيل" : "سداد"} ${account.name}`} /></Field>
     </div>
   </Modal>;
+}
+
+function RestoreAccountModal({ account, onClose, onDone }: { account: AccountRow; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const submit = () => startTransition(async () => { setError(null); const result = await restoreAccountAction({ accountId: account.id, reason }); if (!result.success) { setError(result.error); return; } onDone(); });
+  return <Modal open onClose={onClose} title="استعادة وتنشيط الحساب" description="سيعود الحساب للظهور في نقطة البيع والفواتير ونتائج البحث، دون تعديل سجله التاريخي." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="success" onClick={submit} loading={pending}><RotateCcw size={15} /> استعادة وتنشيط الحساب</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="info">سيتم استعادة الحساب <strong>{account.accountNumber} — {account.name}</strong> فقط. لا تؤثر العملية في الأرصدة أو الفواتير أو السندات التاريخية.</Alert><Field label="سبب الاستعادة" hint="اختياري — يُسجل في سجل التدقيق"><Textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="مثال: عودة التعامل مع العميل" autoFocus /></Field></div></Modal>;
 }
 
 type AccountDeletionImpact = {
