@@ -714,7 +714,12 @@ model TreasuryTransaction {
   amount            Decimal           @db.Decimal(12, 2)
   description       String
   createdByUser     String
+  status            String            @default("ACTIVE") // ACTIVE | VOIDED; vouchers remain immutable after cancellation.
+  voidedAt          DateTime?
+  voidedByUser      String?
+  voidReason        String?
   createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([treasuryId, createdAt])
   @@index([accountId, createdAt])
@@ -722,6 +727,7 @@ model TreasuryTransaction {
   @@index([transferId])
   @@index([createdAt])
   @@index([type, createdAt])
+  @@index([status, createdAt])
 }
 
 model TreasuryTransfer {

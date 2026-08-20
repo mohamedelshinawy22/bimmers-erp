@@ -295,7 +295,7 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
         },
       },
     }),
-    prisma.treasuryTransaction.findMany({ where: { accountId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, transactionNumber: true, invoiceId: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } } } }),
+    prisma.treasuryTransaction.findMany({ where: { accountId, status: "ACTIVE" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, transactionNumber: true, invoiceId: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } } } }),
   ]);
   if (!account) return null;
 
