@@ -52,7 +52,7 @@ export async function createAccountAction(
             address: input.address || null,
             taxNumber: input.taxNumber || null,
             creditLimit: money(input.creditLimit),
-            currentBalance: money(input.openingBalance),
+            currentBalance: input.type === "EXPENSE" ? money(0) : money(input.openingBalance),
             defaultPriceTier: input.defaultPriceTier,
             category: input.category || null,
             status: input.status,
@@ -171,6 +171,29 @@ export async function createQuickPosAccountAction(
     });
   } catch (error) {
     return toActionError(error, "createQuickPosAccountAction");
+  }
+}
+
+export async function resetExpenseAccountBalancesAction(): Promise<ActionResult<{ reset: number; totalCleared: number }>> {
+  try {
+    const user = await requireUser();
+    if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("تصفير الأرصدة التاريخية للمصروفات يقتصر على مدير النظام.");
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const expenses = await tx.account.findMany({ where: { type: "EXPENSE", currentBalance: { not: 0 } }, orderBy: { id: "asc" } });
+      let totalCleared = money(0);
+      for (const expense of expenses) {
+        const previousBalance = money(expense.currentBalance);
+        totalCleared = money(totalCleared.add(previousBalance.abs()));
+        const updated = await tx.account.update({ where: { id: expense.id }, data: { currentBalance: money(0) } });
+        const adjustment = await tx.accountBalanceAdjustment.create({ data: { accountId: expense.id, previousBalance, targetBalance: money(0), delta: money(0).sub(previousBalance), targetNature: "ZERO", reason: "تصحيح تاريخي: حساب مصروف تشغيلي لا يدخل ضمن المدينيات أو المستحقات.", createdByUser: user.id, createdByName: user.fullName } });
+        await writeAudit(tx, { tableName: "Account", recordId: expense.id, action: "UPDATE", oldData: expense, newData: { ...updated, event: "EXPENSE_BALANCE_RESET", adjustmentId: adjustment.id, previousBalance, targetBalance: 0 }, performedBy: user.id });
+      }
+      return { reset: expenses.length, totalCleared: Number(totalCleared) };
+    }, TX_OPTIONS));
+    for (const path of ["/accounts", "/vouchers", "/treasury", "/reports/daily-movement", "/"]) revalidatePath(path);
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "resetExpenseAccountBalancesAction");
   }
 }
 

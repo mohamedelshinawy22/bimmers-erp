@@ -114,7 +114,7 @@ export async function updateVoucherAction(raw: unknown): Promise<ActionResult<{ 
         await tx.treasury.update({ where: { id: treasuryId }, data: { currentBalance: nextBalance } });
       }
       const accountDelta = money(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount).sub(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", oldAmount)));
-      if (account) await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.add(accountDelta)) } });
+      if (account && account.type !== "EXPENSE") await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.add(accountDelta)) } });
       await updateInvoiceSettlement(tx, voucher, amount.sub(oldAmount));
       const updated = await tx.treasuryTransaction.update({ where: { id: voucher.id }, data: { treasuryId: input.treasuryId, amount, description: input.description, category: input.paymentMethod || null, ...(input.createdAt ? { createdAt: new Date(input.createdAt) } : {}) } });
       await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: updated.id, action: "UPDATE", oldData: voucher, newData: { ...updated, operation: "VOUCHER_UPDATED", amountDelta: num(amount.sub(oldAmount)) }, performedBy: user.id });
@@ -143,10 +143,10 @@ export async function restoreCancelledVoucherAction(raw: unknown): Promise<Actio
       const treasuryNext = money(treasury.currentBalance.add(treasuryEffect(voucher.type as "RECEIPT" | "PAYMENT", amount)));
       if (treasuryNext.lt(0)) throw new BusinessRuleError(`لا يمكن استعادة السند: رصيد خزينة "${treasury.name}" لا يكفي لإعادة تفعيل سند الصرف بمبلغ ${num(amount)}.`);
       await tx.treasury.update({ where: { id: treasury.id }, data: { currentBalance: treasuryNext } });
-      if (account) await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.add(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount))) } });
+      if (account && account.type !== "EXPENSE") await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.add(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount))) } });
       await updateInvoiceSettlement(tx, voucher, amount);
       const restored = await tx.treasuryTransaction.update({ where: { id: voucher.id }, data: { status: "ACTIVE", voidedAt: null, voidedByUser: null, voidReason: null } });
-      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: restored.id, action: "UPDATE", oldData: voucher, newData: { ...restored, event: "VOUCHER_RESTORED", reason: input.reason || "استعادة السند بواسطة مدير النظام", restoredTreasuryBalance: true, restoredAccountBalance: Boolean(account) }, performedBy: user.id });
+      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: restored.id, action: "UPDATE", oldData: voucher, newData: { ...restored, event: "VOUCHER_RESTORED", reason: input.reason || "استعادة السند بواسطة مدير النظام", restoredTreasuryBalance: true, restoredAccountBalance: Boolean(account && account.type !== "EXPENSE") }, performedBy: user.id });
       return { id: restored.id, transactionNumber: restored.transactionNumber };
     }, TX_OPTIONS));
     revalidateVoucherConsumers();
@@ -173,10 +173,10 @@ export async function voidVoucherAction(raw: unknown): Promise<ActionResult<{ id
       const treasuryNext = money(treasury.currentBalance.sub(treasuryEffect(voucher.type as "RECEIPT" | "PAYMENT", amount)));
       if (treasuryNext.lt(0)) throw new BusinessRuleError(`لا يمكن إلغاء السند: سيصبح رصيد خزينة "${treasury.name}" سالباً.`);
       await tx.treasury.update({ where: { id: treasury.id }, data: { currentBalance: treasuryNext } });
-      if (account) await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.sub(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount))) } });
+      if (account && account.type !== "EXPENSE") await tx.account.update({ where: { id: account.id }, data: { currentBalance: money(account.currentBalance.sub(accountEffect(voucher.type as "RECEIPT" | "PAYMENT", amount))) } });
       await updateInvoiceSettlement(tx, voucher, amount.negated());
       const voided = await tx.treasuryTransaction.update({ where: { id: voucher.id }, data: { status: "VOIDED", voidedAt: new Date(), voidedByUser: user.id, voidReason: input.reason } });
-      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: voided.id, action: "VOID", oldData: voucher, newData: { ...voided, event: "VOUCHER_CANCELLED", reversedTreasuryBalance: true, reversedAccountBalance: Boolean(account) }, performedBy: user.id });
+      await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: voided.id, action: "VOID", oldData: voucher, newData: { ...voided, event: "VOUCHER_CANCELLED", reversedTreasuryBalance: true, reversedAccountBalance: Boolean(account && account.type !== "EXPENSE") }, performedBy: user.id });
       return { id: voided.id, transactionNumber: voided.transactionNumber };
     }, TX_OPTIONS));
     revalidateVoucherConsumers();

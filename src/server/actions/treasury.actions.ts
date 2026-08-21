@@ -43,12 +43,13 @@ export async function deleteManualTreasuryTransactionsAction(raw: { transactionI
       if (transactions.some((transaction) => transaction.invoiceId || transaction.type === "TRANSFER")) throw new BusinessRuleError("لا يمكن حذف حركة مرتبطة بفاتورة أو تحويل داخلي. استخدم إلغاء الفاتورة أو التحويل من مساره الأصلي.");
       const accountIds = transactions.map((transaction) => transaction.accountId).filter((id): id is string => Boolean(id));
       if (accountIds.length) await lockAccountsForUpdate(tx, accountIds);
+      const accountTypes = new Map((accountIds.length ? await tx.account.findMany({ where: { id: { in: accountIds } }, select: { id: true, type: true } }) : []).map((account) => [account.id, account.type]));
       const treasuries = await lockTreasuriesForUpdate(tx, transactions.map((transaction) => transaction.treasuryId));
       for (const transaction of transactions) {
         const treasury = treasuries.get(transaction.treasuryId)!;
         if (transaction.type === "RECEIPT" && treasury.currentBalance.lt(transaction.amount)) throw new BusinessRuleError(`لا يمكن حذف السند ${transaction.transactionNumber}: سيولة خزينة "${treasury.name}" لا تكفي لعكس القبض.`);
         await tx.treasury.update({ where: { id: transaction.treasuryId }, data: transaction.type === "RECEIPT" ? { currentBalance: { decrement: transaction.amount } } : { currentBalance: { increment: transaction.amount } } });
-        if (transaction.accountId) await tx.account.update({ where: { id: transaction.accountId }, data: transaction.type === "RECEIPT" ? { currentBalance: { decrement: transaction.amount } } : { currentBalance: { increment: transaction.amount } } });
+        if (transaction.accountId && accountTypes.get(transaction.accountId) !== "EXPENSE") await tx.account.update({ where: { id: transaction.accountId }, data: transaction.type === "RECEIPT" ? { currentBalance: { decrement: transaction.amount } } : { currentBalance: { increment: transaction.amount } } });
         await tx.treasuryTransaction.delete({ where: { id: transaction.id } });
         await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "DELETE", oldData: transaction, newData: { reversed: true, source: "MANUAL_VOUCHER" }, performedBy: user.id });
       }
@@ -87,6 +88,8 @@ export async function createTreasuryTransactionAction(
 
         // Account first, treasury second — see GLOBAL LOCK ORDER above.
         if (accountId) await lockAccountForUpdate(tx, accountId);
+        const account = accountId ? await tx.account.findUnique({ where: { id: accountId }, select: { id: true, type: true } }) : null;
+        if (accountId && !account) throw new BusinessRuleError("الحساب المحدد غير موجود.");
         const treasuries = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
         const treasury = treasuries.get(input.treasuryId)!;
         if (!treasury.isActive) throw new BusinessRuleError("لا يمكن إنشاء سند على خزينة معطلة.");
@@ -99,9 +102,10 @@ export async function createTreasuryTransactionAction(
           data: input.type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } },
           select: { currentBalance: true },
         });
-        if (accountId) {
+        // Operational expenses are classified through the voucher ledger but never create receivable/payable balances.
+        if (account && account.type !== "EXPENSE") {
           await tx.account.update({
-            where: { id: accountId },
+            where: { id: account.id },
             data: input.type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } },
           });
         }
@@ -117,7 +121,7 @@ export async function createTreasuryTransactionAction(
             ...(input.createdAt ? { createdAt: new Date(input.createdAt) } : {}),
           },
         });
-        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, event: "VOUCHER_CREATED", invoiceSettlement: Boolean(invoice) }, performedBy: user.id });
+        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, event: "VOUCHER_CREATED", invoiceSettlement: Boolean(invoice), expenseBalanceNeutral: account?.type === "EXPENSE" }, performedBy: user.id });
         return { transactionNumber: transaction.transactionNumber, treasuryBalance: Number(updatedTreasury.currentBalance) };
       }, TX_OPTIONS),
     );

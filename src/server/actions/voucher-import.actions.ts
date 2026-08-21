@@ -239,9 +239,10 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
               const treasuryId = treasuryByName.get(channel.name)?.id!;
               await tx.treasury.update({ where: { id: treasuryId }, data: outbound ? { currentBalance: { decrement: channel.amount } } : { currentBalance: { increment: channel.amount } } });
               const transaction = await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId, accountId: account?.id ?? null, type: kind, category: line.itemCategory || "VOUCHER_IMPORT", amount: channel.amount, description: [line.transactionReference, line.externalReference, line.itemCategory, line.notes].filter(Boolean).join(" — ") || (kind === "RECEIPT" ? "سند قبض مستورد" : "سند صرف مستورد"), createdByUser: user.id, ...(transactionDate(line) ? { createdAt: transactionDate(line) } : {}) } });
-              await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, source: "VOUCHER_EXCEL_IMPORT", channelName: channel.name }, performedBy: user.id });
+              await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, source: "VOUCHER_EXCEL_IMPORT", channelName: channel.name, expenseBalanceNeutral: account?.type === "EXPENSE" }, performedBy: user.id });
             }
-            if (account) await tx.account.update({ where: { id: account.id }, data: kind === "RECEIPT" ? { currentBalance: { increment: money(line.amount) } } : { currentBalance: { decrement: money(line.amount) } } });
+            // Expense accounts categorize operational costs; they do not represent receivables or payables.
+            if (account && account.type !== "EXPENSE") await tx.account.update({ where: { id: account.id }, data: kind === "RECEIPT" ? { currentBalance: { increment: money(line.amount) } } : { currentBalance: { decrement: money(line.amount) } } });
             return { transfer: false, transactions: channels.length };
           }, TX_OPTIONS));
           created += 1;

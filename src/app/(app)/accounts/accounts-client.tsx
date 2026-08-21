@@ -12,7 +12,7 @@ import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/tab
 import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney } from "@/lib/utils";
 import type { AccountRow } from "@/server/services/accounts.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { archiveAccountAction, createAccountAction, createVehicleAction, deleteAccountCascadeAction, deleteAccountsAction, getAccountDeletionImpactAction, restoreAccountAction, updateAccountAction } from "@/server/actions/accounts.actions";
+import { archiveAccountAction, createAccountAction, createVehicleAction, deleteAccountCascadeAction, deleteAccountsAction, getAccountDeletionImpactAction, resetExpenseAccountBalancesAction, restoreAccountAction, updateAccountAction } from "@/server/actions/accounts.actions";
 import { exportAccountsToExcelAction } from "@/server/actions/account-excel.actions";
 import { createTreasuryTransactionAction } from "@/server/actions/treasury.actions";
 import { getAccountDetailedLedgerAction, getAccountPdcInstallmentsAction } from "@/server/actions/invoices.read.actions";
@@ -81,11 +81,12 @@ export function AccountsClient({
   const [restoreTarget, setRestoreTarget] = useState<AccountRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [resettingExpenses, setResettingExpenses] = useState(false);
   const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const displayedReceivables = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
-  const displayedPayables = rows.filter((account) => account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
+  const displayedReceivables = rows.filter((account) => (account.type === "CUSTOMER" || account.type === "WORKSHOP_BMW") && account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  const displayedPayables = rows.filter((account) => account.type === "SUPPLIER" && account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
   const displayedNet = displayedPayables - displayedReceivables;
   const exportExcel = async () => {
     setExporting(true);
@@ -93,6 +94,14 @@ export function AccountsClient({
     setExporting(false);
     if (!result.success) return;
     const binary = atob(result.data.base64); const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0)); const url = URL.createObjectURL(new Blob([bytes], { type: result.data.mimeType })); const link = document.createElement("a"); link.href = url; link.download = result.data.fileName; link.click(); URL.revokeObjectURL(url);
+  };
+
+  const resetExpenseBalances = async () => {
+    if (!window.confirm("سيتم تصفير الأرصدة التاريخية لحسابات المصروفات فقط، مع إنشاء سجل تدقيق لكل حساب. هل تريد المتابعة؟")) return;
+    setResettingExpenses(true);
+    const result = await resetExpenseAccountBalancesAction();
+    setResettingExpenses(false);
+    if (result.success) router.refresh();
   };
 
   const push = (patch: Record<string, string | null>) => {
@@ -116,7 +125,7 @@ export function AccountsClient({
             <p className="text-xs text-bmw-muted">{formatInt(total)} حساب مسجّل</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">{canWrite ? <><Button variant="outline" onClick={() => setImportOpen(true)}><FileText size={16} /> استيراد إكسيل</Button><Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button><Button onClick={() => setAddOpen(true)}><Plus size={16} /> حساب جديد</Button></> : <Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>}</div>
+        <div className="flex flex-wrap gap-2">{canWrite ? <><Button variant="outline" onClick={() => setImportOpen(true)}><FileText size={16} /> استيراد إكسيل</Button><Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>{canAdjustBalance ? <Button variant="outline" onClick={() => void resetExpenseBalances()} loading={resettingExpenses}><Wallet size={16} /> تصحيح أرصدة المصروفات</Button> : null}<Button onClick={() => setAddOpen(true)}><Plus size={16} /> حساب جديد</Button></> : <Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>}</div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -238,17 +247,19 @@ export function AccountsClient({
                   <TD className="whitespace-nowrap">
                     <span
                       className={`tabular font-bold ${
-                        account.currentBalance < 0
-                          ? "text-amber-400"
-                          : account.currentBalance > 0
-                            ? "text-purple-400"
-                            : "text-bmw-muted"
+                        account.type === "EXPENSE"
+                          ? "text-bmw-muted"
+                          : account.currentBalance < 0
+                            ? "text-amber-400"
+                            : account.currentBalance > 0
+                              ? "text-purple-400"
+                              : "text-bmw-muted"
                       }`}
                     >
                       {formatMoney(Math.abs(account.currentBalance))}
                     </span>
                     <span className="mr-1 text-[10px] text-bmw-muted">
-                      {account.currentBalance < 0 ? "مدين — لنا" : account.currentBalance > 0 ? "دائن — علينا" : "متزن"}
+                      {account.type === "EXPENSE" ? "مصروف تشغيلي — متزن" : account.currentBalance < 0 ? "مدين — لنا" : account.currentBalance > 0 ? "دائن — علينا" : "متزن"}
                     </span>
                   </TD>
                   <TD className="tabular whitespace-nowrap text-xs text-bmw-muted">
