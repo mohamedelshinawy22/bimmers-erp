@@ -302,25 +302,43 @@ export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise
   } catch (error) { return toActionError(error, "downloadInvoiceImportTemplateAction"); }
 }
 
-export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; reason?: string }> }>> {
+export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" }> }>> {
   try {
     const input = importSchema.parse(raw);
     await requirePermission(permissionForType(input.type));
-    const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), result: rawLineSchema.safeParse(row) }));
-    const invalid = parsed.filter((entry) => !entry.result.success).map((entry) => ({ row: entry.row, reason: (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
-    const typeInvalid = parsed.filter((entry) => entry.result.success && entry.result.data.type !== input.type).map((entry) => ({ row: entry.row, reason: `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.` }));
-    const preview = [];
+    const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), raw: row, result: rawLineSchema.safeParse(row) }));
+    type PreviewRow = { row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" };
+    const preview: PreviewRow[] = [];
+    const rawString = (row: Record<string, unknown>, key: string) => String(row[key] ?? "").trim();
+    const resolutionFor = (reason: string) => {
+      if (reason.includes("الحساب")) return { errorCode: "ACCOUNT_NOT_FOUND" as const, suggestedFix: "فعّل إنشاء الحسابات غير الموجودة تلقائياً ليُنشأ الحساب بالنوع الصحيح." };
+      if (reason.includes("كمية")) return { errorCode: "INVALID_QUANTITY" as const, suggestedFix: "تأكد من إدخال كمية عددية صحيحة أكبر من صفر في ملف Excel." };
+      if (reason.includes("الإجمالي") || reason.includes("سعر") || reason.includes("مبلغ")) return { errorCode: "INVALID_AMOUNT" as const, suggestedFix: "راجع السعر والإجمالي والمدفوع وتأكد من أنها قيم رقمية صحيحة." };
+      if (reason.includes("خزينة")) return { errorCode: "TREASURY_NOT_FOUND" as const, suggestedFix: "حدد خزينة نشطة مطابقة، أو راجع اسم الخزينة في الملف." };
+      if (reason.includes("نوع الصف")) return { errorCode: "TYPE_MISMATCH" as const, suggestedFix: `استخدم معالج ${typeLabel[input.type]} أو صحح نوع المستند في الصف.` };
+      return { errorCode: "FORMAT_INVALID" as const, suggestedFix: "راجع الحقول المطلوبة وتنسيق الصف في ملف Excel." };
+    };
     for (const entry of parsed) {
-      if (!entry.result.success) continue;
+      if (!entry.result.success) {
+        const reason = (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ");
+        preview.push({ row: entry.row, documentNumber: rawString(entry.raw, "documentNumber"), type: rawString(entry.raw, "type"), accountName: rawString(entry.raw, "accountName"), oemNumber: formatOemNumber(rawString(entry.raw, "oemNumber")), partName: rawString(entry.raw, "partName"), grandTotal: 0, accountMatched: false, partMatched: false, treasuryMatched: false, accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
+        continue;
+      }
       const line = entry.result.data;
+      if (line.type !== input.type) {
+        const reason = `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.`;
+        preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: false, partMatched: false, treasuryMatched: false, accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
+        continue;
+      }
       const match = await matchLine(line, input.type, input.mode);
       const needsTreasury = line.paidAmount > 0;
       const modeIssue = modeValidationIssue(line, input.mode);
-      const reason = modeIssue ?? (!match.account && !match.cashFallback ? "تعذر مطابقة الحساب بشكل فريد." : input.mode === "SUMMARY" && needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined);
-      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: input.mode === "DETAILED" || !needsTreasury || Boolean(match.treasury), reason, accountStatus: (match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : "NOT_FOUND") as "CASH_FALLBACK" | "MATCHED" | "NOT_FOUND", partStatus: (input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM") as "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM" });
+      const accountMissing = !match.account && !match.cashFallback && !input.autoCreateAccounts;
+      const reason = modeIssue ?? (accountMissing ? `الحساب (${line.accountName}) غير مسجل في المنظومة وتم إيقاف الإنشاء التلقائي.` : input.mode === "SUMMARY" && needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined);
+      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback || input.autoCreateAccounts, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: input.mode === "DETAILED" || !needsTreasury || Boolean(match.treasury), isValid: !reason, reason, ...(reason ? resolutionFor(reason) : {}), accountStatus: match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : input.autoCreateAccounts ? "AUTO_CREATE" : "NOT_FOUND", partStatus: input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM" });
     }
-    const matchedInvalid = preview.filter((row) => row.reason).map((row) => ({ row: row.row, reason: row.reason! }));
-    return ok({ total: input.rows.length, valid: input.rows.length - invalid.length - typeInvalid.length - matchedInvalid.length, invalid: [...invalid, ...typeInvalid, ...matchedInvalid], rows: preview });
+    const invalid = preview.filter((row) => !row.isValid).map((row) => ({ row: row.row, reason: row.reason ?? "صف غير صالح." }));
+    return ok({ total: input.rows.length, valid: preview.filter((row) => row.isValid).length, invalid, rows: preview });
   } catch (error) { return toActionError(error, "previewInvoiceImportAction"); }
 }
 
