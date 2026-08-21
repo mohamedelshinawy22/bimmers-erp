@@ -293,6 +293,8 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
             unitPrice: true,
             lineDiscount: true,
             totalPrice: true,
+            partNameSnapshot: true,
+            oemNumberSnapshot: true,
             part: { select: { nameAr: true, oemNumber: true, brand: { select: { name: true } } } },
           },
         },
@@ -308,7 +310,7 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
   const invoiceRows: InternalRow[] = invoices.map((invoice) => {
     const isDebit = invoice.type === "SALE" || invoice.type === "PURCHASE_RETURN";
     const label = invoice.type === "SALE" ? "فاتورة بيع" : invoice.type === "PURCHASE" ? "فاتورة شراء" : invoice.type === "SALE_RETURN" ? "مرتجع بيع" : invoice.type === "PURCHASE_RETURN" ? "مرتجع شراء" : "عرض سعر";
-    const items: AccountLedgerItem[] = mode === "DETAILED" ? invoice.items.map((item) => ({ id: item.id, oemNumber: item.part.oemNumber, nameAr: item.part.nameAr, brandName: item.part.brand.name, quantity: item.quantity, unitPrice: num(item.unitPrice), lineDiscount: num(item.lineDiscount), totalPrice: num(item.totalPrice) })) : [];
+    const items: AccountLedgerItem[] = mode === "DETAILED" ? invoice.items.map((item) => ({ id: item.id, oemNumber: item.part?.oemNumber ?? item.oemNumberSnapshot ?? "—", nameAr: item.part?.nameAr ?? item.partNameSnapshot ?? "صنف نصي غير مربوط", brandName: item.part?.brand.name ?? "غير مربوط بالمخزن", quantity: item.quantity, unitPrice: num(item.unitPrice), lineDiscount: num(item.lineDiscount), totalPrice: num(item.totalPrice) })) : [];
     return { id: `inv:${invoice.id}`, createdAt: invoice.createdAt, reference: invoice.invoiceNumber, type: invoice.type, typeLabel: label, debit: isDebit ? money(invoice.grandTotal) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(invoice.grandTotal), treasuryName: null, note: invoice.notes, documentId: invoice.id, documentKind: "INVOICE", invoiceId: invoice.id, items, sequence: 0 };
   });
   const transactionRows: InternalRow[] = transactions.map((transaction) => {

@@ -23,7 +23,7 @@ export async function getDailyMovementReportAction(raw: DailyMovementReportInput
     const [invoices, ledger, stockMoves, priorLedger, users, treasuries, warehouseRows] = await Promise.all([
       prisma.invoice.findMany({
         where: { isVoided: false, createdAt: period, ...(operatorId ? { userId: operatorId } : {}), ...(treasuryScope ? { treasuryId: treasuryScope } : {}), ...warehouseInvoiceScope },
-        select: { id: true, invoiceNumber: true, type: true, createdAt: true, grandTotal: true, paidAmount: true, remainingAmount: true, paymentMethod: true, treasury: { select: { id: true, name: true } }, user: { select: { id: true, fullName: true, username: true } }, account: { select: { name: true } }, items: { select: { quantity: true, part: { select: { nameAr: true, oemNumber: true } } } } },
+        select: { id: true, invoiceNumber: true, type: true, createdAt: true, grandTotal: true, paidAmount: true, remainingAmount: true, paymentMethod: true, treasury: { select: { id: true, name: true } }, user: { select: { id: true, fullName: true, username: true } }, account: { select: { name: true } }, items: { select: { quantity: true, partNameSnapshot: true, oemNumberSnapshot: true, part: { select: { nameAr: true, oemNumber: true } } } } },
         orderBy: { createdAt: "desc" },
       }),
       prisma.treasuryTransaction.findMany({
@@ -51,7 +51,7 @@ export async function getDailyMovementReportAction(raw: DailyMovementReportInput
       const sign = type === "SALE_RETURN" || type === "PURCHASE_RETURN" ? -1 : 1;
       return {
         id: invoice.id, documentId: invoice.id, reference: invoice.invoiceNumber, at: invoice.createdAt.toISOString(), party: invoice.account.name,
-        description: invoice.items.slice(0, 3).map((item) => `${item.part.nameAr} (${item.part.oemNumber}) ×${item.quantity}`).join("، "),
+        description: invoice.items.slice(0, 3).map((item) => `${item.part?.nameAr ?? item.partNameSnapshot ?? "صنف نصي"} (${item.part?.oemNumber ?? item.oemNumberSnapshot ?? "—"}) ×${item.quantity}`).join("، "),
         itemCount: invoice.items.reduce((total, item) => total + item.quantity, 0), total: sign * n(invoice.grandTotal), paid: sign * n(invoice.paidAmount), remaining: sign * n(invoice.remainingAmount),
         treasury: invoice.treasury?.name ?? "—", warehouse: warehouseName ?? "—", user: `${invoice.user.fullName} (@${invoice.user.username})`, source: type,
       };

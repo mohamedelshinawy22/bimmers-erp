@@ -17,9 +17,11 @@ export default async function PurchaseInvoiceEditPage({ params }: { params: { id
     getSetting("TAX_RATE_PERCENT", "0"),
   ]);
   if (!invoice || invoice.type !== "PURCHASE" || invoice.isVoided) notFound();
-  const parts = await getPosPartsByIds(invoice.items.map((item) => item.partId));
+  const catalogItems = invoice.items.filter((item): item is typeof item & { partId: string } => Boolean(item.partId));
+  if (catalogItems.length !== invoice.items.length) notFound();
+  const parts = await getPosPartsByIds(catalogItems.map((item) => item.partId));
   const byId = new Map(parts.map((part) => [part.id, part]));
-  const lines = invoice.items.map((item) => {
+  const lines = catalogItems.map((item) => {
     const part = byId.get(item.partId);
     if (!part) notFound();
     const lineDiscount = Math.max(0, item.quantity * item.unitPrice - item.totalPrice);

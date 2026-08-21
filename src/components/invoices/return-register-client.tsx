@@ -28,7 +28,7 @@ type ReturnSource = {
   id: string; invoiceNumber: string; type: SourceType; createdAt: string;
   subtotal: number; discountAmount: number; taxAmount: number;
   account: { id: string; name: string; phone: string | null; accountNumber: string; currentBalance: number };
-  items: Array<{ id: string; partId: string; nameAr: string; oemNumber: string; quantity: number; unitPrice: number; totalPrice: number; stockQuantity: number; previouslyReturnedQuantity: number; availableQuantity: number }>;
+  items: Array<{ id: string; partId: string | null; nameAr: string; oemNumber: string; quantity: number; unitPrice: number; totalPrice: number; stockQuantity: number; previouslyReturnedQuantity: number; availableQuantity: number }>;
 };
 
 export function ReturnRegisterClient({ type, rows, treasuries, canVoid, canPurge }: { type: ReturnDocumentType; rows: InvoiceListRow[]; treasuries: Array<{ id: string; name: string }>; canVoid: boolean; canPurge: boolean }) {
@@ -86,7 +86,7 @@ function ReturnCreationModal({ type, treasuries, onClose, onCreated }: { type: R
   const search = () => startSearch(async () => { setError(null); const result = await searchReturnSourceInvoicesAction(sourceType, query); if (!result.success) { setError(result.error); return; } setMatches(result.data); });
   useEffect(() => { void (async () => { const result = await searchReturnSourceInvoicesAction(sourceType); if (result.success) setMatches(result.data); })(); }, [sourceType]);
   const choose = async (invoiceId: string) => { setError(null); const result = await getReturnSourceInvoiceAction(invoiceId); if (!result.success) { setError(result.error); return; } if (result.data.type !== sourceType) { setError("نوع الفاتورة الأصلية غير متوافق مع هذا المرتجع."); return; } setSource(result.data); setQuantities(Object.fromEntries(result.data.items.map((item) => [item.id, "0"]))); };
-  const selected = source?.items.map((item) => ({ invoiceItemId: item.id, quantity: Number(quantities[item.id] ?? 0), item })).filter((line) => Number.isInteger(line.quantity) && line.quantity > 0) ?? [];
+  const selected = source?.items.map((item) => ({ invoiceItemId: item.id, quantity: Number(quantities[item.id] ?? 0), item })).filter((line) => Boolean(line.item.partId) && Number.isInteger(line.quantity) && line.quantity > 0) ?? [];
   const selectionError = selected.find(({ item, quantity }) => quantity > item.availableQuantity || (!isSaleReturn && quantity > item.stockQuantity));
   const selectedSubtotal = selected.reduce((sum, { item, quantity }) => sum + (item.totalPrice / item.quantity) * quantity, 0);
   const estimatedGrandTotal = source && source.subtotal > 0 ? Math.round((selectedSubtotal - source.discountAmount * (selectedSubtotal / source.subtotal) + source.taxAmount * (selectedSubtotal / source.subtotal)) * 100) / 100 : selectedSubtotal;

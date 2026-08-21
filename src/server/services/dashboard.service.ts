@@ -219,7 +219,7 @@ export async function getTopSellingParts(limit = 5) {
 
   const grouped = await prisma.invoiceItem.groupBy({
     by: ["partId"],
-    where: { invoice: { type: "SALE", isVoided: false, createdAt: { gte: since } } },
+    where: { partId: { not: null }, invoice: { type: "SALE", isVoided: false, createdAt: { gte: since } } },
     _sum: { quantity: true, totalPrice: true },
     orderBy: { _sum: { quantity: "desc" } },
     take: limit,
@@ -227,12 +227,13 @@ export async function getTopSellingParts(limit = 5) {
   if (grouped.length === 0) return [];
 
   const parts = await prisma.partItem.findMany({
-    where: { id: { in: grouped.map((g) => g.partId) } },
+    where: { id: { in: grouped.flatMap((g) => g.partId ? [g.partId] : []) } },
     select: { id: true, nameAr: true, oemNumber: true, stockQuantity: true },
   });
   const map = new Map(parts.map((p) => [p.id, p]));
 
   return grouped.flatMap((g) => {
+    if (!g.partId) return [];
     const part = map.get(g.partId);
     if (!part) return [];
     return [

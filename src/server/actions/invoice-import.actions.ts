@@ -14,7 +14,7 @@ import { BusinessRuleError } from "@/lib/errors";
 import { formatOemNumber } from "@/lib/utils";
 import { createInvoiceReturn, createPurchaseInvoice, createSaleInvoice } from "@/server/services/invoice.service";
 import { nextAccountNumber, nextInvoiceNumber, nextTransactionNumber } from "@/server/services/numbering.service";
-import { lockAccountForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
+import { lockAccountForUpdate, lockPartsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
 const invoiceImportTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
@@ -48,10 +48,17 @@ const rawLineSchema = z.object({
   sourceRowNumber: z.coerce.number().int().positive().optional(),
   documentNumber: z.string().trim().min(1, "رقم الفاتورة في ملف الاستيراد مطلوب.").max(120),
   type: z.preprocess(normalizeType, z.enum(documentTypes, { error: "نوع المستند غير صالح." })),
-  accountName: z.string().trim().min(1, "اسم الحساب مطلوب.").max(200),
+  accountName: z.string().trim().max(200).optional().or(z.literal("")).default(""),
   accountPhone: z.string().trim().max(40).optional().or(z.literal("")),
   originalInvoiceNumber: z.string().trim().max(120).optional().or(z.literal("")),
   treasuryName: z.string().trim().max(160).optional().or(z.literal("")),
+  cashDrawer: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  instapay: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  vodafoneCash: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  bankAbk: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  creditAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  dueAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  warehouse: z.string().trim().max(160).optional().or(z.literal("")),
   paymentMethod: z.preprocess(normalizePayment, z.enum(["CASH", "VISA", "SPLIT", "ON_ACCOUNT"])),
   oemNumber: z.string().trim().max(120).optional().or(z.literal("")),
   partName: z.string().trim().max(240).optional().or(z.literal("")),
@@ -129,6 +136,99 @@ function financialAmount(line: ValidLine) {
   return gross.abs().toDecimalPlaces(2);
 }
 
+function isWalkInCashAccount(value: string | undefined) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase("ar-EG");
+  return !normalized || ["نقدي", "كاش", "عميل نقدي", "عميل نقدى"].includes(normalized);
+}
+
+async function getOrCreateWalkInCashAccount(userId: string) {
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const existing = await tx.account.findFirst({ where: { type: "CUSTOMER", OR: [{ accountNumber: "ACC-0001" }, { name: { in: ["عميل نقدي افتراضي", "عميل نقدي"] } }] }, select: { id: true, name: true, type: true } });
+    if (existing) return existing;
+    const account = await tx.account.create({ data: { accountNumber: await nextAccountNumber(tx, "ACC"), name: "عميل نقدي افتراضي", type: "CUSTOMER", currentBalance: 0, isActive: true, status: "ACTIVE", category: "WALK_IN_CASH" }, select: { id: true, name: true, type: true } });
+    await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "INSERT", newData: { createdForInvoiceImport: true, role: "walkInCash" }, performedBy: userId });
+    return account;
+  }, TX_OPTIONS));
+}
+
+function importedPaymentChannels(line: ValidLine) {
+  const channels = [
+    { treasuryType: "CASH_DRAWER" as const, amount: new Prisma.Decimal(line.cashDrawer).abs(), label: "درج النقدية" },
+    { treasuryType: "INSTAPAY" as const, amount: new Prisma.Decimal(line.instapay).abs(), label: "إنستا باي" },
+    { treasuryType: "WALLET" as const, amount: new Prisma.Decimal(line.vodafoneCash).abs(), label: "فودافون كاش" },
+    { treasuryType: "BANK_ACCOUNT" as const, amount: new Prisma.Decimal(line.bankAbk).abs(), label: "البنك ABK" },
+  ].filter((channel) => channel.amount.gt(0));
+  if (channels.length) return channels;
+  const paidAmount = new Prisma.Decimal(line.paidAmount).abs();
+  return paidAmount.gt(0) ? [{ treasuryType: "CASH_DRAWER" as const, amount: paidAmount, label: "السداد النقدي" }] : [];
+}
+
+async function postDetailedImportedInvoice(args: { type: InvoiceImportType; lines: Array<{ line: ValidLine; part: { id: string; oemNumber: string; nameAr: string } | null }>; accountId: string; userId: string; jobId: string }) {
+  const first = args.lines[0]?.line;
+  if (!first) throw new BusinessRuleError("الفاتورة لا تحتوي على بنود قابلة للترحيل.");
+  const grandTotal = financialAmount(first);
+  if (grandTotal.lte(0)) throw new BusinessRuleError("الإجمالي النهائي للفاتورة مطلوب.");
+  const channels = importedPaymentChannels(first);
+  const paidAmount = channels.reduce((total, channel) => total.add(channel.amount), new Prisma.Decimal(0)).toDecimalPlaces(2);
+  const statedCredit = Prisma.Decimal.max(new Prisma.Decimal(first.creditAmount).abs(), new Prisma.Decimal(first.dueAmount).abs());
+  const remainingAmount = statedCredit.gt(0) ? statedCredit.toDecimalPlaces(2) : Prisma.Decimal.max(new Prisma.Decimal(0), grandTotal.sub(paidAmount)).toDecimalPlaces(2);
+  const outbound = args.type === "PURCHASE" || args.type === "SALE_RETURN";
+  const stockReason = args.type === "SALE" ? "SALE" : args.type === "PURCHASE" ? "PURCHASE" : args.type === "SALE_RETURN" ? "SALE_RETURN" : "PURCHASE_RETURN";
+  const balanceAfter = (before: Prisma.Decimal) => args.type === "SALE" || args.type === "PURCHASE_RETURN" ? before.sub(remainingAmount) : before.add(remainingAmount);
+  const linkedPartIds = [...new Set(args.lines.flatMap(({ part }) => part ? [part.id] : []))];
+
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const account = await lockAccountForUpdate(tx, args.accountId);
+    const parts = await lockPartsForUpdate(tx, linkedPartIds);
+    const treasuryRows = channels.length ? await tx.treasury.findMany({ where: { isActive: true, type: { in: [...new Set(channels.map((channel) => channel.treasuryType))] } }, select: { id: true, name: true, type: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }) : [];
+    const treasuryIdByType = new Map<string, string>();
+    for (const channel of channels) {
+      const candidates = treasuryRows.filter((treasury) => treasury.type === channel.treasuryType);
+      const selected = candidates.find((treasury) => treasury.isDefault) ?? candidates[0];
+      if (!selected) throw new BusinessRuleError(`لا توجد خزينة نشطة مهيأة لقناة ${channel.label}.`);
+      treasuryIdByType.set(channel.treasuryType, selected.id);
+    }
+    if (treasuryIdByType.size) await lockTreasuriesForUpdate(tx, [...treasuryIdByType.values()]);
+    const baseType = args.type === "SALE_RETURN" ? "SALE" : args.type === "PURCHASE_RETURN" ? "PURCHASE" : null;
+    const original = baseType && first.originalInvoiceNumber ? await tx.invoice.findFirst({ where: { invoiceNumber: first.originalInvoiceNumber, type: baseType, isVoided: false }, select: { id: true, accountId: true } }) : null;
+    const invoiceNumber = await nextInvoiceNumber(tx, args.type);
+    const invoice = await tx.invoice.create({ data: {
+      invoiceNumber, type: args.type, accountId: account.id, treasuryId: channels.length === 1 ? treasuryIdByType.get(channels[0]!.treasuryType) ?? null : null, userId: args.userId,
+      subtotal: grandTotal, discountAmount: 0, taxAmount: 0, grandTotal, paidAmount, remainingAmount,
+      paymentStatus: remainingAmount.eq(0) ? "PAID" : paidAmount.gt(0) ? "PARTIAL" : "CREDIT",
+      paymentMethod: remainingAmount.gt(0) && paidAmount.eq(0) ? "ON_ACCOUNT" : channels.length > 1 ? "SPLIT" : "CASH",
+      returnOfId: original?.accountId === account.id ? original.id : null,
+      accountBalanceBefore: account.currentBalance, accountBalanceAfter: balanceAfter(account.currentBalance),
+      notes: [`استيراد تفصيلي ${args.jobId}`, `مرجع الملف: ${first.documentNumber}`, first.notes, args.lines.some(({ part }) => !part) ? "يتضمن أصنافاً نصية غير مرتبطة بالمخزن" : ""].filter(Boolean).join(" — "),
+    } });
+    const runningStock = new Map<string, number>();
+    for (const { line, part } of args.lines) {
+      const linked = part ? parts.get(part.id) : null;
+      const quantity = line.quantity;
+      const delta = args.type === "SALE" || args.type === "PURCHASE_RETURN" ? -quantity : quantity;
+      const previous = linked ? runningStock.get(linked.id) ?? linked.stockQuantity : 0;
+      const next = previous + delta;
+      if (linked) runningStock.set(linked.id, next);
+      await tx.invoiceItem.create({ data: {
+        invoiceId: invoice.id, partId: linked?.id ?? null, partNameSnapshot: line.partName || linked?.nameAr || "صنف غير محدد", oemNumberSnapshot: line.oemNumber || linked?.oemNumber || null,
+        quantity, unitPrice: new Prisma.Decimal(line.unitPrice).abs(), unitCostSnapshot: linked?.buyPriceAvg ?? new Prisma.Decimal(0), totalPrice: new Prisma.Decimal(Math.abs(line.quantity * line.unitPrice - line.lineDiscount)), lineDiscount: new Prisma.Decimal(line.lineDiscount).abs(), binLocationSnapshot: linked?.binFullCode ?? null,
+      } });
+      if (linked) {
+        await tx.partItem.update({ where: { id: linked.id }, data: { stockQuantity: next } });
+        await tx.stockMovement.create({ data: { partId: linked.id, invoiceId: invoice.id, reason: stockReason, quantityDelta: delta, balanceAfter: next, unitCost: linked.buyPriceAvg, performedById: args.userId, note: `استيراد Excel تفصيلي - ${invoiceNumber}` } });
+      }
+    }
+    for (const channel of channels) {
+      const treasuryId = treasuryIdByType.get(channel.treasuryType)!;
+      await tx.treasury.update({ where: { id: treasuryId }, data: outbound ? { currentBalance: { decrement: channel.amount } } : { currentBalance: { increment: channel.amount } } });
+      await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId, accountId: account.id, invoiceId: invoice.id, type: outbound ? "PAYMENT" : "RECEIPT", amount: channel.amount, category: "IMPORT_DETAILED", description: `${outbound ? "صرف" : "تحصيل"} استيراد ${channel.label} - ${invoiceNumber}`, createdByUser: args.userId } });
+    }
+    if (remainingAmount.gt(0)) await tx.account.update({ where: { id: account.id }, data: args.type === "SALE" || args.type === "PURCHASE_RETURN" ? { currentBalance: { decrement: remainingAmount } } : { currentBalance: { increment: remainingAmount } } });
+    await writeAudit(tx, { tableName: "Invoice", recordId: invoice.id, action: "INSERT", newData: { ...invoice, importMode: "DETAILED", linkedItemCount: args.lines.filter(({ part }) => Boolean(part)).length, unlinkedTextItemCount: args.lines.filter(({ part }) => !part).length, stockEffect: "CATALOG_LINKED_ONLY" }, performedBy: args.userId });
+    return { invoiceId: invoice.id, invoiceNumber };
+  }, TX_OPTIONS));
+}
+
 async function postSummaryFinancialInvoice(args: { type: InvoiceImportType; line: ValidLine; accountId: string; treasuryId?: string; userId: string; jobId: string }) {
   const grandTotal = financialAmount(args.line);
   if (grandTotal.lte(0)) throw new BusinessRuleError("الإجمالي النهائي مطلوب في الاستيراد المالي ولا يجوز أن يساوي صفراً.");
@@ -179,15 +279,18 @@ function modeValidationIssue(line: ValidLine, mode: "SUMMARY" | "DETAILED") {
 
 async function matchLine(line: ValidLine, type: InvoiceImportType, mode: "SUMMARY" | "DETAILED") {
   const oem = normalizeKey(line.oemNumber ?? "");
+  const cashFallback = isWalkInCashAccount(line.accountName);
   const accountTypes = type === "PURCHASE" || type === "PURCHASE_RETURN" ? ["SUPPLIER"] as const : ["CUSTOMER", "WORKSHOP_BMW"] as const;
   const [accounts, parts, treasuries] = await Promise.all([
-    prisma.account.findMany({ where: { isActive: true, type: { in: [...accountTypes] }, OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } }),
+    cashFallback
+      ? prisma.account.findMany({ where: { isActive: true, type: "CUSTOMER", OR: [{ accountNumber: "ACC-0001" }, { name: { in: ["عميل نقدي افتراضي", "عميل نقدي"] } }] }, select: { id: true, name: true, type: true } })
+      : prisma.account.findMany({ where: { isActive: true, type: { in: [...accountTypes] }, OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } }),
     mode === "DETAILED" && (oem || line.partName?.trim())
       ? prisma.$queryRaw<Array<{ id: string; oemNumber: string; nameAr: string }>>(Prisma.sql`SELECT id, "oemNumber", "nameAr" FROM "PartItem" WHERE (${oem ? Prisma.sql`lower(regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g')) = ${oem}` : Prisma.sql`FALSE`}) OR (${line.partName?.trim() ? Prisma.sql`"nameAr" = ${line.partName.trim()}` : Prisma.sql`FALSE`}) LIMIT 5`)
       : Promise.resolve([]),
     line.treasuryName ? prisma.treasury.findMany({ where: { isActive: true, name: { equals: line.treasuryName } }, select: { id: true, name: true } }) : Promise.resolve([]),
   ]);
-  return { account: accounts.length === 1 ? accounts[0] : null, accountCandidates: accounts, part: parts.length === 1 ? parts[0] : null, partCandidates: parts, treasury: treasuries.length === 1 ? treasuries[0] : null, treasuryCandidates: treasuries };
+  return { account: accounts.length === 1 ? accounts[0] : null, accountCandidates: accounts, cashFallback, part: parts.length === 1 ? parts[0] : null, partCandidates: parts, treasury: treasuries.length === 1 ? treasuries[0] : null, treasuryCandidates: treasuries };
 }
 
 export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string }>> {
@@ -199,7 +302,7 @@ export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise
   } catch (error) { return toActionError(error, "downloadInvoiceImportTemplateAction"); }
 }
 
-export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; reason?: string }> }>> {
+export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; reason?: string }> }>> {
   try {
     const input = importSchema.parse(raw);
     await requirePermission(permissionForType(input.type));
@@ -213,8 +316,8 @@ export async function previewInvoiceImportAction(raw: unknown): Promise<ActionRe
       const match = await matchLine(line, input.type, input.mode);
       const needsTreasury = line.paidAmount > 0;
       const modeIssue = modeValidationIssue(line, input.mode);
-      const reason = modeIssue ?? (!match.account ? "تعذر مطابقة الحساب بشكل فريد." : input.mode === "DETAILED" && !match.part ? "تعذر مطابقة الصنف برقم OEM بشكل فريد." : needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined);
-      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account), partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: !needsTreasury || Boolean(match.treasury), reason });
+      const reason = modeIssue ?? (!match.account && !match.cashFallback ? "تعذر مطابقة الحساب بشكل فريد." : input.mode === "SUMMARY" && needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined);
+      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: input.mode === "DETAILED" || !needsTreasury || Boolean(match.treasury), reason, accountStatus: (match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : "NOT_FOUND") as "CASH_FALLBACK" | "MATCHED" | "NOT_FOUND", partStatus: (input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM") as "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM" });
     }
     const matchedInvalid = preview.filter((row) => row.reason).map((row) => ({ row: row.row, reason: row.reason! }));
     return ok({ total: input.rows.length, valid: input.rows.length - invalid.length - typeInvalid.length - matchedInvalid.length, invalid: [...invalid, ...typeInvalid, ...matchedInvalid], rows: preview });
@@ -249,6 +352,10 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         if (!first) { skipped += 1; continue; }
         const paired = await Promise.all(group.map(async (line) => {
           const match = await matchLine(line, input.type, input.mode);
+          if (!match.account && match.cashFallback) {
+            const account = await getOrCreateWalkInCashAccount(user.id);
+            return { line, match: { ...match, account } };
+          }
           if (!match.account && input.autoCreateAccounts) {
             const account = await createMissingAccountForImport(line, input.type, user.id);
             return { line, match: { ...match, account } };
@@ -262,9 +369,9 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
           skipped += group.length;
           continue;
         }
-        const issue = paired.find(({ line, match }) => !match.account || (input.mode === "DETAILED" && !match.part) || (line.paidAmount > 0 && !match.treasury));
+        const issue = paired.find(({ line, match }) => !match.account || (input.mode === "SUMMARY" && line.paidAmount > 0 && !match.treasury));
         if (issue) {
-          const reason = !issue.match.account ? "تعذر مطابقة الحساب بشكل فريد." : input.mode === "DETAILED" && !issue.match.part ? "تعذر مطابقة الصنف بشكل فريد." : "تعذر مطابقة الخزينة النشطة.";
+          const reason = !issue.match.account ? "تعذر مطابقة الحساب بشكل فريد." : "تعذر مطابقة الخزينة النشطة.";
           invalid.push({ row: issue.line.sourceRowNumber, reason });
           if (!input.skipInvalidRows) throw new BusinessRuleError(`الصف ${issue.line.sourceRowNumber}: ${reason}`);
           skipped += group.length;
@@ -276,6 +383,11 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         const treasuryId = firstMatch.treasury?.id;
         if (input.mode === "SUMMARY") {
           await postSummaryFinancialInvoice({ type: first.type, line: first, accountId: account.id, treasuryId: firstMatch.treasury?.id, userId: user.id, jobId: job.id });
+          created += 1;
+          continue;
+        }
+        if (input.mode === "DETAILED") {
+          await postDetailedImportedInvoice({ type: first.type, lines: paired.map(({ line, match }) => ({ line, part: match.part ?? null })), accountId: account.id, userId: user.id, jobId: job.id });
           created += 1;
           continue;
         }

@@ -173,6 +173,8 @@ export async function getReturnSourceInvoiceAction(invoiceId: string) {
             quantity: true,
             unitPrice: true,
             totalPrice: true,
+            partNameSnapshot: true,
+            oemNumberSnapshot: true,
             part: { select: { nameAr: true, oemNumber: true, stockQuantity: true } },
           },
         },
@@ -187,7 +189,7 @@ export async function getReturnSourceInvoiceAction(invoiceId: string) {
     }
     const returnedByPart = new Map<string, number>();
     for (const returned of invoice.returns) {
-      for (const item of returned.items) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
+      for (const item of returned.items) if (item.partId) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
     }
     return ok({
       id: invoice.id,
@@ -201,14 +203,14 @@ export async function getReturnSourceInvoiceAction(invoiceId: string) {
       items: invoice.items.map((item) => ({
         id: item.id,
         partId: item.partId,
-        nameAr: item.part.nameAr,
-        oemNumber: item.part.oemNumber,
+        nameAr: item.part?.nameAr ?? item.partNameSnapshot ?? "صنف نصي غير مربوط",
+        oemNumber: item.part?.oemNumber ?? item.oemNumberSnapshot ?? "-",
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
         totalPrice: Number(item.totalPrice),
-        stockQuantity: item.part.stockQuantity,
-        previouslyReturnedQuantity: returnedByPart.get(item.partId) ?? 0,
-        availableQuantity: Math.max(0, item.quantity - (returnedByPart.get(item.partId) ?? 0)),
+        stockQuantity: item.part?.stockQuantity ?? 0,
+        previouslyReturnedQuantity: item.partId ? returnedByPart.get(item.partId) ?? 0 : item.quantity,
+        availableQuantity: item.partId ? Math.max(0, item.quantity - (returnedByPart.get(item.partId) ?? 0)) : 0,
       })),
     });
   } catch (error) {

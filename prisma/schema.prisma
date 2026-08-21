@@ -581,16 +581,20 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id                  String   @id @default(uuid())
+  id                  String    @id @default(uuid())
   invoiceId           String
-  invoice             Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  partId              String
-  part                PartItem @relation(fields: [partId], references: [id])
+  invoice             Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /// Null for imported free-text items that did not exist in the catalog at posting time.
+  partId              String?
+  part                PartItem? @relation(fields: [partId], references: [id], onDelete: SetNull)
+  /// Immutable import snapshot retained for linked and unlinked lines alike.
+  partNameSnapshot    String?
+  oemNumberSnapshot   String?
   quantity            Int
-  unitPrice           Decimal  @db.Decimal(12, 2)
-  unitCostSnapshot    Decimal  @db.Decimal(12, 2)
-  totalPrice          Decimal  @db.Decimal(12, 2)
-  lineDiscount        Decimal  @default(0.0) @db.Decimal(12, 2)
+  unitPrice           Decimal   @db.Decimal(12, 2)
+  unitCostSnapshot    Decimal   @db.Decimal(12, 2)
+  totalPrice          Decimal   @db.Decimal(12, 2)
+  lineDiscount        Decimal   @default(0.0) @db.Decimal(12, 2)
   binLocationSnapshot String?
 
   @@index([invoiceId])

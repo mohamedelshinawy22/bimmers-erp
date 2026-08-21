@@ -104,7 +104,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
       select: {
         id: true, invoiceNumber: true, type: true, subtotal: true, discountAmount: true, grandTotal: true, paidAmount: true, remainingAmount: true, paymentStatus: true, paymentMethod: true, createdAt: true, updatedAt: true,
         account: { select: { name: true } }, user: { select: { fullName: true } }, treasury: { select: { name: true } }, returnOf: { select: { invoiceNumber: true } },
-        items: { select: { quantity: true, unitPrice: true, lineDiscount: true, totalPrice: true, part: { select: { oemNumber: true, nameAr: true, stockQuantity: true } } } },
+        items: { select: { quantity: true, unitPrice: true, lineDiscount: true, totalPrice: true, partNameSnapshot: true, oemNumberSnapshot: true, part: { select: { oemNumber: true, nameAr: true, stockQuantity: true } } } },
         transactions: { select: { amount: true, type: true, status: true, treasury: { select: { name: true, type: true } } } },
       },
     });
@@ -127,7 +127,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
       if (input.mode === "DETAILED") {
         const detailHeader = ["", "رقم الصنف (OEM)", "اسم الصنف", "وحدة", "المتاح", "كمية", "السعر", "الخصم", "النهائى"];
         rows.push(detailHeader);
-        for (const item of invoice.items) rows.push(["", formatOemNumber(item.part.oemNumber), item.part.nameAr, "قطعة", item.part.stockQuantity, item.quantity, num(item.unitPrice), num(item.lineDiscount), num(item.totalPrice) * multiplier]);
+        for (const item of invoice.items) rows.push(["", formatOemNumber(item.part?.oemNumber ?? item.oemNumberSnapshot), item.part?.nameAr ?? item.partNameSnapshot ?? "صنف نصي غير مربوط", "قطعة", item.part?.stockQuantity ?? "غير مربوط", item.quantity, num(item.unitPrice), num(item.lineDiscount), num(item.totalPrice) * multiplier]);
         rows.push(["", "", "إجمالي الفاتورة", "", "", quantity, "", num(invoice.discountAmount), grandTotal]);
         rows.push([]);
       }

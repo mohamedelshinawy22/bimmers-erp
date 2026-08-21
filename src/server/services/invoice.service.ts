@@ -75,6 +75,10 @@ function safeRate(raw: string, fallback: number): Prisma.Decimal {
   return new Prisma.Decimal(value);
 }
 
+function hasCatalogPart<T extends { partId: string | null }>(item: T): item is T & { partId: string } {
+  return Boolean(item.partId);
+}
+
 /**
  * Recomputes the money side of an invoice from the line items and server-held
  * settings. NEVER trust client-sent totals: server actions are public HTTP
@@ -582,7 +586,7 @@ async function updateInvoiceDocument(input: EditableInvoiceInput, type: "SALE" |
   ]);
   const existing = await prisma.invoice.findUnique({ where: { id: input.invoiceId }, select: { id: true, items: { select: { partId: true } } } });
   if (!existing) throw new BusinessRuleError("الفاتورة غير موجودة.");
-  const partIds = [...new Set([...existing.items.map((item) => item.partId), ...input.items.map((item) => item.partId)])];
+  const partIds = [...new Set([...existing.items.filter(hasCatalogPart).map((item) => item.partId), ...input.items.map((item) => item.partId)])];
   const taxRate = safeRate(taxRateRaw, 0);
   const maxDiscountPercent = safeRate(maxDiscountRaw, 100);
   const allowNegativeStock = allowNegativeRaw === "true";
@@ -601,7 +605,7 @@ async function updateInvoiceDocument(input: EditableInvoiceInput, type: "SALE" |
     assertAccountTypeFor(type, newAccount);
 
     const oldByPart = new Map<string, { quantity: number; totalCost: Prisma.Decimal }>();
-    for (const item of original.items) {
+    for (const item of original.items.filter(hasCatalogPart)) {
       const prior = oldByPart.get(item.partId) ?? { quantity: 0, totalCost: ZERO };
       oldByPart.set(item.partId, { quantity: prior.quantity + item.quantity, totalCost: prior.totalCost.add(item.unitCostSnapshot.mul(item.quantity)) });
     }
@@ -681,7 +685,7 @@ async function updateInvoiceDocument(input: EditableInvoiceInput, type: "SALE" |
       if (type === "PURCHASE" && available.lt(totals.paidAmount)) throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}" بعد التعديل.`);
     }
 
-    const oldMoves = original.items.map((item) => { const part = parts.get(item.partId)!; const delta = type === "SALE" ? item.quantity : -item.quantity; return { partId: item.partId, invoiceId: original.id, reason: type === "SALE" ? "SALE_RETURN" as const : "PURCHASE_RETURN" as const, quantityDelta: delta, balanceAfter: baseStock.get(item.partId)!, unitCost: item.unitCostSnapshot, note: `عكس تعديل فاتورة ${original.invoiceNumber}` }; });
+    const oldMoves = original.items.filter(hasCatalogPart).map((item) => { const delta = type === "SALE" ? item.quantity : -item.quantity; return { partId: item.partId, invoiceId: original.id, reason: type === "SALE" ? "SALE_RETURN" as const : "PURCHASE_RETURN" as const, quantityDelta: delta, balanceAfter: baseStock.get(item.partId)!, unitCost: item.unitCostSnapshot, note: `عكس تعديل فاتورة ${original.invoiceNumber}` }; });
     const newMoves = lines.map((line) => ({ partId: line.partId, invoiceId: original.id, reason: type, quantityDelta: type === "SALE" ? -line.quantity : line.quantity, balanceAfter: line.balanceAfter, unitCost: line.unitCostSnapshot, note: `تعديل فاتورة ${original.invoiceNumber}` }));
     await applyStockDeltas(tx, [...oldMoves, ...newMoves], actor.id);
     if (type === "PURCHASE") for (const [partId, avg] of runningAvg) await tx.partItem.update({ where: { id: partId }, data: { buyPriceAvg: avg, buyPriceLast: lines.filter((line) => line.partId === partId).at(-1)?.unitCostSnapshot ?? parts.get(partId)!.buyPriceLast } });
@@ -712,7 +716,7 @@ export async function createInvoiceReturn(input: CreateInvoiceReturnInput, actor
     select: { id: true, items: { select: { partId: true } } },
   });
   if (!original) throw new BusinessRuleError("الفاتورة الأصلية غير موجودة.");
-  const partIds = [...new Set(original.items.map((item) => item.partId))];
+  const partIds = [...new Set(original.items.filter(hasCatalogPart).map((item) => item.partId))];
 
   return withTxRetry(() => prisma.$transaction(async (tx) => {
     const source = await tx.invoice.findUnique({
@@ -729,13 +733,13 @@ export async function createInvoiceReturn(input: CreateInvoiceReturnInput, actor
     const requestedByItem = new Map<string, number>();
     for (const line of input.items) requestedByItem.set(line.invoiceItemId, (requestedByItem.get(line.invoiceItemId) ?? 0) + line.quantity);
     const priorReturned = new Map<string, number>();
-    for (const prior of source.returns) for (const line of prior.items) priorReturned.set(line.partId, (priorReturned.get(line.partId) ?? 0) + line.quantity);
+    for (const prior of source.returns) for (const line of prior.items.filter(hasCatalogPart)) priorReturned.set(line.partId, (priorReturned.get(line.partId) ?? 0) + line.quantity);
     const sourceByPart = new Map<string, number>();
-    for (const line of source.items) sourceByPart.set(line.partId, (sourceByPart.get(line.partId) ?? 0) + line.quantity);
+    for (const line of source.items.filter(hasCatalogPart)) sourceByPart.set(line.partId, (sourceByPart.get(line.partId) ?? 0) + line.quantity);
     const requestedByPart = new Map<string, number>();
     for (const [invoiceItemId, quantity] of requestedByItem) {
       const sourceLine = source.items.find((line) => line.id === invoiceItemId);
-      if (!sourceLine) throw new BusinessRuleError("أحد أصناف المرتجع لا ينتمي إلى الفاتورة الأصلية.");
+      if (!sourceLine || !hasCatalogPart(sourceLine)) throw new BusinessRuleError("لا يمكن إنشاء مرتجع مخزني لصنف نصي غير مرتبط بالكتالوج.");
       requestedByPart.set(sourceLine.partId, (requestedByPart.get(sourceLine.partId) ?? 0) + quantity);
     }
     for (const [partId, quantity] of requestedByPart) {
@@ -746,6 +750,7 @@ export async function createInvoiceReturn(input: CreateInvoiceReturnInput, actor
     const lines: Array<{ partId: string; quantity: number; unitPrice: Prisma.Decimal; unitCostSnapshot: Prisma.Decimal; totalPrice: Prisma.Decimal; binLocationSnapshot: string | null }> = [];
     for (const [invoiceItemId, quantity] of requestedByItem) {
       const sourceLine = source.items.find((line) => line.id === invoiceItemId)!;
+      if (!hasCatalogPart(sourceLine)) throw new BusinessRuleError("لا يمكن إنشاء مرتجع مخزني لصنف نصي غير مرتبط بالكتالوج.");
       const unitPrice = money(sourceLine.totalPrice.div(sourceLine.quantity));
       const totalPrice = money(unitPrice.mul(quantity));
       subtotal = money(subtotal.add(totalPrice));
@@ -817,7 +822,7 @@ export async function voidInvoice(input: VoidInvoiceInput, actor: InvoiceActor):
   });
   if (!target) throw new BusinessRuleError("الفاتورة غير موجودة.");
 
-  const partIds = [...new Set(target.items.map((i) => i.partId))];
+  const partIds = [...new Set(target.items.filter(hasCatalogPart).map((i) => i.partId))];
 
   // Serialisation is provided by the pessimistic `SELECT … FOR UPDATE` row locks
   // taken inside the transaction (see lockPartsForUpdate). Those locks live in
@@ -847,7 +852,7 @@ export async function voidInvoice(input: VoidInvoiceInput, actor: InvoiceActor):
       const runningStock = new Map<string, number>();
       const runningAvg = new Map<string, Prisma.Decimal>();
 
-      for (const item of invoice.items) {
+      for (const item of invoice.items.filter(hasCatalogPart)) {
         const part = parts.get(item.partId)!;
         const prior = runningStock.get(item.partId) ?? part.stockQuantity;
         const delta = isOutbound ? item.quantity : -item.quantity;
@@ -952,8 +957,8 @@ export async function voidInvoice(input: VoidInvoiceInput, actor: InvoiceActor):
         if (source) {
           const sourceByPart = new Map<string, number>();
           const returnedByPart = new Map<string, number>();
-          for (const item of source.items) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
-          for (const returned of source.returns) for (const item of returned.items) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
+          for (const item of source.items.filter(hasCatalogPart)) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
+          for (const returned of source.returns) for (const item of returned.items.filter(hasCatalogPart)) returnedByPart.set(item.partId, (returnedByPart.get(item.partId) ?? 0) + item.quantity);
           const hasAnyReturn = [...returnedByPart.values()].some((quantity) => quantity > 0);
           const isFullyReturned = sourceByPart.size > 0 && [...sourceByPart.entries()].every(([partId, quantity]) => (returnedByPart.get(partId) ?? 0) >= quantity);
           await tx.invoice.update({ where: { id: source.id }, data: { returnStatus: isFullyReturned ? "FULLY_RETURNED" : hasAnyReturn ? "PARTIALLY_RETURNED" : "NONE" } });
@@ -1009,14 +1014,14 @@ export async function purgeReturnInvoice(
     if (!source) throw new BusinessRuleError("الفاتورة الأصلية للمرتجع غير موجودة.");
 
     if (!returned.isVoided) {
-      const partIds = [...new Set(returned.items.map((item) => item.partId))];
+      const partIds = [...new Set(returned.items.filter(hasCatalogPart).map((item) => item.partId))];
       const parts = await lockPartsForUpdate(tx, partIds);
       await lockAccountForUpdate(tx, returned.accountId);
       const isSaleReturn = returned.type === "SALE_RETURN";
       const runningStock = new Map<string, number>();
       const runningAvg = new Map<string, Prisma.Decimal>();
 
-      for (const item of returned.items) {
+      for (const item of returned.items.filter(hasCatalogPart)) {
         const part = parts.get(item.partId);
         if (!part) throw new BusinessRuleError("أحد أصناف المرتجع لم يعد موجوداً ولا يمكن عكسه.");
         const priorQty = runningStock.get(item.partId) ?? part.stockQuantity;
@@ -1065,8 +1070,8 @@ export async function purgeReturnInvoice(
 
     const sourceByPart = new Map<string, number>();
     const remainingReturnedByPart = new Map<string, number>();
-    for (const item of source.items) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
-    for (const priorReturn of source.returns) for (const item of priorReturn.items) remainingReturnedByPart.set(item.partId, (remainingReturnedByPart.get(item.partId) ?? 0) + item.quantity);
+    for (const item of source.items.filter(hasCatalogPart)) sourceByPart.set(item.partId, (sourceByPart.get(item.partId) ?? 0) + item.quantity);
+    for (const priorReturn of source.returns) for (const item of priorReturn.items.filter(hasCatalogPart)) remainingReturnedByPart.set(item.partId, (remainingReturnedByPart.get(item.partId) ?? 0) + item.quantity);
     const hasAnyReturn = [...remainingReturnedByPart.values()].some((quantity) => quantity > 0);
     const isFullyReturned = sourceByPart.size > 0 && [...sourceByPart.entries()].every(([partId, quantity]) => (remainingReturnedByPart.get(partId) ?? 0) >= quantity);
     await tx.invoice.update({ where: { id: source.id }, data: { returnStatus: isFullyReturned ? "FULLY_RETURNED" : hasAnyReturn ? "PARTIALLY_RETURNED" : "NONE" } });
@@ -1107,14 +1112,14 @@ export async function purgeInvoice(
     if (invoice.returns.length > 0) throw new BusinessRuleError("لا يمكن الحذف النهائي لفاتورة لها مرتجعات مرتبطة. احذف أو ألغِ المرتجعات أولاً.");
 
     if (!invoice.isVoided) {
-      const partIds = [...new Set(invoice.items.map((item) => item.partId))];
+      const partIds = [...new Set(invoice.items.filter(hasCatalogPart).map((item) => item.partId))];
       const parts = await lockPartsForUpdate(tx, partIds);
       await lockAccountForUpdate(tx, invoice.accountId);
       const isSale = invoice.type === "SALE";
       const runningStock = new Map<string, number>();
       const runningAvg = new Map<string, Prisma.Decimal>();
 
-      for (const item of invoice.items) {
+      for (const item of invoice.items.filter(hasCatalogPart)) {
         const part = parts.get(item.partId);
         if (!part) throw new BusinessRuleError("أحد أصناف الفاتورة لم يعد موجوداً ولا يمكن عكسه.");
         const priorQty = runningStock.get(item.partId) ?? part.stockQuantity;
