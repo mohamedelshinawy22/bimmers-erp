@@ -89,64 +89,62 @@ export async function createAccountAction(
   }
 }
 
-export async function updateAccountAction(raw: UpdateAccountInput): Promise<ActionResult<{ id: string }>> {
+export async function updateAccountAction(raw: UpdateAccountInput): Promise<ActionResult<{ id: string; balanceChanged: boolean }>> {
   try {
     const user = await requirePermission("account.write");
     const input = updateAccountSchema.parse(raw);
-
-    await prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
       const before = await tx.account.findUnique({ where: { id: input.id } });
       if (!before) throw new BusinessRuleError("الحساب غير موجود.");
 
-      /**
-       * Guard: don't strand an existing debt above a newly lowered credit limit.
-       *
-       * The `newLimit > 0` condition used to be part of this check, which meant
-       * lowering the limit to exactly 0 — the most damaging value, since
-       * `createSaleInvoice` treats 0 as "no credit sales at all" — skipped the
-       * guard entirely and left an account owing money above a zero limit.
-       */
-      const newLimit = money(input.creditLimit);
-      if (before.currentBalance.lt(0) && before.currentBalance.abs().gt(newLimit)) {
-        throw new BusinessRuleError(
-          `لا يمكن تخفيض حد الائتمان إلى ${formatMoney(newLimit)} ` +
-            `والمديونية الحالية ${formatMoney(before.currentBalance.abs())}. سدّد الرصيد أولاً.`,
-        );
+      const adjustmentRequested = input.balanceAmount !== undefined || input.balanceNature !== undefined;
+      if (adjustmentRequested && user.role !== "SUPER_ADMIN" && user.role !== "MANAGER") {
+        throw new BusinessRuleError("تعديل الرصيد الدفتري يقتصر على مدير النظام أو المدير المالي.");
+      }
+      if (adjustmentRequested && (input.balanceAmount === undefined || input.balanceNature === undefined)) {
+        throw new BusinessRuleError("حدّد مبلغ التسوية وطبيعة الرصيد معاً.");
+      }
+      const requestedAmount = money(input.balanceAmount ?? Math.abs(Number(before.currentBalance)));
+      const targetBalance = !adjustmentRequested
+        ? before.currentBalance
+        : input.balanceNature === "DEBIT"
+          ? requestedAmount.negated()
+          : input.balanceNature === "CREDIT"
+            ? requestedAmount
+            : money(0);
+      const delta = money(targetBalance.sub(before.currentBalance));
+      const balanceChanged = !delta.eq(0);
+      if (balanceChanged && (!input.adjustmentReason || input.adjustmentReason.trim().length < 5)) {
+        throw new BusinessRuleError("سبب تعديل الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل للتدقيق المالي.");
       }
 
-      if (!input.isActive && !before.currentBalance.eq(0)) {
-        throw new BusinessRuleError("لا يمكن إيقاف حساب له رصيد مفتوح. قم بتسوية الرصيد أولاً.");
+      // The credit policy uses a negative account balance as receivable (عليه).
+      const newLimit = money(input.creditLimit);
+      if (targetBalance.lt(0) && targetBalance.abs().gt(newLimit)) {
+        throw new BusinessRuleError(`لا يمكن اعتماد مديونية ${formatMoney(targetBalance.abs())} مع حد ائتمان ${formatMoney(newLimit)}. عدّل الحد أولاً أو أدخل رصيداً مسموحاً.`);
       }
+      if (!input.isActive && !targetBalance.eq(0)) throw new BusinessRuleError("لا يمكن إيقاف حساب له رصيد مفتوح. قم بتسوية الرصيد أولاً.");
 
       const updated = await tx.account.update({
         where: { id: input.id },
         data: {
-          name: input.name,
-          type: input.type,
-          phone: input.phone || null,
-          email: input.email || null,
-          address: input.address || null,
-          taxNumber: input.taxNumber || null,
-          creditLimit: newLimit,
-          defaultPriceTier: input.defaultPriceTier,
-          category: input.category || null,
-          status: input.status,
-          isActive: input.isActive && input.status !== "INACTIVE",
+          name: input.name, type: input.type, phone: input.phone || null, email: input.email || null, address: input.address || null,
+          taxNumber: input.taxNumber || null, creditLimit: newLimit, defaultPriceTier: input.defaultPriceTier, category: input.category || null,
+          status: input.status, isActive: input.isActive && input.status !== "INACTIVE", currentBalance: targetBalance,
         },
       });
+      if (balanceChanged) {
+        const adjustment = await tx.accountBalanceAdjustment.create({
+          data: { accountId: before.id, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature!, reason: input.adjustmentReason!.trim(), createdByUser: user.id, createdByName: user.fullName },
+        });
+        await writeAudit(tx, { tableName: "AccountBalanceAdjustment", recordId: adjustment.id, action: "INSERT", newData: { event: "ACCOUNT_BALANCE_MANUALLY_ADJUSTED", accountId: before.id, accountName: before.name, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature, reason: input.adjustmentReason, adjustedBy: user.fullName }, performedBy: user.id });
+      }
+      await writeAudit(tx, { tableName: "Account", recordId: input.id, action: "UPDATE", oldData: before, newData: { ...updated, event: balanceChanged ? "ACCOUNT_UPDATED_WITH_BALANCE_RECONCILIATION" : "ACCOUNT_UPDATED", balanceAdjustment: balanceChanged ? { previousBalance: before.currentBalance, targetBalance, delta, nature: input.balanceNature, reason: input.adjustmentReason } : undefined }, performedBy: user.id });
+      return { id: updated.id, balanceChanged };
+    }, TX_OPTIONS));
 
-      await writeAudit(tx, {
-        tableName: "Account",
-        recordId: input.id,
-        action: "UPDATE",
-        oldData: before,
-        newData: updated,
-        performedBy: user.id,
-      });
-    });
-
-    revalidatePath("/accounts");
-    return ok({ id: input.id });
+    for (const path of ["/accounts", "/pos", "/invoices", "/treasury", "/vouchers", "/reports/daily-movement"]) revalidatePath(path);
+    return ok(result);
   } catch (error) {
     return toActionError(error, "updateAccountAction");
   }

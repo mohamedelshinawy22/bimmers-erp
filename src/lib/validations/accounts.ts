@@ -74,6 +74,10 @@ export const updateAccountSchema = z.object({
   defaultPriceTier: z.enum(["RETAIL", "WHOLESALE"]),
   status: accountStatusSchema.default("ACTIVE"),
   isActive: z.boolean().default(true),
+  /** Absolute amount paired with balanceNature; the service applies the ERP sign convention. */
+  balanceAmount: nonNegativeMoney.optional(),
+  balanceNature: z.enum(["DEBIT", "CREDIT", "ZERO"]).optional(),
+  adjustmentReason: optionalText(500),
 });
 
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;

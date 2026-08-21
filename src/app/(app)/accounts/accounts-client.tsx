@@ -36,6 +36,7 @@ interface AccountsClientProps {
   };
   canWrite: boolean;
   canForceCleanup: boolean;
+  canAdjustBalance: boolean;
   canViewStatement: boolean;
   company: CompanyProfile;
   canTransact: boolean;
@@ -60,6 +61,7 @@ export function AccountsClient({
   options,
   canWrite,
   canForceCleanup,
+  canAdjustBalance,
   canViewStatement,
   company,
   canTransact,
@@ -357,7 +359,7 @@ export function AccountsClient({
       {canWrite ? <AddAccountModal open={addOpen} onClose={() => setAddOpen(false)} /> : null}
       {importOpen ? <AccountImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
       {editAccount ? (
-        <EditAccountModal key={editAccount.id} account={editAccount} onClose={() => setEditAccount(null)} />
+        <EditAccountModal key={editAccount.id} account={editAccount} canAdjustBalance={canAdjustBalance} onClose={() => setEditAccount(null)} />
       ) : null}
       {statementFor ? (
         <StatementModal key={statementFor.id} account={statementFor} company={company} onClose={() => setStatementFor(null)} />
@@ -624,10 +626,14 @@ function AddVehicleModal({
 }
 
 /** Edit an existing account. Previously accounts were write-once from the UI. */
-function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: () => void }) {
+function EditAccountModal({ account, canAdjustBalance, onClose }: { account: AccountRow; canAdjustBalance: boolean; onClose: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const initialNature = account.currentBalance < 0 ? "DEBIT" : account.currentBalance > 0 ? "CREDIT" : "ZERO" as "DEBIT" | "CREDIT" | "ZERO";
+  const [balanceAmount, setBalanceAmount] = useState(String(Math.abs(account.currentBalance)));
+  const [balanceNature, setBalanceNature] = useState<"DEBIT" | "CREDIT" | "ZERO">(initialNature);
+  const [adjustmentReason, setAdjustmentReason] = useState("");
   const [form, setForm] = useState({
     name: account.name,
     type: account.type,
@@ -643,7 +649,9 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
   });
 
   const newLimit = Number(form.creditLimit) || 0;
-  const limitBelowDebt = account.debt > 0 && account.debt > newLimit;
+  const requestedBalance = balanceNature === "DEBIT" ? -(Number(balanceAmount) || 0) : balanceNature === "CREDIT" ? (Number(balanceAmount) || 0) : 0;
+  const isBalanceModified = canAdjustBalance && Math.abs(requestedBalance - account.currentBalance) > 0.0001;
+  const limitBelowDebt = requestedBalance < 0 && Math.abs(requestedBalance) > newLimit;
 
   const submit = () => {
     setError(null);
@@ -661,6 +669,7 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
         category: "",
         status: form.isActive ? "ACTIVE" : "INACTIVE",
         isActive: form.isActive,
+        ...(canAdjustBalance ? { balanceAmount: Math.max(0, Number(balanceAmount) || 0), balanceNature, adjustmentReason } : {}),
       });
       if (!res.success) {
         setError(res.error);
@@ -682,7 +691,7 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             إلغاء
           </Button>
-          <Button onClick={submit} loading={pending} disabled={form.name.trim().length < 2 || limitBelowDebt}>
+          <Button onClick={submit} loading={pending} disabled={form.name.trim().length < 2 || limitBelowDebt || (isBalanceModified && adjustmentReason.trim().length < 5)}>
             حفظ التعديلات
           </Button>
         </>
@@ -745,6 +754,7 @@ function EditAccountModal({ account, onClose }: { account: AccountRow; onClose: 
             <Textarea rows={2} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </Field>
         </div>
+        {canAdjustBalance ? <section className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-bold text-bmw-silver">الرصيد الدفتري والتسوية المالية</p><span className="tabular text-[11px] text-bmw-muted">الحالي: {formatMoney(Math.abs(account.currentBalance))} {CURRENCY} — {account.currentBalance < 0 ? "مدين لنا" : account.currentBalance > 0 ? "دائن علينا" : "متزن"}</span></div><div className="grid gap-3 sm:grid-cols-2"><Field label="قيمة المبلغ المعدل" hint="ج.م"><Input type="number" min="0" step="0.01" value={balanceAmount} onChange={(event) => setBalanceAmount(event.target.value)} disabled={balanceNature === "ZERO"} dir="ltr" /></Field><Field label="طبيعة واتجاه الرصيد"><div className="grid grid-cols-3 gap-1.5 rounded-lg border border-bmw-cardBorder bg-bmw-black/40 p-1"><Button size="sm" type="button" variant={balanceNature === "DEBIT" ? "primary" : "ghost"} onClick={() => setBalanceNature("DEBIT")}>مدين (لنا)</Button><Button size="sm" type="button" variant={balanceNature === "CREDIT" ? "danger" : "ghost"} onClick={() => setBalanceNature("CREDIT")}>دائن (علينا)</Button><Button size="sm" type="button" variant={balanceNature === "ZERO" ? "subtle" : "ghost"} onClick={() => { setBalanceNature("ZERO"); setBalanceAmount("0"); }}>متزن (0)</Button></div></Field></div>{isBalanceModified ? <Field label="سبب تعديل الرصيد" required hint="سيسجل كقيد تسوية مستقل في كشف الحساب وسجل التدقيق"><Textarea rows={2} value={adjustmentReason} onChange={(event) => setAdjustmentReason(event.target.value)} placeholder="مثال: تسوية رصيد افتتاحي سابق أو تصحيح خطأ إدخال" autoFocus /></Field> : <Alert variant="info">لم يتغير الرصيد؛ سيتم تحديث بيانات الحساب فقط دون إنشاء قيد تسوية.</Alert>}<Alert variant="warning">يستخدم النظام اتفاقية الحسابات الحالية: «مدين — لنا» يُخزن كرصيد سالب و«دائن — علينا» كرصيد موجب، لضمان اتساق كشف الحساب والتقارير.</Alert></section> : null}
         <label className="flex cursor-pointer items-center gap-2 text-sm text-bmw-silver">
           <input
             type="checkbox"
@@ -769,7 +779,7 @@ interface DetailedLedgerData {
   totalDebit: number;
   totalCredit: number;
   closingBalance: number;
-  rows: Array<{ id: string; documentId: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null; items: Array<{ id: string; oemNumber: string; nameAr: string; brandName: string; quantity: number; unitPrice: number; lineDiscount: number; totalPrice: number }> }>;
+  rows: Array<{ id: string; documentId: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentKind: "INVOICE" | "TREASURY_TRANSACTION" | "BALANCE_ADJUSTMENT"; invoiceId: string | null; items: Array<{ id: string; oemNumber: string; nameAr: string; brandName: string; quantity: number; unitPrice: number; lineDiscount: number; totalPrice: number }> }>;
 }
 
 function StatementModal({ account, company, onClose }: { account: AccountRow; company: CompanyProfile; onClose: () => void }) {

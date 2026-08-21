@@ -264,7 +264,7 @@ export async function getAccountVehicles(accountId: string, limit = 50): Promise
 export type AccountLedgerMode = "SUMMARY" | "DETAILED";
 export type AccountLedgerFilters = { from?: string; to?: string; movementTypes?: string[]; query?: string; mode?: AccountLedgerMode };
 export type AccountLedgerItem = { id: string; oemNumber: string; nameAr: string; brandName: string; quantity: number; unitPrice: number; lineDiscount: number; totalPrice: number };
-export type AccountLedgerRow = { id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentId: string; documentKind: "INVOICE" | "TREASURY_TRANSACTION"; invoiceId: string | null; items: AccountLedgerItem[] };
+export type AccountLedgerRow = { id: string; createdAt: string; reference: string; type: string; typeLabel: string; debit: number; credit: number; runningBalance: number; treasuryName: string | null; note: string | null; documentId: string; documentKind: "INVOICE" | "TREASURY_TRANSACTION" | "BALANCE_ADJUSTMENT"; invoiceId: string | null; items: AccountLedgerItem[] };
 
 /**
  * Produces one replayable account ledger. Account balances use the established
@@ -273,7 +273,7 @@ export type AccountLedgerRow = { id: string; createdAt: string; reference: strin
  * credit increases it, so every row satisfies `balance += credit - debit`.
  */
 export async function getAccountDetailedLedger(accountId: string, filters: AccountLedgerFilters = {}) {
-  const [account, invoices, transactions] = await Promise.all([
+  const [account, invoices, transactions, adjustments] = await Promise.all([
     prisma.account.findUnique({ where: { id: accountId }, select: { id: true, name: true, accountNumber: true, phone: true, type: true, creditLimit: true, currentBalance: true, createdAt: true } }),
     prisma.invoice.findMany({
       where: { accountId, isVoided: false },
@@ -299,6 +299,7 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
       },
     }),
     prisma.treasuryTransaction.findMany({ where: { accountId, status: "ACTIVE" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, transactionNumber: true, invoiceId: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } } } }),
+    prisma.accountBalanceAdjustment.findMany({ where: { accountId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, delta: true, previousBalance: true, targetBalance: true, targetNature: true, reason: true, createdByName: true, createdAt: true } }),
   ]);
   if (!account) return null;
 
@@ -314,7 +315,14 @@ export async function getAccountDetailedLedger(accountId: string, filters: Accou
     const isDebit = transaction.type === "PAYMENT";
     return { id: `trx:${transaction.id}`, createdAt: transaction.createdAt, reference: transaction.transactionNumber, type: transaction.type, typeLabel: isDebit ? "سند صرف" : transaction.type === "RECEIPT" ? "سند قبض" : "تحويل خزينة", debit: isDebit ? money(transaction.amount) : new Prisma.Decimal(0), credit: isDebit ? new Prisma.Decimal(0) : money(transaction.amount), treasuryName: transaction.treasury.name, note: transaction.description, documentId: transaction.id, documentKind: "TREASURY_TRANSACTION", invoiceId: transaction.invoiceId, items: [], sequence: 1 };
   });
-  const events = [...invoiceRows, ...transactionRows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.sequence - b.sequence || a.id.localeCompare(b.id));
+  const adjustmentRows: InternalRow[] = adjustments.map((adjustment) => ({
+    id: `adj:${adjustment.id}`, createdAt: adjustment.createdAt, reference: `ADJ-${adjustment.id.slice(-8).toUpperCase()}`,
+    type: "BALANCE_ADJUSTMENT", typeLabel: "قيد تسوية وتعديل رصيد", debit: adjustment.delta.lt(0) ? money(adjustment.delta.abs()) : new Prisma.Decimal(0),
+    credit: adjustment.delta.gt(0) ? money(adjustment.delta) : new Prisma.Decimal(0), treasuryName: null,
+    note: `${adjustment.reason} — من ${num(adjustment.previousBalance)} إلى ${num(adjustment.targetBalance)} (${adjustment.targetNature === "DEBIT" ? "مدين — لنا" : adjustment.targetNature === "CREDIT" ? "دائن — علينا" : "متزن"}) — بواسطة ${adjustment.createdByName}`,
+    documentId: adjustment.id, documentKind: "BALANCE_ADJUSTMENT", invoiceId: null, items: [], sequence: 2,
+  }));
+  const events = [...invoiceRows, ...transactionRows, ...adjustmentRows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.sequence - b.sequence || a.id.localeCompare(b.id));
   const totalDelta = events.reduce((sum, row) => sum.add(row.credit).sub(row.debit), new Prisma.Decimal(0));
   const inferredOpening = money(account.currentBalance.sub(totalDelta));
   const from = filters.from ? new Date(filters.from) : null;
