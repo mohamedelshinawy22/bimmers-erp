@@ -9,11 +9,11 @@ import { InvoicesClient } from "./invoices-client";
 export const metadata = { title: "الفواتير" };
 export const dynamic = "force-dynamic";
 
-const TYPES: InvoiceType[] = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN", "PRICE_QUOTATION"];
+const TYPES: InvoiceType[] = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"];
 const STATUSES: PaymentStatus[] = ["PAID", "PARTIAL", "CREDIT"];
 
 interface PageProps {
-  searchParams: { q?: string; type?: string; status?: string; voided?: string; page?: string };
+  searchParams: { q?: string; type?: string; status?: string; voided?: string; from?: string; to?: string; page?: string };
 }
 
 export default async function InvoicesPage({ searchParams }: PageProps) {
@@ -24,11 +24,19 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
   const rawStatus = searchParams.status ?? "";
   const type = TYPES.includes(rawType as InvoiceType) ? (rawType as InvoiceType) : "ALL";
   const status = STATUSES.includes(rawStatus as PaymentStatus) ? (rawStatus as PaymentStatus) : "ALL";
-  const includeVoided = searchParams.voided === "1";
+  const voidedOnly = rawStatus === "VOIDED";
+  const includeVoided = !voidedOnly && searchParams.voided === "1";
+  const parseDate = (value: string | undefined, endOfDay = false) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+    const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  };
+  const from = parseDate(searchParams.from);
+  const to = parseDate(searchParams.to, true);
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
 
   const [result, company, treasuries] = await Promise.all([
-    listInvoices({ query: searchParams.q, type, status, includeVoided, page, pageSize: 25 }),
+    listInvoices({ query: searchParams.q, type, status, includeVoided, voidedOnly, from, to, page, pageSize: 25 }),
     getCompanyProfile(),
     prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
@@ -42,8 +50,10 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
       filters={{
         query: searchParams.q ?? "",
         type: type === "ALL" ? "" : type,
-        status: status === "ALL" ? "" : status,
+        status: voidedOnly ? "VOIDED" : status === "ALL" ? "" : status,
         includeVoided,
+        from: searchParams.from ?? "",
+        to: searchParams.to ?? "",
       }}
       permissions={{
         canVoid: can(user.role, "invoice.void"),

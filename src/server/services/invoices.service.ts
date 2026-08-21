@@ -33,6 +33,7 @@ export async function listInvoices(options: {
   type?: InvoiceType | "ALL";
   status?: PaymentStatus | "ALL";
   includeVoided?: boolean;
+  voidedOnly?: boolean;
   from?: Date;
   to?: Date;
   page?: number;
@@ -54,7 +55,8 @@ export async function listInvoices(options: {
   }
   if (options.type && options.type !== "ALL") and.push({ type: options.type });
   if (options.status && options.status !== "ALL") and.push({ paymentStatus: options.status });
-  if (!options.includeVoided) and.push({ isVoided: false });
+  if (options.voidedOnly) and.push({ isVoided: true });
+  else if (!options.includeVoided) and.push({ isVoided: false });
   if (options.from || options.to) {
     and.push({ createdAt: { ...(options.from ? { gte: options.from } : {}), ...(options.to ? { lte: options.to } : {}) } });
   }

@@ -12,8 +12,8 @@ import { normalizeSearchTerm } from "@/lib/search-utils";
 
 const invoicePrintFiltersSchema = z.object({
   query: z.string().trim().max(100).optional(),
-  type: z.enum(["SALE", "PURCHASE"]).optional(),
-  status: z.enum(["PAID", "PARTIAL", "CREDIT"]).optional(),
+  type: z.enum(["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"]).optional(),
+  status: z.enum(["PAID", "PARTIAL", "CREDIT", "VOIDED"]).optional(),
   includeVoided: z.boolean().default(false),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -30,7 +30,8 @@ export async function getInvoicesForPrintAction(raw: unknown) {
   try {
     await requirePermission("invoice.read");
     const filters = invoicePrintFiltersSchema.parse(raw ?? {});
-    const result = await listInvoices({ ...filters, page: 1, pageSize: 100, isForPrint: true });
+    const { status, ...rest } = filters;
+    const result = await listInvoices({ ...rest, status: status === "VOIDED" ? "ALL" : status, voidedOnly: status === "VOIDED", page: 1, pageSize: 100, isForPrint: true });
     return ok({ rows: result.rows, total: result.total, capped: result.total > result.rows.length });
   } catch (error) {
     return toActionError(error, "getInvoicesForPrintAction");

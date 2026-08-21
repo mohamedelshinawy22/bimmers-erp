@@ -16,6 +16,7 @@ import {
   RotateCcw,
   HandCoins,
   Trash2,
+  Download,
 } from "lucide-react";
 import type { InvoiceType, PaymentStatus } from "@prisma/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,7 +29,8 @@ import { ARABIC_LABELS, CURRENCY, formatDateTime, formatInt, formatMoney, format
 import type { InvoiceListRow } from "@/server/services/invoices.service";
 import type { InvoiceDetail } from "@/server/services/invoices.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
-import { bulkDeleteCancelledInvoicesAction, createInvoiceReturnAction, deleteCancelledInvoiceAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
+import { bulkDeleteCancelledInvoicesAction, createInvoiceReturnAction, deleteCancelledInvoiceDocumentAction, voidInvoiceAction } from "@/server/actions/invoice.actions";
+import { exportInvoicesToExcelAction } from "@/server/actions/invoice-excel.actions";
 import { settleInvoiceAction } from "@/server/actions/treasury.actions";
 import { getInvoiceDetailAction, getInvoicesForPrintAction } from "@/server/actions/invoices.read.actions";
 import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
@@ -36,13 +38,14 @@ import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { FilteredInvoiceListPrintDocument } from "@/components/print/templates/filtered-invoice-list-print-document";
 import { OemCode } from "@/components/inventory/oem-code";
+import { InvoiceImportModal } from "@/components/invoices/invoice-import-modal";
 
 interface InvoicesClientProps {
   rows: InvoiceListRow[];
   total: number;
   page: number;
   pageSize: number;
-  filters: { query: string; type: string; status: string; includeVoided: boolean };
+  filters: { query: string; type: string; status: string; includeVoided: boolean; from: string; to: string };
   permissions: { canVoid: boolean; canPurge: boolean; canViewCost: boolean; canSettle: boolean };
   company: CompanyProfile;
   treasuries: Array<{ id: string; name: string }>;
@@ -66,6 +69,8 @@ export function InvoicesClient({
   const [registerPrintRows, setRegisterPrintRows] = useState<InvoiceListRow[] | null>(null);
   const [registerPrintLoading, setRegisterPrintLoading] = useState(false);
   const [registerPrintError, setRegisterPrintError] = useState<string | null>(null);
+  const [exportingMode, setExportingMode] = useState<"SUMMARY" | "DETAILED" | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
   const [settlementTarget, setSettlementTarget] = useState<InvoiceListRow | null>(null);
@@ -73,8 +78,8 @@ export function InvoicesClient({
   const [selectedVoidedIds, setSelectedVoidedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<InvoiceListRow | null>(null);
   const [bulkDeleteTarget, setBulkDeleteTarget] = useState<InvoiceListRow[] | null>(null);
-  const selectedVoidedInvoices = rows.filter((invoice) => selectedVoidedIds.has(invoice.id) && invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE"));
-  const selectableVoidedInvoices = rows.filter((invoice) => invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE"));
+  const selectedVoidedInvoices = rows.filter((invoice) => selectedVoidedIds.has(invoice.id) && invoice.isVoided);
+  const selectableVoidedInvoices = rows.filter((invoice) => invoice.isVoided);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -95,10 +100,20 @@ export function InvoicesClient({
     if (res.success) setDetail(res.data);
   };
 
+  const downloadExport = async (mode: "SUMMARY" | "DETAILED") => {
+    setExportingMode(mode);
+    const result = await exportInvoicesToExcelAction({ type: (filters.type || "ALL") as "ALL" | InvoiceType, status: (filters.status || "ALL") as "ALL" | PaymentStatus | "VOIDED", query: filters.query || undefined, from: filters.from || undefined, to: filters.to || undefined, mode });
+    setExportingMode(null);
+    if (!result.success) { setRegisterPrintError(result.error); return; }
+    const bytes = Uint8Array.from(atob(result.data.base64), (char) => char.charCodeAt(0));
+    const href = URL.createObjectURL(new Blob([bytes], { type: result.data.mimeType }));
+    const link = document.createElement("a"); link.href = href; link.download = result.data.fileName; link.click(); URL.revokeObjectURL(href);
+  };
+
   const openFilteredPrint = async () => {
     setRegisterPrintError(null);
     setRegisterPrintLoading(true);
-    const result = await getInvoicesForPrintAction({ query: filters.query || undefined, type: filters.type === "SALE" || filters.type === "PURCHASE" ? filters.type : undefined, status: filters.status === "PAID" || filters.status === "PARTIAL" || filters.status === "CREDIT" ? filters.status : undefined, includeVoided: filters.includeVoided });
+    const result = await getInvoicesForPrintAction({ query: filters.query || undefined, type: filters.type || undefined, status: filters.status || undefined, includeVoided: filters.includeVoided, from: filters.from || undefined, to: filters.to || undefined });
     setRegisterPrintLoading(false);
     if (!result.success) { setRegisterPrintError(result.error); return; }
     setRegisterPrintRows(result.data.rows);
@@ -118,7 +133,12 @@ export function InvoicesClient({
             </p>
           </div>
         </div>
-        <Button variant="outline" onClick={() => void openFilteredPrint()} loading={registerPrintLoading} disabled={total === 0}><Printer size={16}/> طباعة جميع النتائج ({formatInt(total)})</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Download size={15}/> استيراد Excel</Button>
+          <Button variant="outline" size="sm" onClick={() => void downloadExport("SUMMARY")} loading={exportingMode === "SUMMARY"} disabled={total === 0}><Download size={15}/> تصدير إجمالي</Button>
+          <Button variant="outline" size="sm" onClick={() => void downloadExport("DETAILED")} loading={exportingMode === "DETAILED"} disabled={total === 0}><Download size={15}/> تصدير تفصيلي</Button>
+          <Button variant="outline" onClick={() => void openFilteredPrint()} loading={registerPrintLoading} disabled={total === 0}><Printer size={16}/> طباعة جميع النتائج ({formatInt(total)})</Button>
+        </div>
       </div>
 
       {registerPrintError ? <Alert variant="error">{registerPrintError}</Alert> : null}
@@ -143,7 +163,9 @@ export function InvoicesClient({
           <Select value={filters.type} onChange={(e) => push({ type: e.target.value })}>
             <option value="">كل الأنواع</option>
             <option value="SALE">فاتورة بيع</option>
+            <option value="SALE_RETURN">مرتجع مبيعات</option>
             <option value="PURCHASE">فاتورة شراء</option>
+            <option value="PURCHASE_RETURN">مرتجع مشتريات</option>
           </Select>
 
           <Select value={filters.status} onChange={(e) => push({ status: e.target.value })}>
@@ -151,13 +173,17 @@ export function InvoicesClient({
             <option value="PAID">مدفوعة</option>
             <option value="PARTIAL">مدفوعة جزئياً</option>
             <option value="CREDIT">آجل</option>
+            <option value="VOIDED">ملغاة</option>
           </Select>
+
+          <Input type="date" aria-label="من تاريخ" value={filters.from} onChange={(e) => push({ from: e.target.value })} />
+          <Input type="date" aria-label="إلى تاريخ" value={filters.to} onChange={(e) => push({ to: e.target.value })} />
 
           <div className="md:col-span-4">
             <Button
               size="sm"
               variant={filters.includeVoided ? "danger" : "outline"}
-              onClick={() => push({ voided: filters.includeVoided ? null : "1" })}
+              onClick={() => push({ voided: filters.includeVoided ? null : "1", status: filters.status === "VOIDED" ? null : filters.status })}
             >
               <Ban size={14} /> إظهار الفواتير الملغاة
             </Button>
@@ -202,7 +228,7 @@ export function InvoicesClient({
             ) : (
               rows.map((inv) => (
                 <TR key={inv.id} tabIndex={0} onDoubleClick={() => void openDetail(inv.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void openDetail(inv.id); } }} className={`${inv.isVoided ? "opacity-50" : ""} cursor-pointer focus:outline-none focus:ring-1 focus:ring-bmw-blue`}>
-                  <TD><input aria-label={`تحديد الفاتورة الملغاة ${inv.invoiceNumber}`} type="checkbox" disabled={!permissions.canPurge || !inv.isVoided || (inv.type !== "SALE" && inv.type !== "PURCHASE")} className={!inv.isVoided || (inv.type !== "SALE" && inv.type !== "PURCHASE") ? "cursor-not-allowed opacity-35" : undefined} checked={selectedVoidedIds.has(inv.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedVoidedIds((current) => { const next = new Set(current); if (event.target.checked) next.add(inv.id); else next.delete(inv.id); return next; })} /></TD>
+                  <TD><input aria-label={`تحديد الفاتورة الملغاة ${inv.invoiceNumber}`} type="checkbox" disabled={!permissions.canPurge || !inv.isVoided} className={!inv.isVoided ? "cursor-not-allowed opacity-35" : undefined} checked={selectedVoidedIds.has(inv.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedVoidedIds((current) => { const next = new Set(current); if (event.target.checked) next.add(inv.id); else next.delete(inv.id); return next; })} /></TD>
                   <TD className="tabular whitespace-nowrap font-bold text-white">{inv.invoiceNumber}</TD>
                   <TD>
                     <Badge variant={inv.type === "SALE" ? "blue" : "purple"}>
@@ -291,6 +317,7 @@ export function InvoicesClient({
       {deleteTarget ? <DeleteCancelledInvoiceModal invoice={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedVoidedIds((current) => { const next = new Set(current); next.delete(deleteTarget.id); return next; }); router.refresh(); }} /> : null}
 
       {bulkDeleteTarget ? <BulkDeleteCancelledInvoicesModal invoices={bulkDeleteTarget} onClose={() => setBulkDeleteTarget(null)} onDone={(deletedIds) => { setBulkDeleteTarget(null); setSelectedVoidedIds((current) => { const next = new Set(current); deletedIds.forEach((id) => next.delete(id)); return next; }); router.refresh(); }} /> : null}
+      {importOpen ? <InvoiceImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
 
       {voidTarget ? (
         <VoidInvoiceModal
@@ -312,7 +339,7 @@ function DeleteCancelledInvoiceModal({ invoice, onClose, onDone }: { invoice: In
   const [pending, startTransition] = useTransition();
   const submit = () => startTransition(async () => {
     setError(null);
-    const result = await deleteCancelledInvoiceAction({ invoiceId: invoice.id, reason });
+    const result = await deleteCancelledInvoiceDocumentAction({ invoiceId: invoice.id, reason });
     if (!result.success) { setError(result.error); return; }
     onDone();
   });
@@ -540,7 +567,7 @@ function InvoiceActionMenu({ invoice, canVoid, canPurge, canSettle, onDetail, on
   useEffect(() => { if (!open) return; const close = (event: MouseEvent) => { if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) setOpen(false); }; window.addEventListener("mousedown", close); return () => window.removeEventListener("mousedown", close); }, [open]);
   const toggle = (event: React.MouseEvent) => { event.stopPropagation(); const rect = triggerRef.current?.getBoundingClientRect(); if (rect) setPosition({ top: rect.bottom + 6, left: Math.max(8, rect.right - 208) }); setOpen((value) => !value); };
   const item = (label: string, icon: React.ReactNode, action: () => void, danger = false) => <button type="button" className={`rounded-lg px-3 py-2 text-right text-xs hover:bg-bmw-carbon ${danger ? "text-bmw-mRed" : "text-bmw-silver"}`} onClick={(event) => { event.stopPropagation(); setOpen(false); action(); }}>{icon}{label}</button>;
-  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid min-w-[200px] gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md">{item("عرض التفاصيل", <Eye className="ml-1 inline" size={14}/>, onDetail)}{item("تعديل الفاتورة", <Pencil className="ml-1 inline" size={14}/>, onEdit)}{item("طباعة الفاتورة", <Printer className="ml-1 inline" size={14}/>, onPrint)}{canSettle && invoice.remainingAmount > 0 && !invoice.isVoided ? item("سداد / تحصيل", <HandCoins className="ml-1 inline" size={14}/>, onSettle) : null}{!invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE") ? item("عمل مرتجع", <RotateCcw className="ml-1 inline" size={14}/>, onReturn) : null}{canVoid && !invoice.isVoided ? item("إلغاء الفاتورة", <Ban className="ml-1 inline" size={14}/>, onVoid, true) : null}{canPurge && invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE") ? <><div className="my-1 border-t border-slate-700" />{item("حذف الفاتورة الملغاة نهائياً", <Trash2 className="ml-1 inline" size={14}/>, onDelete, true)}</> : null}</div>, document.body) : null;
+  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid min-w-[200px] gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md">{item("عرض التفاصيل", <Eye className="ml-1 inline" size={14}/>, onDetail)}{!invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE") ? item("تعديل الفاتورة", <Pencil className="ml-1 inline" size={14}/>, onEdit) : null}{item("طباعة الفاتورة", <Printer className="ml-1 inline" size={14}/>, onPrint)}{canSettle && invoice.remainingAmount > 0 && !invoice.isVoided ? item("سداد / تحصيل", <HandCoins className="ml-1 inline" size={14}/>, onSettle) : null}{!invoice.isVoided && (invoice.type === "SALE" || invoice.type === "PURCHASE") ? item("عمل مرتجع", <RotateCcw className="ml-1 inline" size={14}/>, onReturn) : null}{canVoid && !invoice.isVoided ? item("إلغاء الفاتورة", <Ban className="ml-1 inline" size={14}/>, onVoid, true) : null}{canPurge && invoice.isVoided ? <><div className="my-1 border-t border-slate-700" />{item("حذف المستند الملغى نهائياً", <Trash2 className="ml-1 inline" size={14}/>, onDelete, true)}</> : null}</div>, document.body) : null;
   return <><button ref={triggerRef} type="button" aria-label="عمليات الفاتورة" onClick={toggle} className="rounded-lg p-1.5 text-bmw-muted transition-colors hover:bg-bmw-blue/10 hover:text-bmw-blue"><MoreHorizontal size={16}/></button>{menu}</>;
 }
 

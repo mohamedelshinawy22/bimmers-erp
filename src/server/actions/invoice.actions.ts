@@ -190,13 +190,16 @@ export async function bulkDeleteCancelledInvoicesAction(raw: { invoiceIds: strin
     const input = bulkDeleteCancelledInvoicesSchema.parse(raw);
     const invoices = await prisma.invoice.findMany({ where: { id: { in: input.invoiceIds } }, select: { id: true, type: true, isVoided: true } });
     const found = new Map(invoices.map((invoice) => [invoice.id, invoice]));
-    const invalid = input.invoiceIds.filter((id) => { const invoice = found.get(id); return !invoice || !invoice.isVoided || (invoice.type !== "SALE" && invoice.type !== "PURCHASE"); });
-    if (invalid.length) return { success: false, error: "تتضمن القائمة فواتير غير موجودة أو غير ملغاة؛ لا يمكن تنفيذ الحذف الجماعي." };
+    const invalid = input.invoiceIds.filter((id) => { const invoice = found.get(id); return !invoice || !invoice.isVoided || (invoice.type !== "SALE" && invoice.type !== "PURCHASE" && invoice.type !== "SALE_RETURN" && invoice.type !== "PURCHASE_RETURN"); });
+    if (invalid.length) return { success: false, error: "تتضمن القائمة مستندات غير موجودة أو غير ملغاة؛ لا يمكن تنفيذ الحذف الجماعي." };
     const deleted: string[] = [];
     const failed: Array<{ id: string; error: string }> = [];
     for (const invoice of invoices) {
       try {
-        const result = await purgeInvoice(invoice.id, invoice.type as "SALE" | "PURCHASE", { id: user.id, canSellBelowMin: true, canOverrideDiscount: true, purgeReason: input.reason || "حذف جماعي لفواتير ملغاة" });
+        const actor = { id: user.id, canSellBelowMin: true, canOverrideDiscount: true, purgeReason: input.reason || "حذف جماعي لمستندات ملغاة" };
+        const result = invoice.type === "SALE" || invoice.type === "PURCHASE"
+          ? await purgeInvoice(invoice.id, invoice.type, actor)
+          : await purgeReturnInvoice(invoice.id, invoice.type as "SALE_RETURN" | "PURCHASE_RETURN", actor);
         deleted.push(result.invoiceNumber);
       } catch (error) {
         failed.push({ id: invoice.id, error: error instanceof Error ? error.message : "تعذر حذف الفاتورة." });
@@ -206,6 +209,27 @@ export async function bulkDeleteCancelledInvoicesAction(raw: { invoiceIds: strin
     return ok({ deleted, failed });
   } catch (error) {
     return toActionError(error, "bulkDeleteCancelledInvoicesAction");
+  }
+}
+
+export async function deleteCancelledInvoiceDocumentAction(raw: { invoiceId: string; reason?: string }): Promise<ActionResult<{ invoiceNumber: string }>> {
+  try {
+    const user = await requirePermission("invoice.purge");
+    const input = deleteCancelledInvoiceSchema.parse(raw);
+    const invoice = await prisma.invoice.findUnique({ where: { id: input.invoiceId }, select: { id: true, type: true, isVoided: true } });
+    if (!invoice) return { success: false, error: "المستند غير موجود." };
+    if (!invoice.isVoided) return { success: false, error: "لا يمكن الحذف النهائي قبل إلغاء المستند وعكس أثره المالي والمخزني." };
+    const actor = { id: user.id, canSellBelowMin: true, canOverrideDiscount: true, purgeReason: input.reason || "حذف نهائي لمستند ملغى" };
+    const result = invoice.type === "SALE" || invoice.type === "PURCHASE"
+      ? await purgeInvoice(invoice.id, invoice.type, actor)
+      : invoice.type === "SALE_RETURN" || invoice.type === "PURCHASE_RETURN"
+        ? await purgeReturnInvoice(invoice.id, invoice.type, actor)
+        : null;
+    if (!result) return { success: false, error: "نوع المستند غير مدعوم للحذف النهائي." };
+    await revalidateAfterInvoice(["/", "/invoices", "/sales/returns", "/purchases/returns", "/inventory", "/pos", "/treasury", "/accounts", "/reports/daily-movement"]);
+    return ok({ invoiceNumber: result.invoiceNumber });
+  } catch (error) {
+    return toActionError(error, "deleteCancelledInvoiceDocumentAction");
   }
 }
 
