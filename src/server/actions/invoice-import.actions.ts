@@ -27,6 +27,7 @@ const numberValue = (value: unknown) => {
   const parsed = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const moneyValue = (value: unknown) => Math.abs(numberValue(value));
 const normalizeKey = (value: string) => value.replace(/[\s\-_/.]/g, "").toLocaleLowerCase("ar-EG");
 const normalizeType = (value: unknown) => {
   const token = String(value ?? "SALE").trim().toUpperCase();
@@ -52,21 +53,21 @@ const rawLineSchema = z.object({
   accountPhone: z.string().trim().max(40).optional().or(z.literal("")),
   originalInvoiceNumber: z.string().trim().max(120).optional().or(z.literal("")),
   treasuryName: z.string().trim().max(160).optional().or(z.literal("")),
-  cashDrawer: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  instapay: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  vodafoneCash: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  bankAbk: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  creditAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  dueAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  cashDrawer: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  instapay: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  vodafoneCash: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  bankAbk: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  creditAmount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  dueAmount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   warehouse: z.string().trim().max(160).optional().or(z.literal("")),
   paymentMethod: z.preprocess(normalizePayment, z.enum(["CASH", "VISA", "SPLIT", "ON_ACCOUNT"])),
   oemNumber: z.string().trim().max(120).optional().or(z.literal("")),
   partName: z.string().trim().max(240).optional().or(z.literal("")),
   quantity: z.preprocess(numberValue, z.number().int().min(0).max(100_000)).default(0),
-  unitPrice: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  grandTotal: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  lineDiscount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
-  paidAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  unitPrice: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  grandTotal: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  lineDiscount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
+  paidAmount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   notes: z.string().trim().max(500).optional().or(z.literal("")),
 });
 const importSchema = z.object({ type: z.enum(documentTypes), mode: z.enum(["SUMMARY", "DETAILED"]), rows: z.array(z.unknown()).min(1).max(10_000), skipInvalidRows: z.boolean().default(true), autoCreateAccounts: z.boolean().default(false) });

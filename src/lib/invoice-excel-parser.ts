@@ -196,6 +196,64 @@ export function parseDetailedInvoiceWorkbook(worksheetData: WorksheetMatrix, typ
   return invoices;
 }
 
+export function detectInvoiceWorkbookMode(worksheetData: WorksheetMatrix): "DETAILED" | "SUMMARY" {
+  return worksheetData.some((row) => hasItemHeaders(row)) ? "DETAILED" : "SUMMARY";
+}
+
+/**
+ * Parses either workbook form emitted by the legacy ERP: a hierarchical report
+ * with item subheaders, or one flat summary row per invoice. Flat records receive
+ * one descriptive, non-stock summary line so their document context survives any
+ * caller that expects line-oriented records; summary posting still remains
+ * financial-only and never creates stock movements.
+ */
+export function parseUniversalInvoiceWorkbook(worksheetData: WorksheetMatrix, type: InvoiceWorkbookType): ParsedMasterInvoice[] {
+  if (detectInvoiceWorkbookMode(worksheetData) === "DETAILED") return parseDetailedInvoiceWorkbook(worksheetData, type);
+  const headerIndex = worksheetData.findIndex((row) => findColumn(row, headerAliases.documentNumber) >= 0);
+  if (headerIndex < 0) throw new Error("لم يتم العثور على رأس «رقم الفاتورة» في التقرير الإجمالي.");
+  const headers = worksheetData[headerIndex] ?? [];
+  const documentColumn = findColumn(headers, headerAliases.documentNumber);
+  const dateColumn = findColumn(headers, headerAliases.date);
+  const timeColumn = findColumn(headers, headerAliases.time);
+  const originalColumn = findColumn(headers, headerAliases.originalInvoiceNumber);
+  const accountColumn = findColumn(headers, headerAliases.accountName);
+  const paymentColumn = findColumn(headers, headerAliases.paymentMethod);
+  const qtyColumn = findColumn(headers, headerAliases.totalQty);
+  const discountColumn = findColumn(headers, headerAliases.discount);
+  const totalColumn = findColumn(headers, headerAliases.netTotal);
+  const cashColumn = findColumn(headers, headerAliases.cashDrawer);
+  const instapayColumn = findColumn(headers, headerAliases.instapay);
+  const walletColumn = findColumn(headers, headerAliases.vodafoneCash);
+  const bankColumn = findColumn(headers, headerAliases.bankAbk);
+  const paidColumn = findColumn(headers, headerAliases.paidAmount);
+  const creditColumn = findColumn(headers, headerAliases.creditAmount);
+  const dueColumn = findColumn(headers, headerAliases.dueAmount);
+  const warehouseColumn = findColumn(headers, headerAliases.warehouse);
+  const invoices: ParsedMasterInvoice[] = [];
+  for (let rowIndex = headerIndex + 1; rowIndex < worksheetData.length; rowIndex += 1) {
+    const row = worksheetData[rowIndex] ?? [];
+    if (isBlankRow(row) || !isMasterInvoiceRow(row, documentColumn)) continue;
+    const invoiceNumber = stringValue(cellAt(row, documentColumn));
+    const totalQty = numericValue(cellAt(row, qtyColumn));
+    const netTotal = numericValue(cellAt(row, totalColumn));
+    const discountAmount = numericValue(cellAt(row, discountColumn));
+    const originalInvoiceNumber = stringValue(cellAt(row, originalColumn));
+    invoices.push({
+      seq: numericValue(row[0]), sourceRowNumber: rowIndex + 1, date: toDateString(cellAt(row, dateColumn)), time: toTimeString(cellAt(row, timeColumn)), invoiceNumber,
+      ...(originalInvoiceNumber ? { originalInvoiceNumber } : {}), accountName: stringValue(cellAt(row, accountColumn)) || "نقدي", paymentMethod: stringValue(cellAt(row, paymentColumn)) || "نقدي",
+      totalQty, discountAmount, netTotal, cashDrawer: numericValue(cellAt(row, cashColumn)), instapay: numericValue(cellAt(row, instapayColumn)), vodafoneCash: numericValue(cellAt(row, walletColumn)), bankAbk: numericValue(cellAt(row, bankColumn)), paidAmount: numericValue(cellAt(row, paidColumn)), creditAmount: numericValue(cellAt(row, creditColumn)), dueAmount: numericValue(cellAt(row, dueColumn)), warehouse: stringValue(cellAt(row, warehouseColumn)) || "المخزن الرئيسي",
+      items: [{ sourceRowNumber: rowIndex + 1, itemCode: "", name: `فاتورة إجمالية #${invoiceNumber}`, unit: "عملية", quantity: totalQty || 1, unitPrice: netTotal, discount: discountAmount, netTotal }],
+    });
+  }
+  return invoices;
+}
+
+export function summaryInvoicesToImportRows(invoices: ParsedMasterInvoice[], type: InvoiceWorkbookType) {
+  return invoices.map((invoice) => ({
+    sourceRowNumber: invoice.sourceRowNumber, documentNumber: invoice.invoiceNumber, type, accountName: invoice.accountName, originalInvoiceNumber: invoice.originalInvoiceNumber ?? "", paymentMethod: invoice.paymentMethod, treasuryName: "", cashDrawer: invoice.cashDrawer, instapay: invoice.instapay, vodafoneCash: invoice.vodafoneCash, bankAbk: invoice.bankAbk, creditAmount: invoice.creditAmount, dueAmount: invoice.dueAmount, warehouse: invoice.warehouse, oemNumber: "", partName: `فاتورة إجمالية #${invoice.invoiceNumber}`, quantity: invoice.totalQty || 1, unitPrice: invoice.netTotal, lineDiscount: invoice.discountAmount, grandTotal: invoice.netTotal, paidAmount: invoice.paidAmount, notes: `تقرير إجمالي — فاتورة ${invoice.invoiceNumber}`,
+  }));
+}
+
 export function detailedInvoicesToImportRows(invoices: ParsedMasterInvoice[], type: InvoiceWorkbookType) {
   return invoices.flatMap((invoice) => invoice.items.map((item) => ({
     sourceRowNumber: item.sourceRowNumber,

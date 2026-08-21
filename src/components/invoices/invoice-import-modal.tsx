@@ -7,7 +7,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/input";
 import { downloadInvoiceImportTemplateAction, executeInvoiceImportAction, previewInvoiceImportAction } from "@/server/actions/invoice-import.actions";
-import { detailedInvoiceExtractionStats, detailedInvoicesToImportRows, parseDetailedInvoiceWorkbook } from "@/lib/invoice-excel-parser";
+import { detailedInvoiceExtractionStats, detectInvoiceWorkbookMode, detailedInvoicesToImportRows, parseUniversalInvoiceWorkbook, summaryInvoicesToImportRows } from "@/lib/invoice-excel-parser";
 
 type InvoiceImportType = "SALE" | "PURCHASE" | "SALE_RETURN" | "PURCHASE_RETURN";
 const importMeta: Record<InvoiceImportType, { title: string; template: string; tone: string }> = {
@@ -31,9 +31,18 @@ const aliases: Record<string, string[]> = {
   type: ["نوع الفاتورة", "نوع المستند", "النوع", "type"],
   accountName: ["الحساب", "اسم الحساب", "العميل", "المورد", "account"],
   accountPhone: ["رقم الهاتف", "الهاتف", "موبايل", "phone"],
+  date: ["التاريخ", "date"],
+  time: ["الوقت", "time"],
   originalInvoiceNumber: ["الفاتورة المرتجعة", "الفاتورة الأصلية", "original invoice", "return invoice"],
   paymentMethod: ["طريقة السداد", "طريقة الدفع", "payment method"],
   treasuryName: ["الخزينة", "treasury"],
+  cashDrawer: ["درج النقدية", "cash drawer"],
+  instapay: ["انستا باي (المحل)", "انستا باي", "instapay"],
+  vodafoneCash: ["فودافون كاش (محمد ثروت)", "فودافون كاش", "vodafone cash"],
+  bankAbk: ["البنك abk", "bank abk", "abk"],
+  creditAmount: ["الآجل", "credit"],
+  dueAmount: ["المستحق", "due"],
+  warehouse: ["المخزن", "warehouse"],
   oemNumber: ["رقم الصنف (oem)", "رقم الصنف/oem", "رقم الصنف", "oem", "oem number", "كود الصنف"],
   partName: ["اسم الصنف", "اسم المنتج", "part name", "item name"],
   quantity: ["كمية", "الكمية", "qty", "quantity"],
@@ -49,7 +58,7 @@ function readMappedRow(headers: unknown[], values: unknown[], sourceRowNumber: n
   const result: Record<string, unknown> = { sourceRowNumber, type };
   for (const [target, names] of Object.entries(aliases)) {
     const index = headers.findIndex((header) => names.includes(normalizeHeader(header)));
-    result[target] = index >= 0 ? values[index] ?? "" : "";
+    if (index >= 0) result[target] = values[index] ?? "";
   }
   return result;
 }
@@ -61,13 +70,6 @@ function previewStateLabel(row: InvoiceImportPreview["rows"][number], mode: Impo
   if (mode === "DETAILED" && row.partStatus === "UNLINKED_TEXT_ITEM") return "صنف نصي حر (مقبول)";
   if (mode === "DETAILED" && row.partStatus === "MATCHED_CATALOG") return "مطابق للكتالوج";
   return "مطابق";
-}
-function mapSummaryRows(sheet: XLSX.WorkSheet, type: InvoiceImportType) {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: true });
-  const invoiceHeaderIndex = matrix.findIndex((row) => row.some((cell) => (aliases.documentNumber ?? []).includes(normalizeHeader(cell))));
-  if (invoiceHeaderIndex < 0) throw new Error("لم يتم العثور على رأس «رقم الفاتورة» في الملف.");
-  const header = matrix[invoiceHeaderIndex] ?? [];
-  return matrix.slice(invoiceHeaderIndex + 1).map((values, offset) => readMappedRow(header, values, invoiceHeaderIndex + offset + 2, type)).filter(isUsableInvoiceRow);
 }
 
 function downloadBase64(base64: string, fileName: string, mimeType: string) {
@@ -118,12 +120,15 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
         const first = workbook.Sheets[workbook.SheetNames[0] ?? ""];
         if (!first) throw new Error("لا توجد ورقة بيانات قابلة للقراءة في الملف.");
         const matrix = XLSX.utils.sheet_to_json<unknown[]>(first, { header: 1, defval: "", raw: true });
-        const detailedInvoices = importMode === "DETAILED" ? parseDetailedInvoiceWorkbook(matrix, type) : [];
-        const parsed = importMode === "DETAILED" ? detailedInvoicesToImportRows(detailedInvoices, type) : mapSummaryRows(first, type);
-        if (!parsed.length) throw new Error(importMode === "DETAILED" ? "لم يتم العثور على بنود أصناف صالحة مرتبطة بفواتير رئيسية." : "لم يتم العثور على صفوف بيانات في الملف.");
+        const detectedMode: ImportMode = detectInvoiceWorkbookMode(matrix);
+        const parsedInvoices = parseUniversalInvoiceWorkbook(matrix, type);
+        const parsed = detectedMode === "DETAILED" ? detailedInvoicesToImportRows(parsedInvoices, type) : summaryInvoicesToImportRows(parsedInvoices, type);
+        if (!parsed.length) throw new Error(detectedMode === "DETAILED" ? "لم يتم العثور على بنود أصناف صالحة مرتبطة بفواتير رئيسية." : "لم يتم العثور على صفوف فواتير إجمالية صالحة في الملف.");
         if (parsed.length > 10_000) throw new Error("الحد الأقصى للاستيراد هو 10,000 صف.");
-        if (importMode === "DETAILED") setExtractionStats(detailedInvoiceExtractionStats(detailedInvoices));
-        else setExtractionStats({ invoices: new Set(parsed.map((row) => String(row.documentNumber))).size, items: 0 });
+        if (detectedMode === "DETAILED") setExtractionStats(detailedInvoiceExtractionStats(parsedInvoices));
+        else setExtractionStats({ invoices: parsedInvoices.length, items: parsedInvoices.length });
+        setImportMode(detectedMode);
+        if (detectedMode !== importMode) setMessage(detectedMode === "SUMMARY" ? "تم التعرف تلقائياً على التقرير الإجمالي؛ سيُرحّل كقيود مالية من دون بنود مخزون." : "تم التعرف تلقائياً على التقرير التفصيلي بالأصناف؛ سيُرحّل مع بنود المخزون المطابقة.");
         setRows(parsed); setStep(2);
       } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر قراءة ملف Excel."); }
     };
