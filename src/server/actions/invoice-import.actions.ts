@@ -16,6 +16,7 @@ import { createInvoiceReturn, createPurchaseInvoice, createSaleInvoice } from "@
 import { nextAccountNumber, nextInvoiceNumber, nextTransactionNumber } from "@/server/services/numbering.service";
 import { lockAccountForUpdate, lockPartsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { resolveOrCreateImportTreasuries } from "@/server/services/treasury-channel-resolver.service";
 
 const invoiceImportTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
 type InvoiceImportType = (typeof invoiceImportTypes)[number];
@@ -53,6 +54,7 @@ const rawLineSchema = z.object({
   accountPhone: z.string().trim().max(40).optional().or(z.literal("")),
   originalInvoiceNumber: z.string().trim().max(120).optional().or(z.literal("")),
   treasuryName: z.string().trim().max(160).optional().or(z.literal("")),
+  paymentChannels: z.array(z.object({ name: z.string().trim().min(1).max(160), amount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)) })).max(30).optional().default([]),
   cashDrawer: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   instapay: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   vodafoneCash: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
@@ -153,15 +155,17 @@ async function getOrCreateWalkInCashAccount(userId: string) {
 }
 
 function importedPaymentChannels(line: ValidLine) {
+  const discovered = line.paymentChannels.map((channel) => ({ label: channel.name.trim().replace(/\s+/g, " "), amount: new Prisma.Decimal(channel.amount).abs() })).filter((channel) => channel.label && channel.amount.gt(0));
+  if (discovered.length) return discovered;
   const channels = [
-    { treasuryType: "CASH_DRAWER" as const, amount: new Prisma.Decimal(line.cashDrawer).abs(), label: "درج النقدية" },
-    { treasuryType: "INSTAPAY" as const, amount: new Prisma.Decimal(line.instapay).abs(), label: "إنستا باي" },
-    { treasuryType: "WALLET" as const, amount: new Prisma.Decimal(line.vodafoneCash).abs(), label: "فودافون كاش" },
-    { treasuryType: "BANK_ACCOUNT" as const, amount: new Prisma.Decimal(line.bankAbk).abs(), label: "البنك ABK" },
+    { amount: new Prisma.Decimal(line.cashDrawer).abs(), label: "درج النقدية" },
+    { amount: new Prisma.Decimal(line.instapay).abs(), label: "انستا باي (المحل)" },
+    { amount: new Prisma.Decimal(line.vodafoneCash).abs(), label: "فودافون كاش (محمد ثروت)" },
+    { amount: new Prisma.Decimal(line.bankAbk).abs(), label: "البنك ABK" },
   ].filter((channel) => channel.amount.gt(0));
   if (channels.length) return channels;
   const paidAmount = new Prisma.Decimal(line.paidAmount).abs();
-  return paidAmount.gt(0) ? [{ treasuryType: "CASH_DRAWER" as const, amount: paidAmount, label: "السداد النقدي" }] : [];
+  return paidAmount.gt(0) ? [{ amount: paidAmount, label: line.treasuryName?.trim() || "درج النقدية" }] : [];
 }
 
 async function postDetailedImportedInvoice(args: { type: InvoiceImportType; lines: Array<{ line: ValidLine; part: { id: string; oemNumber: string; nameAr: string } | null }>; accountId: string; userId: string; jobId: string }) {
@@ -171,6 +175,7 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
   if (grandTotal.lte(0)) throw new BusinessRuleError("الإجمالي النهائي للفاتورة مطلوب.");
   const channels = importedPaymentChannels(first);
   const paidAmount = channels.reduce((total, channel) => total.add(channel.amount), new Prisma.Decimal(0)).toDecimalPlaces(2);
+  if (paidAmount.gt(grandTotal)) throw new BusinessRuleError("إجمالي قنوات السداد لا يجوز أن يتجاوز إجمالي الفاتورة.");
   const statedCredit = Prisma.Decimal.max(new Prisma.Decimal(first.creditAmount).abs(), new Prisma.Decimal(first.dueAmount).abs());
   const remainingAmount = statedCredit.gt(0) ? statedCredit.toDecimalPlaces(2) : Prisma.Decimal.max(new Prisma.Decimal(0), grandTotal.sub(paidAmount)).toDecimalPlaces(2);
   const outbound = args.type === "PURCHASE" || args.type === "SALE_RETURN";
@@ -181,20 +186,14 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
   return withTxRetry(() => prisma.$transaction(async (tx) => {
     const account = await lockAccountForUpdate(tx, args.accountId);
     const parts = await lockPartsForUpdate(tx, linkedPartIds);
-    const treasuryRows = channels.length ? await tx.treasury.findMany({ where: { isActive: true, type: { in: [...new Set(channels.map((channel) => channel.treasuryType))] } }, select: { id: true, name: true, type: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }) : [];
-    const treasuryIdByType = new Map<string, string>();
-    for (const channel of channels) {
-      const candidates = treasuryRows.filter((treasury) => treasury.type === channel.treasuryType);
-      const selected = candidates.find((treasury) => treasury.isDefault) ?? candidates[0];
-      if (!selected) throw new BusinessRuleError(`لا توجد خزينة نشطة مهيأة لقناة ${channel.label}.`);
-      treasuryIdByType.set(channel.treasuryType, selected.id);
-    }
-    if (treasuryIdByType.size) await lockTreasuriesForUpdate(tx, [...treasuryIdByType.values()]);
+    const treasuryByChannel = await resolveOrCreateImportTreasuries(tx, channels.map((channel) => channel.label), args.userId);
+    const treasuryIds = [...new Set(channels.map((channel) => treasuryByChannel.get(channel.label)?.id).filter((id): id is string => Boolean(id)))];
+    if (treasuryIds.length) await lockTreasuriesForUpdate(tx, treasuryIds);
     const baseType = args.type === "SALE_RETURN" ? "SALE" : args.type === "PURCHASE_RETURN" ? "PURCHASE" : null;
     const original = baseType && first.originalInvoiceNumber ? await tx.invoice.findFirst({ where: { invoiceNumber: first.originalInvoiceNumber, type: baseType, isVoided: false }, select: { id: true, accountId: true } }) : null;
     const invoiceNumber = await nextInvoiceNumber(tx, args.type);
     const invoice = await tx.invoice.create({ data: {
-      invoiceNumber, type: args.type, accountId: account.id, treasuryId: channels.length === 1 ? treasuryIdByType.get(channels[0]!.treasuryType) ?? null : null, userId: args.userId,
+      invoiceNumber, type: args.type, accountId: account.id, treasuryId: channels.length === 1 ? treasuryByChannel.get(channels[0]!.label)?.id ?? null : null, userId: args.userId,
       subtotal: grandTotal, discountAmount: 0, taxAmount: 0, grandTotal, paidAmount, remainingAmount,
       paymentStatus: remainingAmount.eq(0) ? "PAID" : paidAmount.gt(0) ? "PARTIAL" : "CREDIT",
       paymentMethod: remainingAmount.gt(0) && paidAmount.eq(0) ? "ON_ACCOUNT" : channels.length > 1 ? "SPLIT" : "CASH",
@@ -220,7 +219,8 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
       }
     }
     for (const channel of channels) {
-      const treasuryId = treasuryIdByType.get(channel.treasuryType)!;
+      const treasuryId = treasuryByChannel.get(channel.label)?.id;
+      if (!treasuryId) throw new BusinessRuleError(`تعذر ربط قناة السداد «${channel.label}» بخزينة.`);
       await tx.treasury.update({ where: { id: treasuryId }, data: outbound ? { currentBalance: { decrement: channel.amount } } : { currentBalance: { increment: channel.amount } } });
       await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId, accountId: account.id, invoiceId: invoice.id, type: outbound ? "PAYMENT" : "RECEIPT", amount: channel.amount, category: "IMPORT_DETAILED", description: `${outbound ? "صرف" : "تحصيل"} استيراد ${channel.label} - ${invoiceNumber}`, createdByUser: args.userId } });
     }
@@ -230,43 +230,52 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
   }, TX_OPTIONS));
 }
 
-async function postSummaryFinancialInvoice(args: { type: InvoiceImportType; line: ValidLine; accountId: string; treasuryId?: string; userId: string; jobId: string }) {
+async function postSummaryFinancialInvoice(args: { type: InvoiceImportType; line: ValidLine; accountId: string; userId: string; jobId: string }) {
   const grandTotal = financialAmount(args.line);
   if (grandTotal.lte(0)) throw new BusinessRuleError("الإجمالي النهائي مطلوب في الاستيراد المالي ولا يجوز أن يساوي صفراً.");
-  const paidAmount = Prisma.Decimal.min(new Prisma.Decimal(args.line.paidAmount).abs(), grandTotal).toDecimalPlaces(2);
-  const remainingAmount = grandTotal.sub(paidAmount).toDecimalPlaces(2);
+  const channels = importedPaymentChannels(args.line);
+  const paidAmount = channels.reduce((total, channel) => total.add(channel.amount), new Prisma.Decimal(0)).toDecimalPlaces(2);
+  if (paidAmount.gt(grandTotal)) throw new BusinessRuleError("إجمالي قنوات السداد لا يجوز أن يتجاوز إجمالي الفاتورة.");
+  const statedCredit = Prisma.Decimal.max(new Prisma.Decimal(args.line.creditAmount).abs(), new Prisma.Decimal(args.line.dueAmount).abs());
+  const remainingAmount = statedCredit.gt(0) ? statedCredit.toDecimalPlaces(2) : grandTotal.sub(paidAmount).toDecimalPlaces(2);
   const outbound = args.type === "PURCHASE" || args.type === "SALE_RETURN";
   const baseType = args.type === "SALE_RETURN" ? "SALE" : args.type === "PURCHASE_RETURN" ? "PURCHASE" : null;
   return withTxRetry(() => prisma.$transaction(async (tx) => {
     const account = await lockAccountForUpdate(tx, args.accountId);
+    const treasuryByChannel = await resolveOrCreateImportTreasuries(tx, channels.map((channel) => channel.label), args.userId);
+    const treasuryIds = [...new Set(channels.map((channel) => treasuryByChannel.get(channel.label)?.id).filter((id): id is string => Boolean(id)))];
+    const lockedTreasuries = treasuryIds.length ? await lockTreasuriesForUpdate(tx, treasuryIds) : new Map();
+    const amountsByTreasury = new Map<string, Prisma.Decimal>();
+    for (const channel of channels) {
+      const treasuryId = treasuryByChannel.get(channel.label)?.id;
+      if (!treasuryId) throw new BusinessRuleError(`تعذر ربط قناة السداد «${channel.label}» بخزينة.`);
+      amountsByTreasury.set(treasuryId, (amountsByTreasury.get(treasuryId) ?? new Prisma.Decimal(0)).add(channel.amount));
+    }
+    if (outbound) for (const [treasuryId, amount] of amountsByTreasury) {
+      const treasury = lockedTreasuries.get(treasuryId);
+      if (!treasury || !treasury.isActive || treasury.currentBalance.lt(amount)) throw new BusinessRuleError(`السيولة غير كافية في الخزينة ${treasury?.name ?? "المختارة"}.`);
+    }
     const original = baseType && args.line.originalInvoiceNumber
       ? await tx.invoice.findFirst({ where: { invoiceNumber: args.line.originalInvoiceNumber, type: baseType, isVoided: false }, select: { id: true, accountId: true } })
       : null;
     if (baseType && (!original || original.accountId !== account.id)) throw new BusinessRuleError("يجب ربط المرتجع المالي بفاتورة أصلية نشطة للحساب نفسه.");
-    let treasury = null;
-    if (paidAmount.gt(0)) {
-      if (!args.treasuryId) throw new BusinessRuleError("حدد خزينة نشطة للمبلغ المسدد في الاستيراد المالي.");
-      treasury = (await lockTreasuriesForUpdate(tx, [args.treasuryId])).get(args.treasuryId) ?? null;
-      if (!treasury?.isActive) throw new BusinessRuleError("الخزينة المحددة غير نشطة.");
-      if (outbound && treasury.currentBalance.lt(paidAmount)) throw new BusinessRuleError(`السيولة غير كافية في الخزينة ${treasury.name}.`);
-    }
     const invoiceNumber = await nextInvoiceNumber(tx, args.type);
     const paymentStatus = remainingAmount.eq(0) ? "PAID" : paidAmount.gt(0) ? "PARTIAL" : "CREDIT";
     const invoice = await tx.invoice.create({ data: {
-      invoiceNumber, type: args.type, accountId: account.id, treasuryId: treasury?.id ?? null, userId: args.userId,
+      invoiceNumber, type: args.type, accountId: account.id, treasuryId: channels.length === 1 ? treasuryByChannel.get(channels[0]!.label)?.id ?? null : null, userId: args.userId,
       subtotal: grandTotal, discountAmount: 0, taxAmount: 0, grandTotal, paidAmount, remainingAmount, paymentStatus,
-      paymentMethod: remainingAmount.gt(0) && paidAmount.eq(0) ? "ON_ACCOUNT" : "CASH", returnOfId: original?.id ?? null,
+      paymentMethod: remainingAmount.gt(0) && paidAmount.eq(0) ? "ON_ACCOUNT" : channels.length > 1 ? "SPLIT" : "CASH", returnOfId: original?.id ?? null,
       accountBalanceBefore: account.currentBalance, accountBalanceAfter: args.type === "SALE" ? account.currentBalance.sub(remainingAmount) : args.type === "PURCHASE" ? account.currentBalance.add(remainingAmount) : args.type === "SALE_RETURN" ? account.currentBalance.add(remainingAmount) : account.currentBalance.sub(remainingAmount),
       notes: [`استيراد مالي إجمالي ${args.jobId}`, `مرجع الملف: ${args.line.documentNumber}`, args.line.notes, "دون بنود أصناف أو حركة مخزنية"].filter(Boolean).join(" — "),
     } });
-    if (paidAmount.gt(0) && treasury) {
-      await tx.treasury.update({ where: { id: treasury.id }, data: outbound ? { currentBalance: { decrement: paidAmount } } : { currentBalance: { increment: paidAmount } } });
-      await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId: treasury.id, accountId: account.id, invoiceId: invoice.id, type: outbound ? "PAYMENT" : "RECEIPT", amount: paidAmount, category: "IMPORT_SUMMARY", description: `${outbound ? "صرف" : "تحصيل"} استيراد إجمالي ${invoiceNumber}`, createdByUser: args.userId } });
+    for (const channel of channels) {
+      const treasuryId = treasuryByChannel.get(channel.label)?.id;
+      if (!treasuryId) throw new BusinessRuleError(`تعذر ربط قناة السداد «${channel.label}» بخزينة.`);
+      await tx.treasury.update({ where: { id: treasuryId }, data: outbound ? { currentBalance: { decrement: channel.amount } } : { currentBalance: { increment: channel.amount } } });
+      await tx.treasuryTransaction.create({ data: { transactionNumber: await nextTransactionNumber(tx), treasuryId, accountId: account.id, invoiceId: invoice.id, type: outbound ? "PAYMENT" : "RECEIPT", amount: channel.amount, category: "IMPORT_SUMMARY", description: `${outbound ? "صرف" : "تحصيل"} استيراد إجمالي ${channel.label} - ${invoiceNumber}`, createdByUser: args.userId } });
     }
-    if (remainingAmount.gt(0)) {
-      await tx.account.update({ where: { id: account.id }, data: args.type === "SALE" || args.type === "PURCHASE_RETURN" ? { currentBalance: { decrement: remainingAmount } } : { currentBalance: { increment: remainingAmount } } });
-    }
-    await writeAudit(tx, { tableName: "Invoice", recordId: invoice.id, action: "INSERT", newData: { ...invoice, importMode: "SUMMARY", itemCount: 0, stockEffect: "NONE" }, performedBy: args.userId });
+    if (remainingAmount.gt(0)) await tx.account.update({ where: { id: account.id }, data: args.type === "SALE" || args.type === "PURCHASE_RETURN" ? { currentBalance: { decrement: remainingAmount } } : { currentBalance: { increment: remainingAmount } } });
+    await writeAudit(tx, { tableName: "Invoice", recordId: invoice.id, action: "INSERT", newData: { ...invoice, importMode: "SUMMARY", itemCount: 0, stockEffect: "NONE", paymentChannels: channels.map((channel) => ({ name: channel.label, amount: channel.amount.toString() })) }, performedBy: args.userId });
     return { invoiceId: invoice.id, invoiceNumber };
   }, TX_OPTIONS));
 }
@@ -303,12 +312,12 @@ export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise
   } catch (error) { return toActionError(error, "downloadInvoiceImportTemplateAction"); }
 }
 
-export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" }> }>> {
+export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" }> }>> {
   try {
     const input = importSchema.parse(raw);
     await requirePermission(permissionForType(input.type));
     const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), raw: row, result: rawLineSchema.safeParse(row) }));
-    type PreviewRow = { row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" };
+    type PreviewRow = { row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" };
     const preview: PreviewRow[] = [];
     const rawString = (row: Record<string, unknown>, key: string) => String(row[key] ?? "").trim();
     const resolutionFor = (reason: string) => {
@@ -322,21 +331,22 @@ export async function previewInvoiceImportAction(raw: unknown): Promise<ActionRe
     for (const entry of parsed) {
       if (!entry.result.success) {
         const reason = (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ");
-        preview.push({ row: entry.row, documentNumber: rawString(entry.raw, "documentNumber"), type: rawString(entry.raw, "type"), accountName: rawString(entry.raw, "accountName"), oemNumber: formatOemNumber(rawString(entry.raw, "oemNumber")), partName: rawString(entry.raw, "partName"), grandTotal: 0, accountMatched: false, partMatched: false, treasuryMatched: false, accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
+        preview.push({ row: entry.row, documentNumber: rawString(entry.raw, "documentNumber"), type: rawString(entry.raw, "type"), accountName: rawString(entry.raw, "accountName"), oemNumber: formatOemNumber(rawString(entry.raw, "oemNumber")), partName: rawString(entry.raw, "partName"), grandTotal: 0, accountMatched: false, partMatched: false, treasuryMatched: false, paymentChannels: [], accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
         continue;
       }
       const line = entry.result.data;
       if (line.type !== input.type) {
         const reason = `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.`;
-        preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: false, partMatched: false, treasuryMatched: false, accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
+        preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: false, partMatched: false, treasuryMatched: false, paymentChannels: [], accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
         continue;
       }
       const match = await matchLine(line, input.type, input.mode);
-      const needsTreasury = line.paidAmount > 0;
       const modeIssue = modeValidationIssue(line, input.mode);
       const accountMissing = !match.account && !match.cashFallback && !input.autoCreateAccounts;
-      const reason = modeIssue ?? (accountMissing ? `الحساب (${line.accountName}) غير مسجل في المنظومة وتم إيقاف الإنشاء التلقائي.` : input.mode === "SUMMARY" && needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined);
-      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback || input.autoCreateAccounts, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: input.mode === "DETAILED" || !needsTreasury || Boolean(match.treasury), isValid: !reason, reason, ...(reason ? resolutionFor(reason) : {}), accountStatus: match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : input.autoCreateAccounts ? "AUTO_CREATE" : "NOT_FOUND", partStatus: input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM" });
+      const channelTotal = importedPaymentChannels(line).reduce((total, channel) => total.add(channel.amount), new Prisma.Decimal(0));
+      const paymentIssue = channelTotal.gt(financialAmount(line)) ? "إجمالي قنوات السداد لا يجوز أن يتجاوز إجمالي الفاتورة." : undefined;
+      const reason = modeIssue ?? paymentIssue ?? (accountMissing ? `الحساب (${line.accountName}) غير مسجل في المنظومة وتم إيقاف الإنشاء التلقائي.` : undefined);
+      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback || input.autoCreateAccounts, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: true, paymentChannels: importedPaymentChannels(line).map((channel) => ({ name: channel.label, amount: Number(channel.amount) })), isValid: !reason, reason, ...(reason ? resolutionFor(reason) : {}), accountStatus: match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : input.autoCreateAccounts ? "AUTO_CREATE" : "NOT_FOUND", partStatus: input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM" });
     }
     const invalid = preview.filter((row) => !row.isValid).map((row) => ({ row: row.row, reason: row.reason ?? "صف غير صالح." }));
     return ok({ total: input.rows.length, valid: preview.filter((row) => row.isValid).length, invalid, rows: preview });
@@ -388,9 +398,9 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
           skipped += group.length;
           continue;
         }
-        const issue = paired.find(({ line, match }) => !match.account || (input.mode === "SUMMARY" && line.paidAmount > 0 && !match.treasury));
+        const issue = paired.find(({ match }) => !match.account);
         if (issue) {
-          const reason = !issue.match.account ? "تعذر مطابقة الحساب بشكل فريد." : "تعذر مطابقة الخزينة النشطة.";
+          const reason = "تعذر مطابقة الحساب بشكل فريد.";
           invalid.push({ row: issue.line.sourceRowNumber, reason });
           if (!input.skipInvalidRows) throw new BusinessRuleError(`الصف ${issue.line.sourceRowNumber}: ${reason}`);
           skipped += group.length;
@@ -401,7 +411,7 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         const account = firstMatch.account;
         const treasuryId = firstMatch.treasury?.id;
         if (input.mode === "SUMMARY") {
-          await postSummaryFinancialInvoice({ type: first.type, line: first, accountId: account.id, treasuryId: firstMatch.treasury?.id, userId: user.id, jobId: job.id });
+          await postSummaryFinancialInvoice({ type: first.type, line: first, accountId: account.id, userId: user.id, jobId: job.id });
           created += 1;
           continue;
         }
