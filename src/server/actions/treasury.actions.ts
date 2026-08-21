@@ -30,6 +30,7 @@ import { createTreasurySchema, treasuryReportSchema, treasurySchema, type Create
 
 
 const deleteManualTreasuryTransactionsSchema = z.object({ transactionIds: z.array(z.string().uuid()).min(1).max(100) });
+const reconcileTreasuryBalanceSchema = z.object({ treasuryId: z.string().uuid(), targetBalance: z.coerce.number().finite().min(0).max(999_999_999.99), reason: z.string().trim().min(5, "سبب تسوية الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.").max(500) });
 
 /** Reverses and permanently removes manual vouchers only; invoice/transfer entries remain immutable in their source workflows. */
 export async function deleteManualTreasuryTransactionsAction(raw: { transactionIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
@@ -59,6 +60,33 @@ export async function deleteManualTreasuryTransactionsAction(raw: { transactionI
     for (const path of ["/", "/treasury", "/accounts"]) revalidatePath(path);
     return ok(result);
   } catch (error) { return toActionError(error, "deleteManualTreasuryTransactionsAction"); }
+}
+
+export async function reconcileTreasuryBalanceAction(raw: { treasuryId: string; targetBalance: number; reason: string }): Promise<ActionResult<{ transactionNumber: string | null; previousBalance: number; targetBalance: number; delta: number }>> {
+  try {
+    const user = await requirePermission("treasury.manage");
+    if (user.role !== "SUPER_ADMIN" && user.role !== "MANAGER") throw new BusinessRuleError("صلاحية تسوية أرصدة الخزائن متاحة لمدير النظام أو المدير المالي فقط.");
+    const input = reconcileTreasuryBalanceSchema.parse(raw);
+    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+      const locked = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
+      const treasury = locked.get(input.treasuryId)!;
+      const previousBalance = money(treasury.currentBalance);
+      const targetBalance = money(input.targetBalance);
+      const delta = money(targetBalance.sub(previousBalance));
+      const updated = await tx.treasury.update({ where: { id: treasury.id }, data: { currentBalance: targetBalance } });
+      let transactionNumber: string | null = null;
+      if (!delta.eq(0)) {
+        transactionNumber = await nextTransactionNumber(tx);
+        const transaction = await tx.treasuryTransaction.create({ data: { transactionNumber, treasuryId: treasury.id, type: delta.gt(0) ? "RECEIPT" : "PAYMENT", category: delta.gt(0) ? "CASH_RECONCILIATION_IN" : "CASH_RECONCILIATION_OUT", amount: delta.abs(), description: `تسوية جرد فعلي للخزينة من ${formatMoney(previousBalance)} إلى ${formatMoney(targetBalance)} — ${input.reason}`, createdByUser: user.id } });
+        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, event: "TREASURY_CASH_COUNT_RECONCILIATION", treasuryName: treasury.name, previousBalance, targetBalance, delta, reason: input.reason }, performedBy: user.id });
+      }
+      await writeAudit(tx, { tableName: "Treasury", recordId: treasury.id, action: "UPDATE", oldData: treasury, newData: { ...updated, event: "TREASURY_BALANCE_RECONCILED", previousBalance, targetBalance, delta, reason: input.reason, reconciliationTransactionNumber: transactionNumber }, performedBy: user.id });
+      return { transactionNumber, previousBalance: Number(previousBalance), targetBalance: Number(targetBalance), delta: Number(delta) };
+    }, TX_OPTIONS));
+    await invalidateCache("dashboard");
+    for (const path of ["/", "/treasury", "/accounts", "/vouchers", "/reports/daily-movement"]) revalidatePath(path);
+    return ok(result);
+  } catch (error) { return toActionError(error, "reconcileTreasuryBalanceAction"); }
 }
 
 /**

@@ -41,6 +41,7 @@ import {
   toggleTreasuryStatusAction,
   updateTreasuryAction,
   deleteManualTreasuryTransactionsAction,
+  reconcileTreasuryBalanceAction,
 } from "@/server/actions/treasury.actions";
 
 interface ZReport {
@@ -126,6 +127,7 @@ export function TreasuryClient({
   const [shiftAction, setShiftAction] = useState<{ mode: "open" | "close"; treasury: TreasuryRow } | null>(null);
   const [manageTreasury, setManageTreasury] = useState<TreasuryRow | "NEW" | null>(null);
   const [deleteTreasury, setDeleteTreasury] = useState<TreasuryRow | null>(null);
+  const [reconcileTreasury, setReconcileTreasury] = useState<TreasuryRow | null>(null);
   const [treasuryActionError, setTreasuryActionError] = useState<string | null>(null);
   const [statusPending, startStatusTransition] = useTransition();
   const [range, setRange] = useState<DateRangeValue>(initialTreasuryRange);
@@ -238,7 +240,7 @@ export function TreasuryClient({
                   <span className="tabular text-bmw-mRed">▼ {formatMoney(treasury.todayOut)}</span>
                 </div>
 
-                {permissions.canManage ? <div className="grid grid-cols-3 gap-2 border-t border-bmw-cardBorder pt-3"><Button size="sm" variant="ghost" onClick={() => setManageTreasury(treasury)}><Settings2 size={14} /> تعديل</Button><Button size="sm" variant="ghost" onClick={() => toggleStatus(treasury)} disabled={statusPending} title={treasury.isActive ? "تعطيل الخزينة" : "تنشيط الخزينة"}><Power size={14} /> {treasury.isActive ? "تعطيل" : "تنشيط"}</Button><Button size="sm" variant="ghost" className="text-bmw-mRed hover:bg-bmw-mRed/10 hover:text-bmw-mRed" onClick={() => setDeleteTreasury(treasury)} title="حذف الخزينة بعد فحص الرصيد والسجل"><Trash2 size={14} /> حذف</Button></div> : null}
+                {permissions.canManage ? <div className="grid grid-cols-2 gap-2 border-t border-bmw-cardBorder pt-3"><Button size="sm" variant="ghost" onClick={() => setManageTreasury(treasury)}><Settings2 size={14} /> تعديل</Button><Button size="sm" variant="outline" onClick={() => setReconcileTreasury(treasury)}><Banknote size={14} /> جرد / تسوية</Button><Button size="sm" variant="ghost" onClick={() => toggleStatus(treasury)} disabled={statusPending} title={treasury.isActive ? "تعطيل الخزينة" : "تنشيط الخزينة"}><Power size={14} /> {treasury.isActive ? "تعطيل" : "تنشيط"}</Button><Button size="sm" variant="ghost" className="text-bmw-mRed hover:bg-bmw-mRed/10 hover:text-bmw-mRed" onClick={() => setDeleteTreasury(treasury)} title="حذف الخزينة بعد فحص الرصيد والسجل"><Trash2 size={14} /> حذف</Button></div> : null}
 
                 {permissions.canCloseShift && treasury.isActive ? (
                   <div className="border-t border-bmw-cardBorder pt-3">
@@ -477,6 +479,7 @@ export function TreasuryClient({
       ) : null}
 
       {manageTreasury ? <TreasuryManageModal treasury={manageTreasury === "NEW" ? null : manageTreasury} onClose={() => setManageTreasury(null)} /> : null}
+      {reconcileTreasury ? <TreasuryReconciliationModal treasury={reconcileTreasury} onClose={() => setReconcileTreasury(null)} onDone={() => { setReconcileTreasury(null); router.refresh(); }} /> : null}
       {deleteTreasury ? <DeleteTreasuryModal treasury={deleteTreasury} onClose={() => setDeleteTreasury(null)} onDone={() => { setDeleteTreasury(null); router.refresh(); }} /> : null}
 
       {zReportPrintOpen && zReport ? <ZReportPrintModal report={zReport} company={company} onClose={() => setZReportPrintOpen(false)} /> : null}
@@ -490,6 +493,21 @@ export function TreasuryClient({
       ) : null}
     </div>
   );
+}
+
+function TreasuryReconciliationModal({ treasury, onClose, onDone }: { treasury: TreasuryRow; onClose: () => void; onDone: () => void }) {
+  const [targetBalance, setTargetBalance] = useState(String(treasury.currentBalance));
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const target = Number(targetBalance || 0); const delta = target - treasury.currentBalance;
+  const submit = () => startTransition(async () => {
+    setError(null);
+    const result = await reconcileTreasuryBalanceAction({ treasuryId: treasury.id, targetBalance: target, reason });
+    if (!result.success) { setError(result.error); return; }
+    onDone();
+  });
+  return <Modal open onClose={onClose} title={`جرد وتسوية الرصيد — ${treasury.name}`} description="حدد الرصيد الفعلي بعد الجرد. يسجل النظام الفرق كسند تسوية تدقيقي ولا يغير أي حساب عميل أو مورد." size="md" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="primary" onClick={submit} loading={pending} disabled={!Number.isFinite(target) || (Math.abs(delta) > 0.001 && reason.trim().length < 5)}><Banknote size={15} /> اعتماد التسوية</Button></>}><div className="space-y-3" dir="rtl">{error ? <Alert variant="error">{error}</Alert> : null}<div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3"><Row label="الرصيد الدفتري الحالي" value={`${formatMoney(treasury.currentBalance)} ${CURRENCY}`} bold /><Row label="نوع الخزينة" value={ARABIC_LABELS.treasuryType[treasury.type]} /></div><div className="grid gap-3 sm:grid-cols-2"><Field label="الرصيد الفعلي الجديد (ج.م) *"><Input type="number" step="0.01" min="0" value={targetBalance} onChange={(event) => setTargetBalance(event.target.value)} dir="ltr" /></Field><div><p className="mb-1 text-xs text-bmw-muted">الفارق الناتج (عجز / زيادة)</p><div className={`rounded-xl border p-2.5 text-sm font-bold ${delta > 0.001 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : delta < -0.001 ? "border-bmw-mRed/40 bg-bmw-mRed/10 text-bmw-mRed" : "border-bmw-cardBorder bg-bmw-carbon text-bmw-muted"}`}>{delta > 0.001 ? `+${formatMoney(delta)} ${CURRENCY} — زيادة جرد` : delta < -0.001 ? `${formatMoney(delta)} ${CURRENCY} — عجز جرد` : "متطابق (0.00 ج.م)"}</div></div></div>{Math.abs(delta) > 0.001 ? <Field label="سبب تسوية الرصيد (مطلوب) *"><Textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="مثال: مطابقة رصيد فعلي مع كشف البنك / جرد نهاية الوردية" /></Field> : <Alert variant="info">لا يوجد فرق مالي؛ سيجري فقط اعتماد المطابقة وتسجيلها بالتدقيق.</Alert>}</div></Modal>;
 }
 
 function DeleteTreasuryModal({ treasury, onClose, onDone }: { treasury: TreasuryRow; onClose: () => void; onDone: () => void }) {
