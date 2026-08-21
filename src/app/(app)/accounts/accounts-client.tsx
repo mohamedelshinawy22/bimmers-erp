@@ -664,7 +664,6 @@ function EditAccountModal({ account, canAdjustBalance, onClose }: { account: Acc
   const requestedBalance = balanceNature === "DEBIT" ? -(Number(balanceAmount) || 0) : balanceNature === "CREDIT" ? (Number(balanceAmount) || 0) : 0;
   const isBalanceModified = canAdjustBalance && Math.abs(requestedBalance - account.currentBalance) > 0.0001;
   const hasInvalidCustomReason = adjustmentReason.trim().length > 0 && adjustmentReason.trim().length < 5;
-  const limitBelowDebt = requestedBalance < 0 && Math.abs(requestedBalance) > newLimit;
 
   const submit = () => {
     setError(null);
@@ -704,20 +703,15 @@ function EditAccountModal({ account, canAdjustBalance, onClose }: { account: Acc
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             إلغاء
           </Button>
-          <Button onClick={submit} loading={pending} disabled={form.name.trim().length < 2 || limitBelowDebt || hasInvalidCustomReason}>
+          <Button onClick={submit} loading={pending} disabled={form.name.trim().length < 2 || hasInvalidCustomReason}>
             حفظ التعديلات
           </Button>
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="max-h-[88vh] space-y-3 overflow-y-auto px-0.5">
         {error ? <Alert variant="error">{error}</Alert> : null}
-        {limitBelowDebt ? (
-          <Alert variant="warning">
-            حد الائتمان الجديد ({formatMoney(newLimit)}) أقل من المديونية الحالية (
-            {formatMoney(account.debt)}). سدّد الرصيد أولاً.
-          </Alert>
-        ) : null}
+        <Alert variant="info">حد الائتمان يحدد السماح بالبيع الآجل الجديد فقط، ولا يمنع حفظ بيانات الحساب أو اعتماد تسوية الرصيد الدفتري.</Alert>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="اسم الحساب" required className="sm:col-span-2">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

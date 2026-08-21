@@ -122,11 +122,8 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
         throw new BusinessRuleError("سبب تعديل الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل للتدقيق المالي.");
       }
 
-      // The credit policy uses a negative account balance as receivable (عليه).
+      // Credit limits gate new credit sales in POS/invoice flows; they never block an administrator from correcting an existing account profile or audited ledger balance.
       const newLimit = money(input.creditLimit);
-      if (targetBalance.lt(0) && targetBalance.abs().gt(newLimit)) {
-        throw new BusinessRuleError(`لا يمكن اعتماد مديونية ${formatMoney(targetBalance.abs())} مع حد ائتمان ${formatMoney(newLimit)}. عدّل الحد أولاً أو أدخل رصيداً مسموحاً.`);
-      }
       if (!input.isActive && !targetBalance.eq(0)) throw new BusinessRuleError("لا يمكن إيقاف حساب له رصيد مفتوح. قم بتسوية الرصيد أولاً.");
 
       const updated = await tx.account.update({
