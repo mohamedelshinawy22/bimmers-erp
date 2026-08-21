@@ -39,6 +39,7 @@ const voucherLineSchema = z.object({
   itemCategory: z.string().trim().max(200).optional().default(""),
   accountName: z.string().trim().max(200).optional().default(""),
   treasuryName: z.string().trim().max(160).optional().default(""),
+  transferCounterpartyTreasuryName: z.string().trim().max(160).optional().default(""),
   paymentChannels: z.array(z.object({ name: z.string().trim().min(1).max(160), amount: z.preprocess(numeric, z.number().finite().positive().max(99_999_999)) })).max(30).optional().default([]),
   notes: z.string().trim().max(1000).optional().default(""),
   createdByName: z.string().trim().max(180).optional().default(""),
@@ -47,9 +48,24 @@ const voucherLineSchema = z.object({
 
 type ValidVoucherLine = z.infer<typeof voucherLineSchema>;
 
+const transferPairSchema = z.object({
+  key: z.string().trim().min(1).max(300),
+  date: z.string().trim().nullable().optional().default(null),
+  time: z.string().trim().nullable().optional().default(null),
+  amount: z.preprocess(numeric, z.number().finite().positive().max(99_999_999)),
+  fromTreasuryName: z.string().trim().min(1).max(160),
+  toTreasuryName: z.string().trim().min(1).max(160),
+  notes: z.string().trim().max(1000).optional().default(""),
+  paymentRowNumber: z.coerce.number().int().positive(),
+  receiptRowNumber: z.coerce.number().int().positive(),
+});
+
+type TransferPair = z.infer<typeof transferPairSchema>;
+
 const importSchema = z.object({
   type: z.enum(voucherImportTypes),
   rows: z.array(z.unknown()).min(1).max(10_000),
+  reconciledTransfers: z.array(transferPairSchema).max(5_000).optional().default([]),
   autoCreateAccounts: z.boolean().optional().default(false),
   skipInvalidRows: z.boolean().optional().default(true),
 });
@@ -67,11 +83,29 @@ function accountTypeFor(line: ValidVoucherLine, kind: VoucherKind) {
   if (!line.accountName.trim()) return isAdvanceCategory(line.itemCategory) ? "ADVANCE" as const : "EXPENSE" as const;
   return kind === "RECEIPT" ? "CUSTOMER" as const : "SUPPLIER" as const;
 }
-function transactionDate(line: ValidVoucherLine) {
+function transactionDate(line: { date: string | null; time: string | null }) {
   if (!line.date) return undefined;
   const raw = line.time ? `${line.date}T${line.time}` : line.date;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+async function postImportedTransfer(tx: Prisma.TransactionClient, transfer: { fromTreasuryName: string; toTreasuryName: string; amount: Prisma.Decimal; notes: string; date: string | null; time: string | null; reference: string }, userId: string) {
+  if (normalizeName(transfer.fromTreasuryName) === normalizeName(transfer.toTreasuryName)) throw new BusinessRuleError("خزينة المصدر والوجهة للتحويل يجب أن تكون مختلفتين.");
+  const treasuryByName = await resolveOrCreateImportTreasuries(tx, [transfer.fromTreasuryName, transfer.toTreasuryName], userId);
+  const fromId = treasuryByName.get(transfer.fromTreasuryName)?.id;
+  const toId = treasuryByName.get(transfer.toTreasuryName)?.id;
+  if (!fromId || !toId) throw new BusinessRuleError("تعذر تحديد خزينة مصدر أو وجهة التحويل.");
+  const locked = await lockTreasuriesForUpdate(tx, [fromId, toId]);
+  const from = locked.get(fromId)!; const to = locked.get(toId)!;
+  if (from.currentBalance.lt(transfer.amount)) throw new BusinessRuleError(`السيولة غير كافية في الخزينة ${from.name}.`);
+  await tx.treasury.update({ where: { id: fromId }, data: { currentBalance: { decrement: transfer.amount } } });
+  await tx.treasury.update({ where: { id: toId }, data: { currentBalance: { increment: transfer.amount } } });
+  const outNumber = await nextTransactionNumber(tx); const inNumber = await nextTransactionNumber(tx);
+  const record = await tx.treasuryTransfer.create({ data: { transferNumber: `TRF-${outNumber}`, fromTreasuryId: fromId, toTreasuryId: toId, amount: transfer.amount, notes: transfer.notes || null, createdById: userId, ...(transactionDate(transfer) ? { createdAt: transactionDate(transfer) } : {}) } });
+  const transactions = await tx.treasuryTransaction.createMany({ data: [{ transactionNumber: outNumber, treasuryId: fromId, transferId: record.id, type: "TRANSFER", amount: transfer.amount.neg(), description: `تحويل مستورد إلى ${to.name} — ${transfer.reference}`, createdByUser: userId }, { transactionNumber: inNumber, treasuryId: toId, transferId: record.id, type: "TRANSFER", amount: transfer.amount, description: `تحويل مستورد من ${from.name} — ${transfer.reference}`, createdByUser: userId }] });
+  await writeAudit(tx, { tableName: "TreasuryTransfer", recordId: record.id, action: "INSERT", newData: { record, source: "VOUCHER_EXCEL_IMPORT", reference: transfer.reference, transactionCount: transactions.count }, performedBy: userId });
+  return record;
 }
 
 async function findAccount(line: ValidVoucherLine, kind: VoucherKind) {
@@ -99,7 +133,11 @@ function issueFor(line: ValidVoucherLine, type: VoucherImportType, autoCreateAcc
   const channels = channelsFor(line);
   const totalChannels = channels.reduce((sum, channel) => sum.add(channel.amount), new Prisma.Decimal(0));
   if (!totalChannels.eq(money(line.amount).abs())) return "مجموع قنوات السداد يجب أن يساوي مبلغ السند.";
-  if ((kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") && channels.every((channel) => normalizeName(channel.name) === normalizeName(line.treasuryName || ""))) return "التحويل الداخلي يحتاج خزينة مصدر وخزينة وجهة مختلفتين.";
+  if (kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") {
+    const anchor = line.treasuryName.trim() || channels[0]?.name || "";
+    const counterparty = line.transferCounterpartyTreasuryName.trim() || channels.find((channel) => normalizeName(channel.name) !== normalizeName(anchor))?.name || "";
+    if (!counterparty || normalizeName(counterparty) === normalizeName(anchor)) return "التحويل الداخلي يحتاج خزينة مصدر وخزينة وجهة مختلفتين.";
+  }
   if (!accountTarget(line) || kind === "TRANSFER_IN" || kind === "TRANSFER_OUT" || autoCreateAccounts) return undefined;
   return undefined;
 }
@@ -128,11 +166,16 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
     const input = importSchema.parse(raw);
     await requirePermission("treasury.transact");
     const rows = [] as Array<{ row: number; reference: string; kind: VoucherKind; amount: number; accountName: string; itemCategory: string; channels: Array<{ name: string; amount: number }>; isValid: boolean; reason?: string; accountStatus: "MATCHED" | "AUTO_CREATE" | "EXPENSE_ACCOUNT" | "NONE" }>;
+    const pairedSourceRows = new Set(input.reconciledTransfers.flatMap((pair) => [`PAYMENT:${pair.paymentRowNumber}`, `RECEIPT:${pair.receiptRowNumber}`]));
     for (const rawRow of input.rows) {
       const parsed = voucherLineSchema.safeParse(rawRow);
       if (!parsed.success) { rows.push({ row: Number((rawRow as { sourceRowNumber?: number })?.sourceRowNumber ?? 0), reference: "—", kind: input.type, amount: 0, accountName: "", itemCategory: "", channels: [], isValid: false, reason: parsed.error.issues.map((issue) => issue.message).join(" • "), accountStatus: "NONE" }); continue; }
       const line = parsed.data;
       const kind = voucherMovementKind(line.movementType, input.type);
+      if (pairedSourceRows.has(`${line.defaultType}:${line.sourceRowNumber}`)) {
+        rows.push({ row: line.sourceRowNumber, reference: line.transactionReference, kind, amount: line.amount, accountName: line.accountName, itemCategory: line.itemCategory, channels: channelsFor(line).map((channel) => ({ name: channel.name, amount: Number(channel.amount) })), isValid: true, reason: "تمت مطابقة التحويل مع السند المقابل تلقائياً.", accountStatus: "NONE" });
+        continue;
+      }
       const issue = issueFor(line, input.type, input.autoCreateAccounts);
       const accountMatch = await findAccount(line, kind);
       const accountRequired = Boolean(accountMatch.target) && kind !== "TRANSFER_IN" && kind !== "TRANSFER_OUT";
@@ -152,12 +195,19 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
     const parsed = input.rows.map((rawRow) => ({ rawRow, parsed: voucherLineSchema.safeParse(rawRow) }));
     const invalid = parsed.filter((entry) => !entry.parsed.success).map((entry) => ({ row: Number((entry.rawRow as { sourceRowNumber?: number })?.sourceRowNumber ?? 0), reason: (entry.parsed as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
     const lines = parsed.filter((entry): entry is { rawRow: unknown; parsed: { success: true; data: ValidVoucherLine } } => entry.parsed.success).map((entry) => entry.parsed.data);
-    for (const line of lines) { const issue = issueFor(line, input.type, input.autoCreateAccounts); if (issue) invalid.push({ row: line.sourceRowNumber, reason: issue }); }
+    const pairedSourceRows = new Set(input.reconciledTransfers.flatMap((pair) => [`PAYMENT:${pair.paymentRowNumber}`, `RECEIPT:${pair.receiptRowNumber}`]));
+    for (const line of lines) {
+      if (pairedSourceRows.has(`${line.defaultType}:${line.sourceRowNumber}`)) continue;
+      const issue = issueFor(line, input.type, input.autoCreateAccounts); if (issue) invalid.push({ row: line.sourceRowNumber, reason: issue });
+    }
+    for (const pair of input.reconciledTransfers) {
+      if (normalizeName(pair.fromTreasuryName) === normalizeName(pair.toTreasuryName)) invalid.push({ row: pair.receiptRowNumber, reason: "خزينة المصدر والوجهة للتحويل يجب أن تكون مختلفتين." });
+    }
     const invalidRows = new Set(invalid.map((row) => row.row));
-    const validLines = lines.filter((line) => !invalidRows.has(line.sourceRowNumber));
+    const validLines = lines.filter((line) => !pairedSourceRows.has(`${line.defaultType}:${line.sourceRowNumber}`) && !invalidRows.has(line.sourceRowNumber));
     if (invalid.length && !input.skipInvalidRows) throw new BusinessRuleError(`يوجد ${invalid.length} صف غير صالح. صحح الملف أو فعّل التخطي.`);
-    if (!validLines.length) throw new BusinessRuleError("لا توجد سندات صالحة للاستيراد.");
-    const checksum = createHash("sha256").update(JSON.stringify({ type: input.type, lines: validLines })).digest("hex");
+    if (!validLines.length && !input.reconciledTransfers.length) throw new BusinessRuleError("لا توجد سندات صالحة للاستيراد.");
+    const checksum = createHash("sha256").update(JSON.stringify({ type: input.type, lines: validLines, reconciledTransfers: input.reconciledTransfers })).digest("hex");
     const prior = await prisma.importJob.findFirst({ where: { type: "VOUCHERS", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
     if (prior) return ok({ jobId: prior.id, created: 0, skipped: validLines.length, transfers: 0, invalid });
     const job = await prisma.importJob.create({ data: { type: "VOUCHERS", status: "PROCESSING", checksum, mapping: { type: input.type, autoCreateAccounts: input.autoCreateAccounts, skipInvalidRows: input.skipInvalidRows }, createdById: user.id } });
@@ -173,21 +223,8 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
             const anchorId = treasuryByName.get(anchorName)?.id;
             if (!anchorId) throw new BusinessRuleError("تعذر تحديد خزينة السند.");
             if (kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") {
-              const opposite = channels.find((channel) => normalizeName(channel.name) !== normalizeName(anchorName));
-              if (!opposite) throw new BusinessRuleError("التحويل الداخلي يحتاج قناة تمثل الخزينة المقابلة.");
-              const otherId = treasuryByName.get(opposite.name)?.id;
-              if (!otherId || otherId === anchorId) throw new BusinessRuleError("خزينة المصدر والوجهة للتحويل يجب أن تكون مختلفتين.");
-              const fromId = kind === "TRANSFER_OUT" ? anchorId : otherId;
-              const toId = kind === "TRANSFER_OUT" ? otherId : anchorId;
-              const locked = await lockTreasuriesForUpdate(tx, [fromId, toId]);
-              const from = locked.get(fromId)!; const to = locked.get(toId)!; const amount = money(line.amount);
-              if (from.currentBalance.lt(amount)) throw new BusinessRuleError(`السيولة غير كافية في الخزينة ${from.name}.`);
-              await tx.treasury.update({ where: { id: fromId }, data: { currentBalance: { decrement: amount } } });
-              await tx.treasury.update({ where: { id: toId }, data: { currentBalance: { increment: amount } } });
-              const outNumber = await nextTransactionNumber(tx); const inNumber = await nextTransactionNumber(tx);
-              const transfer = await tx.treasuryTransfer.create({ data: { transferNumber: `TRF-${outNumber}`, fromTreasuryId: fromId, toTreasuryId: toId, amount, notes: ["استيراد Excel", line.transactionReference, line.notes].filter(Boolean).join(" — "), createdById: user.id, ...(transactionDate(line) ? { createdAt: transactionDate(line) } : {}) } });
-              const transactions = await tx.treasuryTransaction.createMany({ data: [{ transactionNumber: outNumber, treasuryId: fromId, transferId: transfer.id, type: "TRANSFER", amount: amount.neg(), description: `تحويل مستورد إلى ${to.name} — ${line.transactionReference}`, createdByUser: user.id }, { transactionNumber: inNumber, treasuryId: toId, transferId: transfer.id, type: "TRANSFER", amount, description: `تحويل مستورد من ${from.name} — ${line.transactionReference}`, createdByUser: user.id }] });
-              await writeAudit(tx, { tableName: "TreasuryTransfer", recordId: transfer.id, action: "INSERT", newData: { transfer, importedReference: line.transactionReference, transactionCount: transactions.count }, performedBy: user.id });
+              const counterpartyName = line.transferCounterpartyTreasuryName.trim() || channels.find((channel) => normalizeName(channel.name) !== normalizeName(anchorName))?.name || "";
+              await postImportedTransfer(tx, { fromTreasuryName: kind === "TRANSFER_OUT" ? anchorName : counterpartyName, toTreasuryName: kind === "TRANSFER_OUT" ? counterpartyName : anchorName, amount: money(line.amount), notes: ["استيراد Excel", line.transactionReference, line.notes].filter(Boolean).join(" — "), date: line.date, time: line.time, reference: line.transactionReference }, user.id);
               return { transfer: true, transactions: 2 };
             }
             const account = await resolveOrCreateAccount(tx, line, kind, input.autoCreateAccounts, user.id);
@@ -216,7 +253,20 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
           skipped += 1;
         }
       }
-      const summary = { total: input.rows.length, created, skipped, transfers, invalid: invalid.length };
+      for (const pair of input.reconciledTransfers) {
+        try {
+          await withTxRetry(() => prisma.$transaction(async (tx) => {
+            await postImportedTransfer(tx, { fromTreasuryName: pair.fromTreasuryName, toTreasuryName: pair.toTreasuryName, amount: money(pair.amount), notes: pair.notes, date: pair.date, time: pair.time, reference: pair.key }, user.id);
+          }, TX_OPTIONS));
+          created += 1; transfers += 1;
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "تعذر ترحيل التحويل الداخلي.";
+          invalid.push({ row: pair.receiptRowNumber, reason });
+          if (!input.skipInvalidRows) throw error;
+          skipped += 1;
+        }
+      }
+      const summary = { total: input.rows.length + input.reconciledTransfers.length, created, skipped, transfers, invalid: invalid.length };
       await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
       await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: { ...summary, source: "VOUCHER_EXCEL_IMPORT" }, performedBy: user.id });
       ["/vouchers", "/treasury", "/accounts", "/"].forEach((path) => revalidatePath(path));
