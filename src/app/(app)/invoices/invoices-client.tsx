@@ -35,6 +35,7 @@ import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-previ
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { FilteredInvoiceListPrintDocument } from "@/components/print/templates/filtered-invoice-list-print-document";
+import { OemCode } from "@/components/inventory/oem-code";
 
 interface InvoicesClientProps {
   rows: InvoiceListRow[];
@@ -412,7 +413,7 @@ function InvoiceDetailModal({
             {detail.items.map((it) => (
               <TR key={it.id}>
                 <TD className="max-w-[200px] truncate font-bold text-white">{it.nameAr}</TD>
-                <TD className="font-mono text-[11px] text-bmw-blue">{formatOemNumber(it.oemNumber)}</TD>
+                <TD><OemCode value={it.oemNumber} className="text-bmw-blue" /></TD>
                 <TD className="font-mono text-[11px] text-bmw-muted">{it.binLocationSnapshot ?? "—"}</TD>
                 <TD className="tabular">{it.quantity}</TD>
                 <TD className="tabular">{formatMoney(it.unitPrice)}</TD>
@@ -591,7 +592,7 @@ function InvoiceReturnModal({ invoice, treasuries, onClose, onDone }: { invoice:
     <div className="space-y-4">
       {loading ? <Alert variant="info">جاري تحميل أصناف الفاتورة…</Alert> : null}
       {error ? <Alert variant="error">{error}</Alert> : null}
-      {detail ? <><Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>المباع / المستلم</TH><TH>الكمية المرتجعة</TH><TH>القيمة التقديرية</TH></TR></THead><TBody>{detail.items.map((item) => { const quantity = quantities[item.id] ?? "0"; const numeric = Number(quantity) || 0; return <TR key={item.id}><TD className="font-bold text-white">{item.nameAr}</TD><TD className="font-mono text-xs text-bmw-blue">{formatOemNumber(item.oemNumber)}</TD><TD className="tabular">{item.quantity}</TD><TD><Input type="number" min="0" max={item.quantity} step="1" value={quantity} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="w-24" dir="ltr" /></TD><TD className="tabular">{formatMoney(item.totalPrice / item.quantity * numeric)}</TD></TR>; })}</TBody></Table>
+      {detail ? <><Table><THead><TR><TH>الصنف</TH><TH>OEM</TH><TH>المباع / المستلم</TH><TH>الكمية المرتجعة</TH><TH>القيمة التقديرية</TH></TR></THead><TBody>{detail.items.map((item) => { const quantity = quantities[item.id] ?? "0"; const numeric = Number(quantity) || 0; return <TR key={item.id}><TD className="font-bold text-white">{item.nameAr}</TD><TD><OemCode value={item.oemNumber} className="text-bmw-blue" /></TD><TD className="tabular">{item.quantity}</TD><TD><Input type="number" min="0" max={item.quantity} step="1" value={quantity} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="w-24" dir="ltr" /></TD><TD className="tabular">{formatMoney(item.totalPrice / item.quantity * numeric)}</TD></TR>; })}</TBody></Table>
         <div className="grid gap-3 sm:grid-cols-3"><Field label={isSale ? "مبلغ نقدي يُرد للعميل" : "مبلغ نقدي يُستلم من المورد"} hint={`حد أقصى تقريبي ${formatMoney(returnedSubtotal)} ${CURRENCY}`}><Input type="number" min="0" max={returnedSubtotal} step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} dir="ltr" /></Field><Field label="الخزينة النقدية"><Select value={treasuryId} onChange={(event) => setTreasuryId(event.target.value)}><option value="">لا يوجد سداد نقدي</option>{treasuries.map((treasury) => <option key={treasury.id} value={treasury.id}>{treasury.name}</option>)}</Select></Field><Field label="بيان / سبب المرتجع"><Input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="مثال: عيب تصنيع" /></Field></div>
         <Alert variant="info">القيمة التقديرية للأصناف المحددة: <strong>{formatMoney(returnedSubtotal)} {CURRENCY}</strong>. أي رصيد غير نقدي يُرحّل تلقائياً إلى حساب {invoice.accountName}.</Alert>
       </> : null}

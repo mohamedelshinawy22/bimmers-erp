@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { num } from "@/lib/utils";
+import { money, num, sanitizeOemForSearch } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
 
@@ -125,14 +125,20 @@ export async function searchParts(
 
   if (input.query) {
     const q = input.query.trim();
-    const numeric = q.replace(/[\s\-.]/g, "");
+    const oemKey = sanitizeOemForSearch(q);
+    // PostgreSQL comparison key removes visual separators in stored legacy OEMs too,
+    // so 17 11-8 484 638, 17118484638, and 17/118/484638 resolve identically.
+    const separatorInsensitiveIds = oemKey.length >= 2
+      ? await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT 10000`)
+      : [];
     and.push({
       OR: [
-        { oemNumber: { contains: numeric, mode: "insensitive" } },
+        { oemNumber: { contains: oemKey, mode: "insensitive" } },
+        ...(separatorInsensitiveIds.length ? [{ id: { in: separatorInsensitiveIds.map((row) => row.id) } }] : []),
         { nameAr: { contains: q } },
         { nameEn: { contains: q, mode: "insensitive" } },
         { brandPartNumber: { contains: q, mode: "insensitive" } },
-        { barcode: { equals: numeric } },
+        { barcode: { equals: oemKey } },
       ],
     });
   }
@@ -203,7 +209,11 @@ function toPosRow(p: { id: string; oemNumber: string; nameAr: string; nameEn: st
 
 export async function quickSearchParts(query: string, limit = 12): Promise<PosPartRow[]> {
   const { normalized, numericNormalized, variations } = normalizeSearchTerm(query);
+  const oemKey = sanitizeOemForSearch(query);
   if (normalized.length < 2) return [];
+  const separatorInsensitiveIds = oemKey.length >= 2
+    ? await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT ${Math.max(limit * 8, 96)}`)
+    : [];
 
   const rows = await prisma.partItem.findMany({
     where: {
@@ -211,7 +221,8 @@ export async function quickSearchParts(query: string, limit = 12): Promise<PosPa
       isDeleted: false,
       OR: [
         { barcode: { equals: numericNormalized } },
-        { oemNumber: { contains: numericNormalized, mode: "insensitive" } },
+        { oemNumber: { contains: oemKey || numericNormalized, mode: "insensitive" } },
+        ...(separatorInsensitiveIds.length ? [{ id: { in: separatorInsensitiveIds.map((row) => row.id) } }] : []),
         ...variations.flatMap((term) => [
           { nameAr: { contains: term } },
           { nameEn: { contains: term, mode: "insensitive" as const } },

@@ -35,6 +35,7 @@ import { PurchaseInvoiceModal } from "./components/purchase-invoice-modal";
 import { StockLedgerModal } from "./components/stock-ledger-modal";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { ExcelImportModal } from "@/components/inventory/excel-import-modal";
+import { OemCode } from "@/components/inventory/oem-code";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { PartCatalogPrintDocument } from "@/components/print/templates/universal-document-templates";
@@ -277,8 +278,8 @@ export function InventoryClient({
                   className={`${part.isActive ? "" : "opacity-50 "}${canOpenLedger ? "cursor-pointer transition-colors hover:bg-slate-800/60 focus:outline-none focus:ring-1 focus:ring-bmw-blue" : ""}`}
                 >
                   <TD><input aria-label={`تحديد ${part.nameAr}`} type="checkbox" checked={selectedIds.includes(part.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, part.id])] : current.filter((id) => id !== part.id))}/></TD>
-                  <TD className="whitespace-nowrap font-mono text-xs text-bmw-blue">
-                    <div className="flex flex-wrap items-center gap-1.5"><span>{formatOemNumber(part.oemNumber)}</span>{part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}</div>
+                  <TD className="whitespace-nowrap text-bmw-blue">
+                    <div className="flex flex-wrap items-center gap-1.5"><OemCode value={part.oemNumber} className="text-bmw-blue" />{part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}</div>
                   </TD>
                   <TD className="max-w-[240px]">
                     <div className="flex flex-wrap items-center gap-1.5"><p className="truncate font-bold text-white">{part.nameAr}</p>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم ×{part.duplicateNameCount}</Badge> : null}</div>

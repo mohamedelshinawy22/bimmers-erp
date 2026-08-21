@@ -87,15 +87,23 @@ export function startOfYesterday(): Date {
 
 /** ── BMW domain helpers ───────────────────────────────────────────────── */
 
-/** 34116859066 → 34 11 6 859 066 (BMW ETK display convention). */
-export function formatOemNumber(oem: string): string {
-  const clean = oem.replace(/\D/g, "");
-  if (clean.length !== 11) return oem;
-  return `${clean.slice(0, 2)} ${clean.slice(2, 4)} ${clean.slice(4, 5)} ${clean.slice(5, 8)} ${clean.slice(8, 11)}`;
+/**
+ * OEM identifiers are operational codes, not prose. Keep them continuous so RTL
+ * layouts cannot reorder legacy ETK chunks (e.g. 17 11 8 484 638) visually.
+ * Valid separators such as / and - remain intact for display.
+ */
+export function formatOemNumber(oem?: string | null): string {
+  if (!oem) return "-";
+  return String(oem).trim().replace(/\s+/g, "").toUpperCase();
+}
+
+/** Stable comparison key for OEM searching across spaces, hyphens, slashes, dots, and underscores. */
+export function sanitizeOemForSearch(oem: string): string {
+  return String(oem).replace(/[\s\-_/\.]/g, "").toUpperCase();
 }
 
 export function normalizeOemNumber(oem: string): string {
-  return oem.replace(/[\s\-.]/g, "").toUpperCase();
+  return sanitizeOemForSearch(oem);
 }
 
 /** BMW VINs are 17 chars and never contain I, O or Q. */

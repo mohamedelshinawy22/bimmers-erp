@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getInvoicePrintDataAction } from "@/server/actions/invoice-print.actions";
 import type { InvoicePrintData, InvoicePrintFormat } from "@/lib/invoice-print-types";
 import type { InvoiceTemplateChoice } from "@/components/print/print-container";
+import { formatOemNumber } from "@/lib/utils";
 
 const TEMPLATE_STORAGE_KEY = "bimmer_print_template_invoice";
 const FORMAT_STORAGE_KEY = "bimmer_print_paper_invoice";
@@ -21,7 +22,8 @@ export function useInvoicePrint(invoiceId?: string) {
     setState("loading"); setError(null);
     const result = await getInvoicePrintDataAction(invoiceId);
     if (!result.success) { setState("error"); setError(result.error); return null; }
-    setData(result.data); setState("ready"); return result.data;
+    const normalized = { ...result.data, lines: result.data.lines.map((line) => ({ ...line, oemNumber: formatOemNumber(line.oemNumber) })) };
+    setData(normalized); setState("ready"); return normalized;
   }, [invoiceId]);
   const print = useCallback(async () => { const ready = data ?? await prepare(); if (ready) setState("printing"); }, [data, prepare]);
   const closePreview = useCallback(() => { setState("idle"); setData(null); }, []);

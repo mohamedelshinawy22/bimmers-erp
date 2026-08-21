@@ -21,7 +21,7 @@ import { Badge, StockBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert, Modal } from "@/components/ui/modal";
-import { CURRENCY, formatMoney, formatOemNumber } from "@/lib/utils";
+import { CURRENCY, formatMoney } from "@/lib/utils";
 import { lineTotal as calcLineTotal, round2, sum as sumMoney, taxOf } from "@/lib/money";
 import type { PosPartRow } from "@/server/services/parts.service";
 import type { AccountVehicle, PosAccount } from "@/server/services/accounts.service";
@@ -33,6 +33,7 @@ import { QuickPartModal } from "@/components/pos/quick-part-modal";
 import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-preview-modal";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { POSAccountCombobox } from "./components/pos-account-combobox";
+import { OemCode } from "@/components/inventory/oem-code";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -441,7 +442,7 @@ export function PosTerminal({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-sm font-bold text-white">{part.nameAr}</p>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم</Badge> : null}</div>
                         <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-bmw-muted">
-                          <span>{formatOemNumber(part.oemNumber)}</span>
+                          <OemCode value={part.oemNumber} className="text-bmw-muted" />
                           {part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}
                           <span className="text-bmw-cardBorder">|</span>
                           <span className="font-bold text-bmw-silver">{part.brandName}</span>
@@ -511,7 +512,7 @@ export function PosTerminal({
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-white">{line.part.nameAr}</p>
                         <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-bmw-muted">
-                          <span>{formatOemNumber(line.part.oemNumber)}</span>
+                          <OemCode value={line.part.oemNumber} className="text-bmw-muted" />
                           <span className="text-bmw-cardBorder">|</span>
                           <span>{line.part.brandName}</span>
                           {line.part.binCode ? (
