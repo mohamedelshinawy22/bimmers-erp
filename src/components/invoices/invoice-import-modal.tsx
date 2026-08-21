@@ -7,6 +7,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/input";
 import { downloadInvoiceImportTemplateAction, executeInvoiceImportAction, previewInvoiceImportAction } from "@/server/actions/invoice-import.actions";
+import { detailedInvoiceExtractionStats, detailedInvoicesToImportRows, parseDetailedInvoiceWorkbook } from "@/lib/invoice-excel-parser";
 
 type InvoiceImportType = "SALE" | "PURCHASE" | "SALE_RETURN" | "PURCHASE_RETURN";
 const importMeta: Record<InvoiceImportType, { title: string; template: string; tone: string }> = {
@@ -52,33 +53,12 @@ function readMappedRow(headers: unknown[], values: unknown[], sourceRowNumber: n
   return result;
 }
 function isUsableInvoiceRow(row: Record<string, unknown>) { return Boolean(String(row.documentNumber ?? "").trim() && String(row.accountName ?? "").trim()); }
-function mapRows(sheet: XLSX.WorkSheet, type: InvoiceImportType, mode: ImportMode) {
+function mapSummaryRows(sheet: XLSX.WorkSheet, type: InvoiceImportType) {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: true });
   const invoiceHeaderIndex = matrix.findIndex((row) => row.some((cell) => (aliases.documentNumber ?? []).includes(normalizeHeader(cell))));
   if (invoiceHeaderIndex < 0) throw new Error("لم يتم العثور على رأس «رقم الفاتورة» في الملف.");
   const header = matrix[invoiceHeaderIndex] ?? [];
-  if (mode === "SUMMARY") {
-    return matrix.slice(invoiceHeaderIndex + 1).map((values, offset) => readMappedRow(header, values, invoiceHeaderIndex + offset + 2, type)).filter(isUsableInvoiceRow);
-  }
-  const rows: Array<Record<string, unknown>> = [];
-  let currentHeader: Record<string, unknown> | null = null;
-  let itemHeader: unknown[] | null = null;
-  for (let index = invoiceHeaderIndex + 1; index < matrix.length; index += 1) {
-    const values = matrix[index] ?? [];
-    const firstCell = values[0];
-    const isParent = Number.isInteger(Number(firstCell)) && Number(firstCell) > 0;
-    if (isParent) {
-      currentHeader = readMappedRow(header, values, index + 1, type);
-      itemHeader = null;
-      continue;
-    }
-    if (values.some((cell) => (aliases.oemNumber ?? []).includes(normalizeHeader(cell)))) { itemHeader = values; continue; }
-    if (!currentHeader || !itemHeader) continue;
-    const item = readMappedRow(itemHeader, values, index + 1, type);
-    if (!String(item.oemNumber ?? "").trim()) continue;
-    rows.push({ ...currentHeader, ...item, sourceRowNumber: index + 1, type });
-  }
-  return rows;
+  return matrix.slice(invoiceHeaderIndex + 1).map((values, offset) => readMappedRow(header, values, invoiceHeaderIndex + offset + 2, type)).filter(isUsableInvoiceRow);
 }
 
 function downloadBase64(base64: string, fileName: string, mimeType: string) {
@@ -92,6 +72,7 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
   const [step, setStep] = useState(1);
   const [importMode, setImportMode] = useState<ImportMode>("DETAILED");
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  const [extractionStats, setExtractionStats] = useState<{ invoices: number; items: number } | null>(null);
   const [fileName, setFileName] = useState("");
   const [skipInvalidRows, setSkipInvalidRows] = useState(true);
   const [autoCreateAccounts, setAutoCreateAccounts] = useState(false);
@@ -113,16 +94,20 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
   });
 
   const loadFile = (file: File) => {
-    setError(null); setMessage(null); setPreview(undefined); setFileName(file.name);
+    setError(null); setMessage(null); setPreview(undefined); setExtractionStats(null); setFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const workbook = XLSX.read(reader.result, { type: "array" });
         const first = workbook.Sheets[workbook.SheetNames[0] ?? ""];
         if (!first) throw new Error("لا توجد ورقة بيانات قابلة للقراءة في الملف.");
-        const parsed = mapRows(first, type, importMode);
-        if (!parsed.length) throw new Error("لم يتم العثور على صفوف بيانات في الملف.");
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(first, { header: 1, defval: "", raw: true });
+        const detailedInvoices = importMode === "DETAILED" ? parseDetailedInvoiceWorkbook(matrix, type) : [];
+        const parsed = importMode === "DETAILED" ? detailedInvoicesToImportRows(detailedInvoices, type) : mapSummaryRows(first, type);
+        if (!parsed.length) throw new Error(importMode === "DETAILED" ? "لم يتم العثور على بنود أصناف صالحة مرتبطة بفواتير رئيسية." : "لم يتم العثور على صفوف بيانات في الملف.");
         if (parsed.length > 10_000) throw new Error("الحد الأقصى للاستيراد هو 10,000 صف.");
+        if (importMode === "DETAILED") setExtractionStats(detailedInvoiceExtractionStats(detailedInvoices));
+        else setExtractionStats({ invoices: new Set(parsed.map((row) => String(row.documentNumber))).size, items: 0 });
         setRows(parsed); setStep(2);
       } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر قراءة ملف Excel."); }
     };
@@ -150,7 +135,7 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
       {message ? <Alert variant="success">{message}</Alert> : null}
       <div className="grid grid-cols-3 gap-2 text-xs"><div className={`rounded-lg border p-2 ${step >= 1 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>1. النموذج والرفع</div><div className={`rounded-lg border p-2 ${step >= 2 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>2. مطابقة البيانات</div><div className={`rounded-lg border p-2 ${step >= 3 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>3. التنفيذ</div></div>
       {step === 1 ? <section className="space-y-3"><Alert variant="info">اختر طريقة الاستيراد أولاً. الاستيراد التفصيلي يطابق الأصناف ويرحّل حركات المخزون، بينما الاستيراد الإجمالي ينشئ قيوداً مالية للفواتير دون بنود أصناف أو أي حركة مخزنية.</Alert><div className="grid gap-3 md:grid-cols-2"><button type="button" onClick={() => { setImportMode("DETAILED"); setRows([]); setPreview(undefined); }} className={`rounded-2xl border p-4 text-right transition ${importMode === "DETAILED" ? "border-bmw-blue bg-bmw-blue/15 ring-1 ring-bmw-blue" : "border-bmw-cardBorder bg-bmw-carbon hover:border-bmw-blue/60"}`}><b className="block text-base text-bmw-blue">استيراد تفصيلي — موصى به</b><span className="mt-1 block text-xs text-bmw-muted">فواتير ببنود أصناف؛ يتحقق من OEM ويحدّث رصيد المخزون عبر محرك الترحيل الذري.</span></button><button type="button" onClick={() => { setImportMode("SUMMARY"); setRows([]); setPreview(undefined); }} className={`rounded-2xl border p-4 text-right transition ${importMode === "SUMMARY" ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500" : "border-bmw-cardBorder bg-bmw-carbon hover:border-emerald-500/60"}`}><b className="block text-base text-emerald-400">استيراد إجمالي — مالي فقط</b><span className="mt-1 block text-xs text-bmw-muted">فاتورة واحدة لكل صف؛ يحدّث الحساب والخزينة فقط، من دون InvoiceItem أو حركات مخزون.</span></button></div><p className={`rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 text-sm font-bold ${importMeta[type].tone}`}>{importMeta[type].title} — {importMode === "DETAILED" ? "تفصيلي بالأصناف" : "إجمالي مالي"}</p><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => downloadTemplate("SUMMARY")} loading={pending}><Download size={15}/> تنزيل نموذج ملخص مالي</Button><Button variant="outline" onClick={() => downloadTemplate("DETAILED")} loading={pending}><Download size={15}/> تنزيل نموذج تفصيلي بالأصناف</Button><Button onClick={() => inputRef.current?.click()}><FileSpreadsheet size={15}/> اختيار ملف Excel ({importMode === "DETAILED" ? "تفصيلي" : "إجمالي"})</Button><input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) loadFile(file); event.currentTarget.value = ""; }} /></div></section> : null}
-      {step === 2 ? <section className="space-y-3"><Alert variant="info">تمت قراءة <b>{rows.length}</b> صفاً من الملف <b>{fileName}</b>. {importMode === "DETAILED" ? "سيجري التحقق من الحسابات والأصناف والخزائن قبل تحديث المخزون." : "سيجري التحقق من الحسابات والخزائن قبل إنشاء القيود المالية فقط."}</Alert><div className="max-h-64 overflow-auto rounded-xl border border-bmw-cardBorder"><table className="w-full text-xs"><thead><tr className="bg-bmw-carbon text-bmw-muted"><th className="p-2">الصف</th><th className="p-2">المستند</th><th className="p-2">الحساب</th>{importMode === "DETAILED" ? <th className="p-2">OEM</th> : <th className="p-2">الإجمالي</th>}</tr></thead><tbody>{rows.slice(0, 15).map((row) => <tr key={String(row.sourceRowNumber)} className="border-t border-bmw-cardBorder"><td className="p-2">{String(row.sourceRowNumber)}</td><td className="p-2">{String(row.documentNumber)}</td><td className="p-2">{String(row.accountName)}</td>{importMode === "DETAILED" ? <td className="p-2 font-mono" dir="ltr">{String(row.oemNumber)}</td> : <td className="p-2 font-mono">{String(row.grandTotal)}</td>}</tr>)}</tbody></table></div></section> : null}
+      {step === 2 ? <section className="space-y-3"><Alert variant="info">تمت قراءة <b>{rows.length}</b> صفاً من الملف <b>{fileName}</b>. {importMode === "DETAILED" ? "سيجري التحقق من الحسابات والأصناف والخزائن قبل تحديث المخزون." : "سيجري التحقق من الحسابات والخزائن قبل إنشاء القيود المالية فقط."}</Alert>{extractionStats ? <div className="grid gap-2 sm:grid-cols-2"><Alert variant="success">تم استخراج <b>{extractionStats.invoices}</b> فاتورة بنجاح.</Alert><Alert variant="info">{importMode === "DETAILED" ? <>تتضمن <b>{extractionStats.items}</b> صنفاً مرتبطاً بفواتيره الرئيسية.</> : <>تقرير مالي إجمالي دون بنود أصناف.</>}</Alert></div> : null}<div className="max-h-64 overflow-auto rounded-xl border border-bmw-cardBorder"><table className="w-full text-xs"><thead><tr className="bg-bmw-carbon text-bmw-muted"><th className="p-2">الصف</th><th className="p-2">المستند</th><th className="p-2">الحساب</th>{importMode === "DETAILED" ? <><th className="p-2">كود الصنف/OEM</th><th className="p-2">اسم القطعة</th><th className="p-2">الكمية</th><th className="p-2">السعر</th></> : <th className="p-2">الإجمالي</th>}</tr></thead><tbody>{rows.slice(0, 15).map((row) => <tr key={String(row.sourceRowNumber)} className="border-t border-bmw-cardBorder"><td className="p-2">{String(row.sourceRowNumber)}</td><td className="p-2 font-mono" dir="ltr">{String(row.documentNumber)}</td><td className="p-2">{String(row.accountName)}</td>{importMode === "DETAILED" ? <><td className="p-2 font-mono" dir="ltr">{String(row.oemNumber)}</td><td className="p-2">{String(row.partName)}</td><td className="p-2 font-mono">{String(row.quantity)}</td><td className="p-2 font-mono">{String(row.unitPrice)}</td></> : <td className="p-2 font-mono">{String(row.grandTotal)}</td>}</tr>)}</tbody></table></div></section> : null}
       {step === 3 && preview ? <section className="space-y-3"><div className="grid gap-2 sm:grid-cols-3"><Alert variant="info">إجمالي الصفوف: {preview.total}</Alert><Alert variant="success">المستندات السليمة: {validCount}</Alert><Alert variant={invalidCount ? "warning" : "success"}>غير صالحة: {invalidCount}</Alert></div><label className="flex cursor-pointer items-start gap-2 rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-sm"><input type="checkbox" checked={autoCreateAccounts} onChange={(event) => setAutoCreateAccounts(event.target.checked)} /><span><b>إنشاء الحسابات غير الموجودة تلقائياً</b> بالنوع المناسب لهذا المعالج؛ الحسابات المتطابقة فقط تُستخدم عند إيقاف الخيار.</span></label>{invalidCount ? <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm"><input type="checkbox" checked={skipInvalidRows} onChange={(event) => setSkipInvalidRows(event.target.checked)} /><span><b>تخطي الصفوف غير الصالحة</b> ومتابعة استيراد البيانات المطابقة فقط.</span></label> : null}<div className="max-h-72 overflow-auto rounded-xl border border-bmw-cardBorder"><table className="w-full text-xs"><thead><tr className="bg-bmw-carbon text-bmw-muted"><th className="p-2">الصف</th><th className="p-2">المرجع</th><th className="p-2">الحساب</th>{importMode === "DETAILED" ? <th className="p-2">OEM</th> : <th className="p-2">الإجمالي</th>}<th className="p-2">الحالة</th></tr></thead><tbody>{rowSummary.map((row) => <tr key={row.row} className="border-t border-bmw-cardBorder"><td className="p-2">{row.row}</td><td className="p-2">{row.documentNumber}</td><td className="p-2">{row.accountName}</td>{importMode === "DETAILED" ? <td className="p-2 font-mono" dir="ltr">{row.oemNumber}</td> : <td className="p-2 font-mono">{row.grandTotal.toLocaleString("ar-EG", { minimumFractionDigits: 2 })}</td>}<td className={`p-2 ${row.reason ? "text-bmw-mRed" : "text-emerald-400"}`}>{row.reason ?? "مطابق"}</td></tr>)}</tbody></table></div></section> : null}
     </div>
   </Modal>;
