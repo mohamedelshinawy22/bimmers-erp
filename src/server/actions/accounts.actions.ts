@@ -114,7 +114,11 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
             : money(0);
       const delta = money(targetBalance.sub(before.currentBalance));
       const balanceChanged = !delta.eq(0);
-      if (balanceChanged && (!input.adjustmentReason || input.adjustmentReason.trim().length < 5)) {
+      const adjustmentReason = input.adjustmentReason?.trim() || "تسوية رصيد دفتري مباشر";
+      if (input.type === "EXPENSE" && !targetBalance.eq(0)) {
+        throw new BusinessRuleError("حسابات المصروفات التشغيلية تبقى متزنة ولا تقبل رصيداً مديناً أو دائناً.");
+      }
+      if (balanceChanged && adjustmentReason.length < 5) {
         throw new BusinessRuleError("سبب تعديل الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل للتدقيق المالي.");
       }
 
@@ -135,11 +139,11 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
       });
       if (balanceChanged) {
         const adjustment = await tx.accountBalanceAdjustment.create({
-          data: { accountId: before.id, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature!, reason: input.adjustmentReason!.trim(), createdByUser: user.id, createdByName: user.fullName },
+          data: { accountId: before.id, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature!, reason: adjustmentReason, createdByUser: user.id, createdByName: user.fullName },
         });
-        await writeAudit(tx, { tableName: "AccountBalanceAdjustment", recordId: adjustment.id, action: "INSERT", newData: { event: "ACCOUNT_BALANCE_MANUALLY_ADJUSTED", accountId: before.id, accountName: before.name, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature, reason: input.adjustmentReason, adjustedBy: user.fullName }, performedBy: user.id });
+        await writeAudit(tx, { tableName: "AccountBalanceAdjustment", recordId: adjustment.id, action: "INSERT", newData: { event: "ACCOUNT_BALANCE_MANUALLY_ADJUSTED", accountId: before.id, accountName: before.name, previousBalance: before.currentBalance, targetBalance, delta, targetNature: input.balanceNature, reason: adjustmentReason, adjustedBy: user.fullName }, performedBy: user.id });
       }
-      await writeAudit(tx, { tableName: "Account", recordId: input.id, action: "UPDATE", oldData: before, newData: { ...updated, event: balanceChanged ? "ACCOUNT_UPDATED_WITH_BALANCE_RECONCILIATION" : "ACCOUNT_UPDATED", balanceAdjustment: balanceChanged ? { previousBalance: before.currentBalance, targetBalance, delta, nature: input.balanceNature, reason: input.adjustmentReason } : undefined }, performedBy: user.id });
+      await writeAudit(tx, { tableName: "Account", recordId: input.id, action: "UPDATE", oldData: before, newData: { ...updated, event: balanceChanged ? "ACCOUNT_UPDATED_WITH_BALANCE_RECONCILIATION" : "ACCOUNT_UPDATED", balanceAdjustment: balanceChanged ? { previousBalance: before.currentBalance, targetBalance, delta, nature: input.balanceNature, reason: adjustmentReason } : undefined }, performedBy: user.id });
       return { id: updated.id, balanceChanged };
     }, TX_OPTIONS));
 
