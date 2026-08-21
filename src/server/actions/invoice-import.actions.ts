@@ -13,8 +13,14 @@ import { writeAudit } from "@/lib/audit";
 import { BusinessRuleError } from "@/lib/errors";
 import { formatOemNumber } from "@/lib/utils";
 import { createInvoiceReturn, createPurchaseInvoice, createSaleInvoice } from "@/server/services/invoice.service";
+import { nextAccountNumber } from "@/server/services/numbering.service";
+import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
-const documentTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
+const invoiceImportTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
+type InvoiceImportType = (typeof invoiceImportTypes)[number];
+const documentTypes = invoiceImportTypes;
+const typeLabel: Record<InvoiceImportType, string> = { SALE: "فواتير البيع", PURCHASE: "فواتير الشراء", SALE_RETURN: "مرتجعات البيع", PURCHASE_RETURN: "مرتجعات الشراء" };
+const permissionForType = (type: InvoiceImportType) => type === "SALE" || type === "SALE_RETURN" ? "invoice.sale" : "invoice.purchase";
 const numberValue = (value: unknown) => {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const parsed = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, ""));
@@ -53,18 +59,20 @@ const rawLineSchema = z.object({
   paidAmount: z.preprocess(numberValue, z.number().finite().min(0).max(99_999_999)).default(0),
   notes: z.string().trim().max(500).optional().or(z.literal("")),
 });
-const importSchema = z.object({ rows: z.array(z.unknown()).min(1).max(10_000), skipInvalidRows: z.boolean().default(true) });
+const importSchema = z.object({ type: z.enum(documentTypes), rows: z.array(z.unknown()).min(1).max(10_000), skipInvalidRows: z.boolean().default(true), autoCreateAccounts: z.boolean().default(false) });
+const templateSchema = z.object({ type: z.enum(documentTypes), format: z.enum(["SUMMARY", "DETAILED"]).default("DETAILED") });
 type ValidLine = z.infer<typeof rawLineSchema>;
 
 function headersForTemplate() {
   return ["رقم الفاتورة", "نوع الفاتورة", "الحساب", "رقم الهاتف", "الفاتورة المرتجعة", "طريقة السداد", "الخزينة", "رقم الصنف (OEM)", "كمية", "السعر", "خصم السطر", "المدفوع", "ملاحظات"];
 }
 
-function importTemplateWorkbook() {
+function importTemplateWorkbook(type: InvoiceImportType, format: "SUMMARY" | "DETAILED") {
   const headers = headersForTemplate();
+  const returnSource = type === "SALE_RETURN" || type === "PURCHASE_RETURN" ? "INV-أصلية-0001" : "";
+  const exampleType = type === "SALE" ? "فاتورة بيع" : type === "PURCHASE" ? "فاتورة شراء" : type === "SALE_RETURN" ? "مرتجع مبيعات" : "مرتجع مشتريات";
   const examples = [
-    ["EXT-0001", "فاتورة بيع", "عميل نقدي", "", "", "نقدي", "الخزينة الرئيسية", "17118484638", 1, 1200, 0, 1200, "استيراد تجريبي — احذف هذا الصف قبل الرفع"],
-    ["EXT-0002", "فاتورة شراء", "المورد", "", "", "آجل", "", "51459125626/622", 2, 800, 0, 0, ""],
+    ["EXT-0001", exampleType, type === "PURCHASE" || type === "PURCHASE_RETURN" ? "المورد" : "العميل", "", returnSource, type === "PURCHASE" ? "آجل" : "نقدي", type === "PURCHASE" ? "" : "الخزينة الرئيسية", "17118484638", 1, 1200, 0, type === "PURCHASE" ? 0 : 1200, `استيراد ${typeLabel[type]} — ${format === "SUMMARY" ? "ملخص مع بند تفصيلي إلزامي" : "تفصيلي"}`],
   ];
   const sheet = XLSX.utils.aoa_to_sheet([headers, ...examples]);
   sheet["!cols"] = [18, 18, 28, 18, 18, 15, 22, 22, 10, 14, 14, 14, 36].map((wch) => ({ wch }));
@@ -84,57 +92,74 @@ function inputRows(raw: unknown[]) {
   return raw.map((row, index) => ({ sourceRowNumber: index + 2, ...row as Record<string, unknown> }));
 }
 
-async function matchLine(line: ValidLine) {
+async function createMissingAccountForImport(line: ValidLine, type: InvoiceImportType, userId: string) {
+  const accountType = type === "PURCHASE" || type === "PURCHASE_RETURN" ? "SUPPLIER" as const : "CUSTOMER" as const;
+  const prefix = accountType === "SUPPLIER" ? "SUP" : "ACC";
+  return withTxRetry(() => prisma.$transaction(async (tx) => {
+    const existing = await tx.account.findFirst({ where: { OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } });
+    if (existing) return existing;
+    const account = await tx.account.create({ data: { accountNumber: await nextAccountNumber(tx, prefix), name: line.accountName, type: accountType, phone: line.accountPhone || null, currentBalance: 0, isActive: true, status: "ACTIVE" }, select: { id: true, name: true, type: true } });
+    await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "INSERT", newData: { importedFromInvoiceExcel: true, type, name: account.name }, performedBy: userId });
+    return account;
+  }, TX_OPTIONS));
+}
+
+async function matchLine(line: ValidLine, type: InvoiceImportType) {
   const oem = normalizeKey(line.oemNumber);
+  const accountTypes = type === "PURCHASE" || type === "PURCHASE_RETURN" ? ["SUPPLIER"] as const : ["CUSTOMER", "WORKSHOP_BMW"] as const;
   const [accounts, parts, treasuries] = await Promise.all([
-    prisma.account.findMany({ where: { isActive: true, OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } }),
+    prisma.account.findMany({ where: { isActive: true, type: { in: [...accountTypes] }, OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } }),
     prisma.$queryRaw<Array<{ id: string; oemNumber: string; nameAr: string }>>(Prisma.sql`SELECT id, "oemNumber", "nameAr" FROM "PartItem" WHERE lower(regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g')) = ${oem} LIMIT 5`),
     line.treasuryName ? prisma.treasury.findMany({ where: { isActive: true, name: { equals: line.treasuryName } }, select: { id: true, name: true } }) : Promise.resolve([]),
   ]);
   return { account: accounts.length === 1 ? accounts[0] : null, accountCandidates: accounts, part: parts.length === 1 ? parts[0] : null, partCandidates: parts, treasury: treasuries.length === 1 ? treasuries[0] : null, treasuryCandidates: treasuries };
 }
 
-export async function downloadInvoiceImportTemplateAction(): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string }>> {
+export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string }>> {
   try {
-    await requirePermission("invoice.sale");
-    const buffer = importTemplateWorkbook();
-    return ok({ fileName: "نموذج_استيراد_الفواتير.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
+    const input = templateSchema.parse(raw);
+    await requirePermission(permissionForType(input.type));
+    const buffer = importTemplateWorkbook(input.type, input.format);
+    return ok({ fileName: `نموذج_استيراد_${typeLabel[input.type]}_${input.format === "SUMMARY" ? "ملخص" : "تفصيلي"}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
   } catch (error) { return toActionError(error, "downloadInvoiceImportTemplateAction"); }
 }
 
 export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; reason?: string }> }>> {
   try {
-    await requirePermission("invoice.sale");
     const input = importSchema.parse(raw);
+    await requirePermission(permissionForType(input.type));
     const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), result: rawLineSchema.safeParse(row) }));
     const invalid = parsed.filter((entry) => !entry.result.success).map((entry) => ({ row: entry.row, reason: (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
+    const typeInvalid = parsed.filter((entry) => entry.result.success && entry.result.data.type !== input.type).map((entry) => ({ row: entry.row, reason: `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.` }));
     const preview = [];
     for (const entry of parsed) {
       if (!entry.result.success) continue;
       const line = entry.result.data;
-      const match = await matchLine(line);
+      const match = await matchLine(line, input.type);
       const needsTreasury = line.paymentMethod !== "ON_ACCOUNT" && line.paidAmount > 0;
       const reason = !match.account ? "تعذر مطابقة الحساب بشكل فريد." : !match.part ? "تعذر مطابقة الصنف برقم OEM بشكل فريد." : needsTreasury && !match.treasury ? "تعذر مطابقة الخزينة النشطة." : undefined;
       preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), accountMatched: Boolean(match.account), partMatched: Boolean(match.part), treasuryMatched: !needsTreasury || Boolean(match.treasury), reason });
     }
     const matchedInvalid = preview.filter((row) => row.reason).map((row) => ({ row: row.row, reason: row.reason! }));
-    return ok({ total: input.rows.length, valid: input.rows.length - invalid.length - matchedInvalid.length, invalid: [...invalid, ...matchedInvalid], rows: preview });
+    return ok({ total: input.rows.length, valid: input.rows.length - invalid.length - typeInvalid.length - matchedInvalid.length, invalid: [...invalid, ...typeInvalid, ...matchedInvalid], rows: preview });
   } catch (error) { return toActionError(error, "previewInvoiceImportAction"); }
 }
 
 export async function executeInvoiceImportAction(raw: unknown): Promise<ActionResult<{ jobId: string; total: number; created: number; skipped: number; invalid: Array<{ row: number; reason: string }> }>> {
   try {
-    const user = await requirePermission("invoice.sale");
     const input = importSchema.parse(raw);
+    const user = await requirePermission(permissionForType(input.type));
     const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), result: rawLineSchema.safeParse(row) }));
     const invalid = parsed.filter((entry) => !entry.result.success).map((entry) => ({ row: entry.row, reason: (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
-    const lines = parsed.filter((entry): entry is { row: number; result: { success: true; data: ValidLine } } => entry.result.success).map((entry) => ({ ...entry.result.data, sourceRowNumber: entry.row }));
+    const typeInvalid = parsed.filter((entry) => entry.result.success && entry.result.data.type !== input.type).map((entry) => ({ row: entry.row, reason: `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.` }));
+    invalid.push(...typeInvalid);
+    const lines = parsed.filter((entry): entry is { row: number; result: { success: true; data: ValidLine } } => entry.result.success && entry.result.data.type === input.type).map((entry) => ({ ...entry.result.data, sourceRowNumber: entry.row }));
     if (invalid.length && !input.skipInvalidRows) throw new BusinessRuleError(`يوجد ${invalid.length} صف غير صالح. صحح البيانات أو فعّل التخطي.`);
     if (!lines.length) throw new BusinessRuleError("لا توجد صفوف صالحة لاستيراد الفواتير.");
-    const checksum = createHash("sha256").update(JSON.stringify(lines)).digest("hex");
+    const checksum = createHash("sha256").update(JSON.stringify({ type: input.type, lines })).digest("hex");
     const previous = await prisma.importJob.findFirst({ where: { type: "INVOICES", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
     if (previous) return ok({ jobId: previous.id, total: input.rows.length, created: 0, skipped: lines.length, invalid });
-    const job = await prisma.importJob.create({ data: { type: "INVOICES", status: "PROCESSING", checksum, mapping: { headers: headersForTemplate(), skipInvalidRows: input.skipInvalidRows }, createdById: user.id } });
+    const job = await prisma.importJob.create({ data: { type: "INVOICES", status: "PROCESSING", checksum, mapping: { type: input.type, headers: headersForTemplate(), skipInvalidRows: input.skipInvalidRows, autoCreateAccounts: input.autoCreateAccounts }, createdById: user.id } });
     let created = 0;
     let skipped = 0;
     try {
@@ -144,7 +169,14 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
       for (const group of grouped.values()) {
         const first = group.at(0);
         if (!first) { skipped += 1; continue; }
-        const paired = await Promise.all(group.map(async (line) => ({ line, match: await matchLine(line) })));
+        const paired = await Promise.all(group.map(async (line) => {
+          const match = await matchLine(line, input.type);
+          if (!match.account && input.autoCreateAccounts) {
+            const account = await createMissingAccountForImport(line, input.type, user.id);
+            return { line, match: { ...match, account } };
+          }
+          return { line, match };
+        }));
         const issue = paired.find(({ line, match }) => !match.account || !match.part || ((line.paymentMethod !== "ON_ACCOUNT" && line.paidAmount > 0) && !match.treasury));
         if (issue) { skipped += 1; continue; }
         const firstMatch = paired.at(0)?.match;

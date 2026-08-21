@@ -70,7 +70,7 @@ export function InvoicesClient({
   const [registerPrintLoading, setRegisterPrintLoading] = useState(false);
   const [registerPrintError, setRegisterPrintError] = useState<string | null>(null);
   const [exportingMode, setExportingMode] = useState<"SUMMARY" | "DETAILED" | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  const [importType, setImportType] = useState<"SALE" | "PURCHASE" | "SALE_RETURN" | "PURCHASE_RETURN" | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceListRow | null>(null);
   const [settlementTarget, setSettlementTarget] = useState<InvoiceListRow | null>(null);
@@ -134,7 +134,7 @@ export function InvoicesClient({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Download size={15}/> استيراد Excel</Button>
+          <InvoiceImportTypeMenu onSelect={setImportType} />
           <Button variant="outline" size="sm" onClick={() => void downloadExport("SUMMARY")} loading={exportingMode === "SUMMARY"} disabled={total === 0}><Download size={15}/> تصدير إجمالي</Button>
           <Button variant="outline" size="sm" onClick={() => void downloadExport("DETAILED")} loading={exportingMode === "DETAILED"} disabled={total === 0}><Download size={15}/> تصدير تفصيلي</Button>
           <Button variant="outline" onClick={() => void openFilteredPrint()} loading={registerPrintLoading} disabled={total === 0}><Printer size={16}/> طباعة جميع النتائج ({formatInt(total)})</Button>
@@ -317,7 +317,7 @@ export function InvoicesClient({
       {deleteTarget ? <DeleteCancelledInvoiceModal invoice={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={() => { setDeleteTarget(null); setSelectedVoidedIds((current) => { const next = new Set(current); next.delete(deleteTarget.id); return next; }); router.refresh(); }} /> : null}
 
       {bulkDeleteTarget ? <BulkDeleteCancelledInvoicesModal invoices={bulkDeleteTarget} onClose={() => setBulkDeleteTarget(null)} onDone={(deletedIds) => { setBulkDeleteTarget(null); setSelectedVoidedIds((current) => { const next = new Set(current); deletedIds.forEach((id) => next.delete(id)); return next; }); router.refresh(); }} /> : null}
-      {importOpen ? <InvoiceImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
+      {importType ? <InvoiceImportModal type={importType} onClose={() => setImportType(null)} onDone={() => { setImportType(null); router.refresh(); }} /> : null}
 
       {voidTarget ? (
         <VoidInvoiceModal
@@ -478,6 +478,17 @@ function InvoiceDetailModal({
       </div>
     </Modal>
   );
+}
+
+function InvoiceImportTypeMenu({ onSelect }: { onSelect: (type: "SALE" | "PURCHASE" | "SALE_RETURN" | "PURCHASE_RETURN") => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  useEffect(() => { if (!open) return; const close = (event: MouseEvent) => { if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) setOpen(false); }; window.addEventListener("mousedown", close); return () => window.removeEventListener("mousedown", close); }, [open]);
+  const choose = (type: "SALE" | "PURCHASE" | "SALE_RETURN" | "PURCHASE_RETURN") => { setOpen(false); onSelect(type); };
+  const menu = open && typeof document !== "undefined" ? createPortal(<div ref={menuRef} dir="rtl" style={{ position: "fixed", top: position.top, left: position.left }} className="z-50 grid w-56 gap-1 rounded-xl border border-slate-700 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md"><button type="button" className="rounded-lg px-3 py-2 text-right text-xs text-bmw-silver hover:bg-bmw-carbon" onClick={() => choose("SALE")}>🛒 استيراد فواتير بيع</button><button type="button" className="rounded-lg px-3 py-2 text-right text-xs text-bmw-silver hover:bg-bmw-carbon" onClick={() => choose("PURCHASE")}>📦 استيراد فواتير شراء</button><button type="button" className="rounded-lg px-3 py-2 text-right text-xs text-bmw-silver hover:bg-bmw-carbon" onClick={() => choose("SALE_RETURN")}>🔄 استيراد مرتجع مبيعات</button><button type="button" className="rounded-lg px-3 py-2 text-right text-xs text-bmw-silver hover:bg-bmw-carbon" onClick={() => choose("PURCHASE_RETURN")}>↩️ استيراد مرتجع مشتريات</button></div>, document.body) : null;
+  return <><Button ref={triggerRef} variant="outline" size="sm" onClick={() => { const rect = triggerRef.current?.getBoundingClientRect(); if (rect) setPosition({ top: rect.bottom + 6, left: Math.max(8, rect.right - 224) }); setOpen((value) => !value); }}><Download size={15}/> استيراد Excel</Button>{menu}</>;
 }
 
 function Info({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
