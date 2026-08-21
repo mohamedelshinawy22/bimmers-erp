@@ -48,7 +48,7 @@ const QUICK_ACTIONS = [
     border: "hover:border-emerald-500",
   },
   {
-    href: "/treasury?voucher=RECEIPT",
+    href: "/vouchers?action=new_receipt",
     title: "سند قبض",
     subtitle: "تحصيل من ورشة / عميل",
     icon: ArrowDownLeft,
@@ -56,7 +56,7 @@ const QUICK_ACTIONS = [
     border: "hover:border-amber-500",
   },
   {
-    href: "/treasury?voucher=PAYMENT",
+    href: "/vouchers?action=new_payment",
     title: "سند صرف",
     subtitle: "سداد مورد أو مصروف",
     icon: ArrowUpRight,

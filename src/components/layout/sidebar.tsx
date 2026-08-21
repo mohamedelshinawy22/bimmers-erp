@@ -37,6 +37,7 @@ const NAV: Array<{
   { href: "/purchases/returns", label: "مرتجع المشتريات", icon: RotateCcw, hotkey: null, permission: "invoice.purchase" },
   { href: "/accounts", label: "الحسابات والورش", icon: Users, hotkey: "F4", permission: "account.read" },
   { href: "/treasury", label: "الخزينة والسيولة", icon: Wallet, hotkey: "F5", permission: "treasury.read" },
+  { href: "/vouchers", label: "سجل السندات والتحصيلات", icon: Receipt, hotkey: "F8", permission: "treasury.read" },
   { href: "/reports/daily-movement", label: "تقرير الحركة اليومية", icon: BarChart3, hotkey: null, permission: "reports.dailyMovement" },
   { href: "/reports/inventory-movement", label: "حركة البضاعة والرواكد", icon: BarChart3, hotkey: null, permission: "reports.dailyMovement" },
   { href: "/audit", label: "سجل التدقيق", icon: ShieldCheck, hotkey: null, permission: "audit.read" },

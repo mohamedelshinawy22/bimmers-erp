@@ -842,7 +842,7 @@ function AccountVoucherModal({ account, type, treasuries, onClose }: { account: 
   const parsed = Number(amount) || 0;
   const selectedTreasury = treasuries.find((treasury) => treasury.id === treasuryId);
   const insufficient = type === "PAYMENT" && !!selectedTreasury && parsed > selectedTreasury.currentBalance;
-  const submit = () => { setError(null); startTransition(async () => { const result = await createTreasuryTransactionAction({ treasuryId, accountId: account.id, type, amount: parsed, description: description || `${type === "RECEIPT" ? "تحصيل من" : "سداد إلى"} ${account.name}` }); if (!result.success) { setError(result.error); return; } onClose(); router.refresh(); }); };
+  const submit = () => { setError(null); startTransition(async () => { const result = await createTreasuryTransactionAction({ treasuryId, accountId: account.id, invoiceId: undefined, type, amount: parsed, description: description || `${type === "RECEIPT" ? "تحصيل من" : "سداد إلى"} ${account.name}` }); if (!result.success) { setError(result.error); return; } onClose(); router.refresh(); }); };
   return <Modal open onClose={onClose} title={type === "RECEIPT" ? `سند قبض — ${account.name}` : `سند صرف — ${account.name}`} description={type === "RECEIPT" ? "يُسجّل القبض في الخزينة ويخفض مديونية الحساب." : "يُسجّل الصرف من الخزينة ويخفض مستحقات الحساب."} size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button><Button variant={type === "RECEIPT" ? "success" : "danger"} onClick={submit} loading={pending} disabled={!treasuryId || parsed <= 0 || insufficient}>تسجيل السند</Button></>}>
     <div className="space-y-3">
       {error ? <Alert variant="error">{error}</Alert> : null}

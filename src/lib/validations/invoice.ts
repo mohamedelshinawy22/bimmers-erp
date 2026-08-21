@@ -141,8 +141,13 @@ export type CreateInvoiceReturnInput = z.infer<typeof createInvoiceReturnSchema>
 export const treasuryTransactionSchema = z.object({
   treasuryId: uuid,
   accountId: optionalUuid,
+  invoiceId: optionalUuid,
   type: z.enum(["RECEIPT", "PAYMENT"]),
   amount: positiveMoney,
+  /** Stored on the voucher as its payment channel; the financial sign is determined solely by type. */
+  category: z.enum(["CASH", "BANK", "WALLET", "CHEQUE", "INSTAPAY", "OTHER"]).optional(),
+  /** Optional business timestamp for an authorised, manually entered voucher. */
+  createdAt: z.string().datetime().optional(),
   description: z.string().trim().min(3, "يجب كتابة بيان الحركة").max(500),
 });
 

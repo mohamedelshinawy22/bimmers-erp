@@ -550,6 +550,7 @@ function VoucherModal({
       const result = await createTreasuryTransactionAction({
         treasuryId,
         accountId,
+        invoiceId: undefined,
         type,
         amount: parsedAmount,
         description,

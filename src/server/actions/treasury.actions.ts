@@ -75,70 +75,54 @@ export async function createTreasuryTransactionAction(
 
     const result = await withTxRetry(() =>
       prisma.$transaction(async (tx) => {
-        // Account first, treasury second — see GLOBAL LOCK ORDER above.
-        if (input.accountId) await lockAccountForUpdate(tx, input.accountId);
+        const invoice = input.invoiceId ? await tx.invoice.findUnique({ where: { id: input.invoiceId } }) : null;
+        if (input.invoiceId && !invoice) throw new BusinessRuleError("الفاتورة المرتبطة غير موجودة.");
+        if (invoice?.isVoided) throw new BusinessRuleError("لا يمكن ربط سند بفاتورة ملغاة.");
+        if (invoice && ((invoice.type === "SALE" && input.type !== "RECEIPT") || (invoice.type === "PURCHASE" && input.type !== "PAYMENT"))) {
+          throw new BusinessRuleError("نوع السند لا يتوافق مع نوع الفاتورة المرتبطة.");
+        }
+        if (invoice && amount.gt(invoice.remainingAmount)) throw new BusinessRuleError(`مبلغ السند أكبر من المتبقي على الفاتورة (${formatMoney(invoice.remainingAmount)}).`);
+        const accountId = invoice?.accountId ?? input.accountId ?? null;
+        if (invoice && input.accountId && input.accountId !== invoice.accountId) throw new BusinessRuleError("الحساب المحدد لا يطابق حساب الفاتورة المرتبطة.");
 
+        // Account first, treasury second — see GLOBAL LOCK ORDER above.
+        if (accountId) await lockAccountForUpdate(tx, accountId);
         const treasuries = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
         const treasury = treasuries.get(input.treasuryId)!;
-
+        if (!treasury.isActive) throw new BusinessRuleError("لا يمكن إنشاء سند على خزينة معطلة.");
         if (input.type === "PAYMENT" && treasury.currentBalance.lt(amount)) {
-          throw new BusinessRuleError(
-            `السيولة غير كافية في "${treasury.name}". الرصيد الحالي: ${formatMoney(treasury.currentBalance)}`,
-          );
+          throw new BusinessRuleError(`السيولة غير كافية في "${treasury.name}". الرصيد الحالي: ${formatMoney(treasury.currentBalance)}`);
         }
 
         const updatedTreasury = await tx.treasury.update({
           where: { id: input.treasuryId },
-          data:
-            input.type === "RECEIPT"
-              ? { currentBalance: { increment: amount } }
-              : { currentBalance: { decrement: amount } },
+          data: input.type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } },
           select: { currentBalance: true },
         });
-
-        // Ledger sign convention: positive balance = we owe them (له),
-        // negative = they owe us (عليه).
-        if (input.accountId) {
+        if (accountId) {
           await tx.account.update({
-            where: { id: input.accountId },
-            data:
-              input.type === "RECEIPT"
-                ? { currentBalance: { increment: amount } }
-                : { currentBalance: { decrement: amount } },
+            where: { id: accountId },
+            data: input.type === "RECEIPT" ? { currentBalance: { increment: amount } } : { currentBalance: { decrement: amount } },
           });
+        }
+        if (invoice) {
+          const remainingAmount = money(invoice.remainingAmount.sub(amount));
+          await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount: { increment: amount }, remainingAmount, paymentStatus: remainingAmount.eq(0) ? "PAID" : "PARTIAL", treasuryId: invoice.treasuryId ?? input.treasuryId } });
         }
 
         const transaction = await tx.treasuryTransaction.create({
           data: {
-            transactionNumber: await nextTransactionNumber(tx),
-            treasuryId: input.treasuryId,
-            accountId: input.accountId,
-            type: input.type,
-            amount,
-            description: input.description,
-            createdByUser: user.id,
+            transactionNumber: await nextTransactionNumber(tx), treasuryId: input.treasuryId, accountId, invoiceId: invoice?.id,
+            type: input.type, category: input.category ?? "CASH", amount, description: input.description, createdByUser: user.id,
+            ...(input.createdAt ? { createdAt: new Date(input.createdAt) } : {}),
           },
         });
-
-        await writeAudit(tx, {
-          tableName: "TreasuryTransaction",
-          recordId: transaction.id,
-          action: "INSERT",
-          newData: transaction,
-          performedBy: user.id,
-        });
-
-        return {
-          transactionNumber: transaction.transactionNumber,
-          treasuryBalance: Number(updatedTreasury.currentBalance),
-        };
+        await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, event: "VOUCHER_CREATED", invoiceSettlement: Boolean(invoice) }, performedBy: user.id });
+        return { transactionNumber: transaction.transactionNumber, treasuryBalance: Number(updatedTreasury.currentBalance) };
       }, TX_OPTIONS),
     );
-
     await invalidateCache("dashboard");
-    revalidatePath("/");
-    revalidatePath("/treasury");
-    revalidatePath("/accounts");
+    for (const path of ["/", "/treasury", "/accounts", "/invoices", "/vouchers"]) revalidatePath(path);
     return ok(result);
   } catch (error) {
     return toActionError(error, "createTreasuryTransactionAction");
