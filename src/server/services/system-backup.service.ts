@@ -23,6 +23,35 @@ const TABLES = [
 
 type SnapshotTable = (typeof TABLES)[number];
 
+const DATE_FIELDS: Partial<Record<SnapshotTable, readonly string[]>> = {
+  users: ["lastLoginAt", "createdAt", "updatedAt"],
+  userPermissions: ["createdAt", "updatedAt"],
+  brands: ["createdAt"],
+  categories: ["createdAt", "updatedAt"],
+  chassis: ["createdAt"],
+  engines: ["createdAt"],
+  warehouseBins: ["createdAt"],
+  parts: ["deletedAt", "createdAt", "updatedAt"],
+  accounts: ["lastSaleDate", "lastPaymentDate", "createdAt", "updatedAt"],
+  accountBalanceAdjustments: ["createdAt"],
+  customerVehicles: ["createdAt"],
+  treasuries: ["createdAt", "updatedAt"],
+  treasuryShifts: ["openedAt", "closedAt"],
+  invoices: ["voidedAt", "createdAt", "updatedAt"],
+  heldSales: ["createdAt", "updatedAt"],
+  accountChecks: ["issueDate", "dueDate", "createdAt", "updatedAt"],
+  installmentPlans: ["startDate", "createdAt", "updatedAt"],
+  installments: ["dueDate", "createdAt", "updatedAt"],
+  stockMovements: ["createdAt"],
+  treasuryTransfers: ["createdAt"],
+  treasuryTransactions: ["voidedAt", "createdAt", "updatedAt"],
+  barcodeConfigs: ["updatedAt"],
+  importJobs: ["createdAt", "updatedAt"],
+  systemAuditTrail: ["timestamp"],
+  documentCounters: ["updatedAt"],
+  systemSettings: ["updatedAt"],
+};
+
 function jsonSafe(value: unknown): unknown {
   if (value instanceof Prisma.Decimal) return value.toString();
   if (value instanceof Date) return value.toISOString();
@@ -56,6 +85,23 @@ function asRows(data: Record<string, unknown[]>, key: SnapshotTable) {
   const rows = data[key];
   if (!Array.isArray(rows)) throw new BusinessRuleError(`ملف النسخة الاحتياطية يفتقد جدول «${key}» أو يحتوي بيانات غير صالحة.`);
   return rows as Array<Record<string, unknown>>;
+}
+
+function rehydrateDateRows(table: SnapshotTable, rows: Array<Record<string, unknown>>) {
+  const dateFields = DATE_FIELDS[table] ?? [];
+  if (!dateFields.length) return rows;
+  return rows.map((row) => {
+    const restored = { ...row };
+    for (const field of dateFields) {
+      const value = restored[field];
+      if (value === null || value === undefined || value instanceof Date) continue;
+      if (typeof value !== "string") throw new BusinessRuleError(`قيمة التاريخ «${field}» في جدول «${table}» غير صالحة.`);
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) throw new BusinessRuleError(`تعذر تحويل التاريخ «${field}» في جدول «${table}».`);
+      restored[field] = date;
+    }
+    return restored;
+  });
 }
 
 function withoutKey<T extends Record<string, unknown>>(row: T, key: string) {
@@ -115,6 +161,8 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     throw new BusinessRuleError("كلمة مرور مدير النظام غير صحيحة. تم إلغاء الاستعادة.");
   }
   const data = snapshot.data;
+  // JSON snapshots serialize DateTime columns as ISO strings. Rehydrate only fields declared as DateTime in the Prisma schema before any insert runs.
+  for (const table of TABLES) data[table] = rehydrateDateRows(table, asRows(data, table));
   // A full relational snapshot legitimately takes longer than an invoice. This stays bounded and is paired with the route's 60-second execution budget.
   const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 60_000 } as const;
 
