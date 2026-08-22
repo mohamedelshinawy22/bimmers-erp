@@ -42,7 +42,7 @@ const PUBLIC_PATHS = [LOGIN_PATH];
 /** Probed by Docker/orchestrators without a session — must bypass the gate entirely. */
 const OPEN_PATHS = ["/api/health"];
 /** API handlers that authenticate internally and must return JSON errors rather than a navigation redirect. */
-const SELF_AUTH_API_PATHS = ["/api/admin/restore-backup"];
+const SELF_AUTH_API_PATHS = ["/api/admin/restore-backup", "/api/admin/restore-chunk"];
 
 /** `none` = no cookie; `stale` = present but unverifiable; `valid` = verified. */
 type SessionState = "none" | "stale" | "valid";
@@ -104,7 +104,7 @@ export async function middleware(request: NextRequest) {
   if (OPEN_PATHS.some((p) => pathname === p)) return NextResponse.next();
 
   const state = await inspectSession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (SELF_AUTH_API_PATHS.some((p) => pathname === p)) return state === "stale" ? clearStaleCookie(NextResponse.next()) : NextResponse.next();
+  if (SELF_AUTH_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return state === "stale" ? clearStaleCookie(NextResponse.next()) : NextResponse.next();
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   /** Attaches the cookie deletion to whatever response we return. */

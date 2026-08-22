@@ -50,6 +50,7 @@ function RestoreBackupModal({ onClose }: { onClose: () => void }) {
   const [adminPassword, setAdminPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [progress, setProgress] = useState<{ status: string; percent: number } | null>(null);
   const phraseMatches = confirmationPhrase === (summary?.confirmationPhrase ?? "استعادة نسخة احتياطية");
 
   const inspectFile = async (file?: File) => {
@@ -74,32 +75,62 @@ function RestoreBackupModal({ onClose }: { onClose: () => void }) {
     const selectedFile = selectedFileRef.current;
     if (!selectedFile) { setError("ملف النسخة الاحتياطية مفقود. أعد اختياره من الخطوة الأولى."); return; }
     if (!phraseMatches || !adminPassword) return;
-    setError(null); setRestoring(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("adminPassword", adminPassword);
-      formData.append("confirmationPhrase", confirmationPhrase);
-      const response = await fetch("/api/admin/restore-backup", { method: "POST", body: formData });
+    const postJson = async <T,>(url: string, body: unknown): Promise<T> => {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const contentType = response.headers.get("content-type") ?? "";
-      const result = (contentType.includes("application/json")
-        ? await response.json().catch(() => ({}))
-        : { error: `استجابة غير متوقعة من الخادم (HTTP ${response.status}): ${(await response.text()).slice(0, 180)}` }) as { success?: boolean; error?: string };
-      if (!response.ok || !result.success) {
-        setError(result.error || `فشلت الاستعادة؛ أعاد الخادم HTTP ${response.status}.`);
-        setRestoring(false);
-        return;
+      const payload = (contentType.includes("application/json") ? await response.json().catch(() => ({})) : { error: `استجابة غير متوقعة من الخادم (HTTP ${response.status}): ${(await response.text()).slice(0, 180)}` }) as T & { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) throw new Error(payload.error || `فشل الطلب؛ أعاد الخادم HTTP ${response.status}.`);
+      return payload;
+    };
+    const chunkByBytes = (rows: unknown[], maxRows: number, maxBytes: number) => {
+      const chunks: unknown[][] = [];
+      for (let cursor = 0; cursor < rows.length;) {
+        const chunk: unknown[] = [];
+        while (cursor < rows.length && chunk.length < maxRows) {
+          const candidate = [...chunk, rows[cursor]];
+          if (chunk.length && new Blob([JSON.stringify(candidate)]).size > maxBytes) break;
+          if (!chunk.length && new Blob([JSON.stringify(candidate)]).size > maxBytes) throw new Error("يوجد سجل واحد أكبر من الحد الآمن لدفعة الاستعادة.");
+          chunk.push(rows[cursor++]);
+        }
+        chunks.push(chunk);
       }
-      window.setTimeout(() => window.location.assign("/settings?restore=success"), 900);
+      return chunks;
+    };
+    setError(null); setRestoring(true); setProgress({ status: "قراءة ملف النسخة الاحتياطية محلياً…", percent: 3 });
+    try {
+      const snapshot = JSON.parse(await selectedFile.text()) as { metadata?: { createdAt?: string; checksum?: string }; data?: Record<string, unknown[]> };
+      if (!snapshot.metadata?.createdAt || !snapshot.metadata?.checksum || !snapshot.data) throw new Error("ملف النسخة غير صالح: بيانات التعريف أو كائن data مفقود.");
+      setProgress({ status: "التحقق من كلمة مرور المدير وتهيئة قاعدة البيانات…", percent: 8 });
+      const init = await postJson<{ restoreToken: string; actorId: string; maxRows: number; maxBytes: number }>("/api/admin/restore-chunk/init", { adminPassword, confirmationPhrase, metadata: snapshot.metadata });
+      const tables = ["users", "userPermissions", "brands", "categories", "chassis", "engines", "warehouseBins", "accounts", "treasuries", "parts", "partChassis", "partEngines", "customerVehicles", "invoices", "invoiceItems", "heldSales", "heldSaleItems", "accountChecks", "installmentPlans", "installments", "treasuryShifts", "treasuryTransfers", "treasuryTransactions", "stockMovements", "accountBalanceAdjustments", "barcodeConfigs", "importJobs", "documentCounters", "systemSettings", "systemAuditTrail"] as const;
+      const labels: Record<string, string> = { users: "المستخدمين", userPermissions: "الصلاحيات", brands: "الماركات", categories: "الفئات", chassis: "أكواد الشاسيه", engines: "أكواد المحركات", warehouseBins: "نقاط التخزين", accounts: "الحسابات", treasuries: "الخزائن", parts: "الأصناف", invoices: "الفواتير", invoiceItems: "بنود الفواتير", treasuryTransactions: "حركات الخزينة", stockMovements: "حركات المخزون", systemAuditTrail: "سجل التدقيق" };
+      for (let tableIndex = 0; tableIndex < tables.length; tableIndex++) {
+        const table = tables[tableIndex];
+        if (!table) continue;
+        const rows = Array.isArray(snapshot.data[table]) ? snapshot.data[table] : [];
+        const chunks = chunkByBytes(rows, init.maxRows, Math.min(init.maxBytes, 700 * 1024));
+        for (let index = 0; index < chunks.length; index++) {
+          const percent = Math.round(10 + ((tableIndex + (index + 1) / Math.max(chunks.length, 1)) / tables.length) * 80);
+          setProgress({ status: `استعادة ${labels[table] ?? table} — دفعة ${index + 1} من ${chunks.length || 1}`, percent });
+          await postJson("/api/admin/restore-chunk/insert", { restoreToken: init.restoreToken, table, rows: chunks[index] });
+        }
+      }
+      const categoryLinks = (snapshot.data.categories ?? []).filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row) && "parentId" in row && (row as Record<string, unknown>).parentId)).map((row) => ({ id: row.id, parentId: row.parentId }));
+      for (const links of chunkByBytes(categoryLinks, init.maxRows, Math.min(init.maxBytes, 700 * 1024))) await postJson("/api/admin/restore-chunk/finalize", { action: "category-links", restoreToken: init.restoreToken, rows: links });
+      const actorSnapshot = (snapshot.data.users ?? []).find((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row) && (row as Record<string, unknown>).id === init.actorId));
+      setProgress({ status: "توثيق الاستعادة وإتمام فحص النظام…", percent: 96 });
+      await postJson("/api/admin/restore-chunk/finalize", { action: "complete", restoreToken: init.restoreToken, actorProfile: actorSnapshot ? { allowedTreasuryIds: actorSnapshot.allowedTreasuryIds, allowedWarehouseIds: actorSnapshot.allowedWarehouseIds, transferToTreasuryId: actorSnapshot.transferToTreasuryId } : undefined });
+      setProgress({ status: "تمت الاستعادة بنجاح — جاري تحديث النظام…", percent: 100 });
+      window.setTimeout(() => window.location.assign("/settings?restore=success"), 1100);
     } catch (cause) {
-      setError(`تعذر الاتصال بمسار الاستعادة: ${cause instanceof Error ? cause.message : "خطأ شبكة غير معروف."}`);
-      setRestoring(false);
+      setError(cause instanceof Error ? cause.message : "حدث خطأ غير متوقع أثناء الاستعادة المتدرجة.");
+      setRestoring(false); setProgress(null);
     }
   };
 
   const footer = <><Button variant="ghost" onClick={onClose} disabled={restoring}>إلغاء</Button>{step === 2 ? <Button variant="outline" onClick={() => { selectedFileRef.current = null; setSummary(null); setStep(1); }} disabled={restoring}>تغيير الملف</Button> : null}{step === 2 ? <Button onClick={() => setStep(3)} disabled={!summary || restoring}>متابعة إلى التحقق <KeyRound size={15} /></Button> : null}{step === 3 ? <Button variant="danger" onClick={restore} loading={restoring} disabled={!phraseMatches || !adminPassword || !selectedFileRef.current}><RotateCcw size={15} /> تنفيذ الاستعادة الذرية</Button> : null}</>;
 
-  return <Modal open onClose={restoring ? () => undefined : onClose} title="استعادة النظام من نسخة احتياطية" description={`الخطوة ${step} من 3 — لا يبدأ التعديل في قاعدة البيانات قبل اكتمال الفحص والتأكيد.`} size="lg" footer={footer}><div className="space-y-4" dir="rtl">{error ? <div className="space-y-1 rounded-xl border border-rose-800/80 bg-rose-950/60 p-3 text-xs text-rose-200"><div className="flex items-center gap-1.5 font-bold text-rose-300"><AlertTriangle size={14} /><span>تعذر استعادة النسخة الاحتياطية</span></div><div className="break-words rounded border border-rose-900/50 bg-rose-950/80 p-2 font-mono text-[11px] text-rose-100/90">{error}</div></div> : null}<div className="grid grid-cols-3 gap-2 text-[11px]"><div className={`rounded-lg border p-2 ${step >= 1 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>1. رفع وفحص</div><div className={`rounded-lg border p-2 ${step >= 2 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>2. معاينة المحتوى</div><div className={`rounded-lg border p-2 ${step >= 3 ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-bmw-cardBorder text-bmw-muted"}`}>3. تحقق وتنفيذ</div></div>{step === 1 ? <section className="space-y-3"><Alert variant="info">يقرأ الفحص الأولي تعريفاً محدوداً من الملف فقط. يبقى ملف النسخة كاملاً خارج ذاكرة React حتى الإرسال المباشر والاستعادة الآمنة.</Alert><button type="button" onClick={() => inputRef.current?.click()} className="flex min-h-40 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-bmw-cardBorder bg-bmw-carbon/50 p-6 transition hover:border-bmw-blue hover:bg-bmw-blue/5"><FolderOpen size={32} className="text-bmw-blue" /><span className="text-sm font-bold text-white">اختيار ملف نسخة احتياطية JSON</span><span className="text-xs text-bmw-muted">بحد أقصى 50MB عبر مسار رفع مستقل</span><input ref={inputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { void inspectFile(event.target.files?.[0]); event.currentTarget.value = ""; }} /></button></section> : null}{step === 2 && summary ? <section className="space-y-3"><Alert variant="success">تمت قراءة تعريف الملف <b>{fileName}</b> بأمان. سيجري التحقق الكامل من البصمة وهيكل البيانات على الخادم قبل بدء الاستعادة.</Alert><div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/5 p-3"><p className="mb-2 flex items-center gap-2 text-sm font-bold text-bmw-blue"><FileJson2 size={17} /> ملخص محتويات النسخة</p><div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3"><span>تاريخ النسخة: {safeFormatDate(summary.createdAt)}</span><span>الأصناف: {summary.parts.toLocaleString("ar-EG")}</span><span>الفواتير: {summary.invoices.toLocaleString("ar-EG")}</span><span>الحسابات: {summary.accounts.toLocaleString("ar-EG")}</span><span>الخزائن: {summary.treasuries.toLocaleString("ar-EG")}</span><span>السندات: {summary.transactions.toLocaleString("ar-EG")}</span><span>حركات المخزون: {summary.stockMovements.toLocaleString("ar-EG")}</span><span>المستخدمون: {summary.users.toLocaleString("ar-EG")}</span></div></div><Alert variant="warning">عند التنفيذ سيستبدل النظام البيانات التشغيلية الحالية بالكامل ببيانات هذه النسخة. يبقى حساب المدير المسجل حالياً فعالاً لضمان استمرار الوصول بعد الاستعادة.</Alert></section> : null}{step === 3 && summary ? <section className="space-y-3"><div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-100"><p className="mb-1 flex items-center gap-2 font-bold"><AlertTriangle size={16} />تأكيد نهائي</p><p>هذه عملية دائمة. تأكد من أن لديك نسخة احتياطية حديثة من الحالة الحالية قبل الاستبدال.</p></div><Field label="اكتب عبارة التأكيد"><Input value={confirmationPhrase} onChange={(event) => setConfirmationPhrase(event.target.value)} placeholder={summary.confirmationPhrase} autoFocus /></Field><Field label="كلمة مرور مدير النظام الحالية"><Input type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="كلمة المرور" dir="ltr" className="text-left font-mono" /></Field>{confirmationPhrase && !phraseMatches ? <p className="text-xs text-bmw-mRed">عبارة التأكيد غير مطابقة.</p> : null}<Alert variant="info">تتحقق كلمة المرور على الخادم باستخدام bcrypt ولا تُحفظ ضمن النسخة أو سجل التدقيق.</Alert></section> : null}</div></Modal>;
+  return <Modal open onClose={restoring ? () => undefined : onClose} title="استعادة النظام من نسخة احتياطية" description={`الخطوة ${step} من 3 — لا يبدأ التعديل في قاعدة البيانات قبل اكتمال الفحص والتأكيد.`} size="lg" footer={footer}><div className="space-y-4" dir="rtl">{progress ? <div className="space-y-2 rounded-xl border border-bmw-blue/40 bg-bmw-blue/5 p-3 text-xs text-bmw-blue"><div className="flex items-center justify-between gap-3 font-bold"><span>{progress.status}</span><span className="font-mono">{progress.percent}%</span></div><div className="h-2 overflow-hidden rounded-full border border-bmw-blue/20 bg-slate-950"><div className="h-full rounded-full bg-bmw-blue transition-all duration-300" style={{ width: `${progress.percent}%` }} /></div></div> : null}{error ? <div className="space-y-1 rounded-xl border border-rose-800/80 bg-rose-950/60 p-3 text-xs text-rose-200"><div className="flex items-center gap-1.5 font-bold text-rose-300"><AlertTriangle size={14} /><span>تعذر استعادة النسخة الاحتياطية</span></div><div className="break-words rounded border border-rose-900/50 bg-rose-950/80 p-2 font-mono text-[11px] text-rose-100/90">{error}</div></div> : null}<div className="grid grid-cols-3 gap-2 text-[11px]"><div className={`rounded-lg border p-2 ${step >= 1 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>1. رفع وفحص</div><div className={`rounded-lg border p-2 ${step >= 2 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>2. معاينة المحتوى</div><div className={`rounded-lg border p-2 ${step >= 3 ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-bmw-cardBorder text-bmw-muted"}`}>3. تحقق وتنفيذ</div></div>{step === 1 ? <section className="space-y-3"><Alert variant="info">يقرأ الفحص الأولي تعريفاً محدوداً من الملف فقط. يبقى ملف النسخة كاملاً خارج ذاكرة React حتى الإرسال المباشر والاستعادة الآمنة.</Alert><button type="button" onClick={() => inputRef.current?.click()} className="flex min-h-40 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-bmw-cardBorder bg-bmw-carbon/50 p-6 transition hover:border-bmw-blue hover:bg-bmw-blue/5"><FolderOpen size={32} className="text-bmw-blue" /><span className="text-sm font-bold text-white">اختيار ملف نسخة احتياطية JSON</span><span className="text-xs text-bmw-muted">بحد أقصى 50MB عبر مسار رفع مستقل</span><input ref={inputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { void inspectFile(event.target.files?.[0]); event.currentTarget.value = ""; }} /></button></section> : null}{step === 2 && summary ? <section className="space-y-3"><Alert variant="success">تمت قراءة تعريف الملف <b>{fileName}</b> بأمان. سيجري التحقق الكامل من البصمة وهيكل البيانات على الخادم قبل بدء الاستعادة.</Alert><div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/5 p-3"><p className="mb-2 flex items-center gap-2 text-sm font-bold text-bmw-blue"><FileJson2 size={17} /> ملخص محتويات النسخة</p><div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3"><span>تاريخ النسخة: {safeFormatDate(summary.createdAt)}</span><span>الأصناف: {summary.parts.toLocaleString("ar-EG")}</span><span>الفواتير: {summary.invoices.toLocaleString("ar-EG")}</span><span>الحسابات: {summary.accounts.toLocaleString("ar-EG")}</span><span>الخزائن: {summary.treasuries.toLocaleString("ar-EG")}</span><span>السندات: {summary.transactions.toLocaleString("ar-EG")}</span><span>حركات المخزون: {summary.stockMovements.toLocaleString("ar-EG")}</span><span>المستخدمون: {summary.users.toLocaleString("ar-EG")}</span></div></div><Alert variant="warning">عند التنفيذ سيستبدل النظام البيانات التشغيلية الحالية بالكامل ببيانات هذه النسخة. يبقى حساب المدير المسجل حالياً فعالاً لضمان استمرار الوصول بعد الاستعادة.</Alert></section> : null}{step === 3 && summary ? <section className="space-y-3"><div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-100"><p className="mb-1 flex items-center gap-2 font-bold"><AlertTriangle size={16} />تأكيد نهائي</p><p>هذه عملية دائمة. تأكد من أن لديك نسخة احتياطية حديثة من الحالة الحالية قبل الاستبدال.</p></div><Field label="اكتب عبارة التأكيد"><Input value={confirmationPhrase} onChange={(event) => setConfirmationPhrase(event.target.value)} placeholder={summary.confirmationPhrase} autoFocus /></Field><Field label="كلمة مرور مدير النظام الحالية"><Input type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="كلمة المرور" dir="ltr" className="text-left font-mono" /></Field>{confirmationPhrase && !phraseMatches ? <p className="text-xs text-bmw-mRed">عبارة التأكيد غير مطابقة.</p> : null}<Alert variant="info">تتحقق كلمة المرور على الخادم باستخدام bcrypt ولا تُحفظ ضمن النسخة أو سجل التدقيق.</Alert></section> : null}</div></Modal>;
 }
 
 function BackupRecoveryPanel() {

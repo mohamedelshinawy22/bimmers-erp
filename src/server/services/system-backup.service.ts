@@ -17,11 +17,11 @@ export type BackupSnapshot = {
   data: Record<string, unknown[]>;
 };
 
-const TABLES = [
+export const BACKUP_TABLES = [
   "users", "userPermissions", "brands", "categories", "chassis", "engines", "warehouseBins", "parts", "partChassis", "partEngines", "accounts", "accountBalanceAdjustments", "customerVehicles", "treasuries", "treasuryShifts", "invoices", "invoiceItems", "heldSales", "heldSaleItems", "accountChecks", "installmentPlans", "installments", "stockMovements", "treasuryTransfers", "treasuryTransactions", "barcodeConfigs", "importJobs", "systemAuditTrail", "documentCounters", "systemSettings",
 ] as const;
 
-type SnapshotTable = (typeof TABLES)[number];
+type SnapshotTable = (typeof BACKUP_TABLES)[number];
 
 const SNAPSHOT_MODELS: Record<SnapshotTable, string> = {
   users: "User", userPermissions: "UserPermission", brands: "Brand", categories: "Category", chassis: "BmwChassis", engines: "BmwEngine", warehouseBins: "WarehouseBin", parts: "PartItem", partChassis: "PartChassis", partEngines: "PartEngine", accounts: "Account", accountBalanceAdjustments: "AccountBalanceAdjustment", customerVehicles: "CustomerVehicle", treasuries: "Treasury", treasuryShifts: "TreasuryShift", invoices: "Invoice", invoiceItems: "InvoiceItem", heldSales: "HeldSale", heldSaleItems: "HeldSaleItem", accountChecks: "AccountCheck", installmentPlans: "InstallmentPlan", installments: "Installment", stockMovements: "StockMovement", treasuryTransfers: "TreasuryTransfer", treasuryTransactions: "TreasuryTransaction", barcodeConfigs: "BarcodeConfig", importJobs: "ImportJob", systemAuditTrail: "SystemAuditTrail", documentCounters: "DocumentCounter", systemSettings: "SystemSetting",
@@ -93,7 +93,7 @@ function asRows(data: Record<string, unknown[]>, key: SnapshotTable) {
   return rows as Array<Record<string, unknown>>;
 }
 
-function rehydrateDateRows(table: SnapshotTable, rows: Array<Record<string, unknown>>) {
+export function sanitizeBackupRows(table: SnapshotTable, rows: Array<Record<string, unknown>>) {
   const scalarFields = SCALAR_FIELDS[SNAPSHOT_MODELS[table]];
   if (!scalarFields) throw new BusinessRuleError(`تعذر تحميل حقول جدول الاستعادة «${table}».`);
   const dateFields = DATE_FIELDS[table] ?? [];
@@ -140,7 +140,7 @@ export function parseBackupSnapshot(raw: unknown): BackupSnapshot {
   if (candidate.metadata?.format !== SNAPSHOT_FORMAT) throw new BusinessRuleError("صيغة النسخة الاحتياطية غير مدعومة أو الملف لا يخص BimmerERP.");
   if (!candidate.metadata.createdAt || !candidate.metadata.checksum || !candidate.data || typeof candidate.data !== "object" || Array.isArray(candidate.data)) throw new BusinessRuleError("بيانات تعريف النسخة أو حمولتها غير مكتملة.");
   const data = candidate.data as Record<string, unknown[]>;
-  for (const table of TABLES) asRows(data, table);
+  for (const table of BACKUP_TABLES) asRows(data, table);
   const actualChecksum = checksum(data);
   // Current snapshots use canonical key ordering, so whitespace and formatting never affect integrity. Accept the legacy ordered JSON checksum only for snapshots exported before this compatibility fix.
   if (actualChecksum !== candidate.metadata.checksum && legacyChecksum(data) !== candidate.metadata.checksum) throw new BusinessRuleError("فشل التحقق من سلامة النسخة الاحتياطية؛ قد يكون الملف تالفاً أو تم تعديله.");
@@ -153,7 +153,7 @@ export async function createFullBackupSnapshot(actor: { id: string; fullName: st
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }), prisma.userPermission.findMany({ orderBy: { createdAt: "asc" } }), prisma.brand.findMany({ orderBy: { createdAt: "asc" } }), prisma.category.findMany({ orderBy: { createdAt: "asc" } }), prisma.bmwChassis.findMany({ orderBy: { createdAt: "asc" } }), prisma.bmwEngine.findMany({ orderBy: { createdAt: "asc" } }), prisma.warehouseBin.findMany({ orderBy: { createdAt: "asc" } }), prisma.partItem.findMany({ orderBy: { createdAt: "asc" } }), prisma.partChassis.findMany(), prisma.partEngine.findMany(), prisma.account.findMany({ orderBy: { createdAt: "asc" } }), prisma.accountBalanceAdjustment.findMany({ orderBy: { createdAt: "asc" } }), prisma.customerVehicle.findMany({ orderBy: { createdAt: "asc" } }), prisma.treasury.findMany({ orderBy: { createdAt: "asc" } }), prisma.treasuryShift.findMany({ orderBy: { openedAt: "asc" } }), prisma.invoice.findMany({ orderBy: { createdAt: "asc" } }), prisma.invoiceItem.findMany(), prisma.heldSale.findMany({ orderBy: { createdAt: "asc" } }), prisma.heldSaleItem.findMany(), prisma.accountCheck.findMany({ orderBy: { createdAt: "asc" } }), prisma.installmentPlan.findMany({ orderBy: { createdAt: "asc" } }), prisma.installment.findMany({ orderBy: { createdAt: "asc" } }), prisma.stockMovement.findMany({ orderBy: { seq: "asc" } }), prisma.treasuryTransfer.findMany({ orderBy: { createdAt: "asc" } }), prisma.treasuryTransaction.findMany({ orderBy: { createdAt: "asc" } }), prisma.barcodeConfig.findMany(), prisma.importJob.findMany({ orderBy: { createdAt: "asc" } }), prisma.systemAuditTrail.findMany({ orderBy: { timestamp: "asc" } }), prisma.documentCounter.findMany(), prisma.systemSetting.findMany({ orderBy: { key: "asc" } }),
   ]);
   const data = jsonSafe({ users, userPermissions, brands, categories, chassis, engines, warehouseBins, parts, partChassis, partEngines, accounts, accountBalanceAdjustments, customerVehicles, treasuries, treasuryShifts, invoices, invoiceItems, heldSales, heldSaleItems, accountChecks, installmentPlans, installments, stockMovements, treasuryTransfers, treasuryTransactions, barcodeConfigs, importJobs, systemAuditTrail, documentCounters, systemSettings }) as Record<string, unknown[]>;
-  return { metadata: { format: SNAPSHOT_FORMAT, createdAt: new Date().toISOString(), generatedBy: actor.fullName, checksum: checksum(data) }, counts: Object.fromEntries(TABLES.map((table) => [table, data[table]?.length ?? 0])), data };
+  return { metadata: { format: SNAPSHOT_FORMAT, createdAt: new Date().toISOString(), generatedBy: actor.fullName, checksum: checksum(data) }, counts: Object.fromEntries(BACKUP_TABLES.map((table) => [table, data[table]?.length ?? 0])), data };
 }
 
 export async function restoreFullBackupSnapshot(input: { actor: { id: string; fullName: string; role: Role }; adminPassword: string; confirmationPhrase: string; snapshot: unknown; serializedBytes: number }) {
@@ -170,7 +170,7 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
   }
   const data = snapshot.data;
   // JSON snapshots serialize DateTime columns as ISO strings. Rehydrate only fields declared as DateTime in the Prisma schema before any insert runs.
-  for (const table of TABLES) data[table] = rehydrateDateRows(table, asRows(data, table));
+  for (const table of BACKUP_TABLES) data[table] = sanitizeBackupRows(table, asRows(data, table));
   // A full relational snapshot legitimately takes longer than an invoice. Keep this bounded below the 90-second route budget so parsing, password checks, and the final response have time to complete.
   const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 75_000 } as const;
   let restoreStage = "بدء تجهيز قاعدة البيانات";
