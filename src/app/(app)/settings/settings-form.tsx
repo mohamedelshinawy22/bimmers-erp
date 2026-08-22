@@ -2,12 +2,13 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, ImagePlus, Printer, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
+import { Building2, Flame, ImagePlus, Printer, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/modal";
 import { UsersPanel } from "./users-panel";
+import { FullSystemResetModal } from "@/components/settings/full-system-reset-modal";
 import type { ManagedUser } from "@/server/services/audit.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { updateCompanySettingsAction, updateSettingsAction } from "@/server/actions/settings.actions";
@@ -27,6 +28,7 @@ interface SettingItem {
 interface SettingsFormProps {
   groups: Array<{ group: string; items: SettingItem[] }>;
   canWrite: boolean;
+  canFactoryReset: boolean;
   users: ManagedUser[] | null;
   currentUserId: string;
   companyProfile: CompanyProfile;
@@ -38,11 +40,12 @@ interface SettingsFormProps {
 
 const PROFILE_KEYS = new Set(["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"]);
 
-export function SettingsForm({ groups, canWrite, users, currentUserId, companyProfile }: SettingsFormProps) {
+export function SettingsForm({ groups, canWrite, canFactoryReset, users, currentUserId, companyProfile }: SettingsFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [factoryResetOpen, setFactoryResetOpen] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -203,6 +206,8 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
 
       {users ? <UsersPanel users={users} currentUserId={currentUserId} /> : null}
 
+      {canFactoryReset ? <Card className="border-2 border-bmw-mRed/50 bg-bmw-mRed/5"><CardHeader><CardTitle className="text-rose-300"><Flame size={18} /> منطقة الخطر: إعادة ضبط المصنع وتصفير النظام</CardTitle><p className="text-xs text-bmw-muted">يحذف هذا الإجراء جميع البيانات التشغيلية نهائياً، ثم ينشئ خط أساس نظيفاً. لا يمكن تنفيذه إلا من حساب مدير النظام وبعد إدخال عبارة التأكيد وكلمة المرور الحالية.</p></CardHeader><CardContent className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-rose-200">تتضمن العملية الفواتير والسندات والأرصدة والأصناف والمخزون والحركات والسجل التدقيقي السابق.</div><Button variant="danger" onClick={() => setFactoryResetOpen(true)}><Flame size={16} /> مسح وتصفير كافة البيانات</Button></CardContent></Card> : null}
+
       <Card>
         <CardHeader>
           <CardTitle>معلومات البنية التحتية</CardTitle>
@@ -218,6 +223,7 @@ export function SettingsForm({ groups, canWrite, users, currentUserId, companyPr
           </ul>
         </CardContent>
       </Card>
+      {factoryResetOpen ? <FullSystemResetModal onClose={() => setFactoryResetOpen(false)} /> : null}
     </div>
   );
 }

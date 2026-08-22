@@ -29,6 +29,7 @@ export default async function SettingsPage() {
       <SettingsForm
         groups={groups}
         canWrite={can(user.role, "settings.write")}
+        canFactoryReset={can(user.role, "system.maintenance")}
         users={users}
         currentUserId={user.id}
         companyProfile={companyProfile}
