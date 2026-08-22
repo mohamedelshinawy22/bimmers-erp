@@ -36,7 +36,19 @@ function stableJson(value: unknown) {
   return JSON.stringify(value);
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function checksum(data: Record<string, unknown[]>) {
+  return createHash("sha256").update(canonicalJson(data)).digest("hex");
+}
+
+function legacyChecksum(data: Record<string, unknown[]>) {
   return createHash("sha256").update(stableJson(data)).digest("hex");
 }
 
@@ -49,6 +61,10 @@ function asRows(data: Record<string, unknown[]>, key: SnapshotTable) {
 function withoutKey<T extends Record<string, unknown>>(row: T, key: string) {
   const { [key]: _ignored, ...rest } = row;
   return rest;
+}
+
+async function insertInChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknown>, size = 250) {
+  for (let start = 0; start < rows.length; start += size) await insert(rows.slice(start, start + size));
 }
 
 function summary(snapshot: BackupSnapshot) {
@@ -72,7 +88,8 @@ export function parseBackupSnapshot(raw: unknown): BackupSnapshot {
   const data = candidate.data as Record<string, unknown[]>;
   for (const table of TABLES) asRows(data, table);
   const actualChecksum = checksum(data);
-  if (actualChecksum !== candidate.metadata.checksum) throw new BusinessRuleError("فشل التحقق من سلامة النسخة الاحتياطية؛ قد يكون الملف تالفاً أو تم تعديله.");
+  // Current snapshots use canonical key ordering, so whitespace and formatting never affect integrity. Accept the legacy ordered JSON checksum only for snapshots exported before this compatibility fix.
+  if (actualChecksum !== candidate.metadata.checksum && legacyChecksum(data) !== candidate.metadata.checksum) throw new BusinessRuleError("فشل التحقق من سلامة النسخة الاحتياطية؛ قد يكون الملف تالفاً أو تم تعديله.");
   const counts = candidate.counts && typeof candidate.counts === "object" ? candidate.counts as Record<string, number> : {};
   return { metadata: { format: SNAPSHOT_FORMAT, createdAt: candidate.metadata.createdAt, generatedBy: candidate.metadata.generatedBy ?? "unknown", checksum: candidate.metadata.checksum }, counts, data };
 }
@@ -98,7 +115,8 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     throw new BusinessRuleError("كلمة مرور مدير النظام غير صحيحة. تم إلغاء الاستعادة.");
   }
   const data = snapshot.data;
-  const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5_000, timeout: 45_000 } as const;
+  // A full relational snapshot legitimately takes longer than an invoice. This stays bounded and is paired with the route's 60-second execution budget.
+  const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 60_000 } as const;
 
   await withTxRetry(() => prisma.$transaction(async (tx) => {
     // Keep the currently authenticated administrator and its permission profile so the restore can never invalidate the in-flight session.
@@ -120,14 +138,14 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     if (asRows(data, "chassis").length) await tx.bmwChassis.createMany({ data: asRows(data, "chassis") as never[] });
     if (asRows(data, "engines").length) await tx.bmwEngine.createMany({ data: asRows(data, "engines") as never[] });
     if (asRows(data, "warehouseBins").length) await tx.warehouseBin.createMany({ data: asRows(data, "warehouseBins") as never[] });
-    if (asRows(data, "accounts").length) await tx.account.createMany({ data: asRows(data, "accounts") as never[] });
+    await insertInChunks(asRows(data, "accounts"), async (chunk) => tx.account.createMany({ data: chunk as never[] }));
     if (asRows(data, "treasuries").length) await tx.treasury.createMany({ data: asRows(data, "treasuries") as never[] });
-    if (asRows(data, "parts").length) await tx.partItem.createMany({ data: asRows(data, "parts") as never[] });
+    await insertInChunks(asRows(data, "parts"), async (chunk) => tx.partItem.createMany({ data: chunk as never[] }));
     if (asRows(data, "partChassis").length) await tx.partChassis.createMany({ data: asRows(data, "partChassis") as never[] });
     if (asRows(data, "partEngines").length) await tx.partEngine.createMany({ data: asRows(data, "partEngines") as never[] });
     if (asRows(data, "customerVehicles").length) await tx.customerVehicle.createMany({ data: asRows(data, "customerVehicles") as never[] });
-    if (asRows(data, "invoices").length) await tx.invoice.createMany({ data: asRows(data, "invoices") as never[] });
-    if (asRows(data, "invoiceItems").length) await tx.invoiceItem.createMany({ data: asRows(data, "invoiceItems") as never[] });
+    await insertInChunks(asRows(data, "invoices"), async (chunk) => tx.invoice.createMany({ data: chunk as never[] }));
+    await insertInChunks(asRows(data, "invoiceItems"), async (chunk) => tx.invoiceItem.createMany({ data: chunk as never[] }));
     if (asRows(data, "heldSales").length) await tx.heldSale.createMany({ data: asRows(data, "heldSales") as never[] });
     if (asRows(data, "heldSaleItems").length) await tx.heldSaleItem.createMany({ data: asRows(data, "heldSaleItems") as never[] });
     if (asRows(data, "accountChecks").length) await tx.accountCheck.createMany({ data: asRows(data, "accountChecks") as never[] });
@@ -135,15 +153,15 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     if (asRows(data, "installments").length) await tx.installment.createMany({ data: asRows(data, "installments") as never[] });
     if (asRows(data, "treasuryShifts").length) await tx.treasuryShift.createMany({ data: asRows(data, "treasuryShifts") as never[] });
     if (asRows(data, "treasuryTransfers").length) await tx.treasuryTransfer.createMany({ data: asRows(data, "treasuryTransfers") as never[] });
-    if (asRows(data, "treasuryTransactions").length) await tx.treasuryTransaction.createMany({ data: asRows(data, "treasuryTransactions") as never[] });
+    await insertInChunks(asRows(data, "treasuryTransactions"), async (chunk) => tx.treasuryTransaction.createMany({ data: chunk as never[] }));
     const movements = asRows(data, "stockMovements").map((row) => ({ ...row, seq: BigInt(String(row.seq)) }));
-    if (movements.length) await tx.stockMovement.createMany({ data: movements as never[] });
+    await insertInChunks(movements, async (chunk) => tx.stockMovement.createMany({ data: chunk as never[] }));
     if (asRows(data, "accountBalanceAdjustments").length) await tx.accountBalanceAdjustment.createMany({ data: asRows(data, "accountBalanceAdjustments") as never[] });
     if (asRows(data, "barcodeConfigs").length) await tx.barcodeConfig.createMany({ data: asRows(data, "barcodeConfigs") as never[] });
     if (asRows(data, "importJobs").length) await tx.importJob.createMany({ data: asRows(data, "importJobs") as never[] });
     if (asRows(data, "documentCounters").length) await tx.documentCounter.createMany({ data: asRows(data, "documentCounters") as never[] });
     if (asRows(data, "systemSettings").length) await tx.systemSetting.createMany({ data: asRows(data, "systemSettings") as never[] });
-    if (asRows(data, "systemAuditTrail").length) await tx.systemAuditTrail.createMany({ data: asRows(data, "systemAuditTrail") as never[] });
+    await insertInChunks(asRows(data, "systemAuditTrail"), async (chunk) => tx.systemAuditTrail.createMany({ data: chunk as never[] }));
 
     const restoredActor = asRows(data, "users").find((row) => row.id === input.actor.id);
     if (restoredActor) await tx.user.update({ where: { id: input.actor.id }, data: { allowedTreasuryIds: (restoredActor.allowedTreasuryIds as string[] | undefined) ?? [], allowedWarehouseIds: (restoredActor.allowedWarehouseIds as string[] | undefined) ?? [], transferToTreasuryId: restoredActor.transferToTreasuryId ? String(restoredActor.transferToTreasuryId) : null } });
