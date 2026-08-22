@@ -5,7 +5,7 @@ import { restoreFullBackupSnapshot } from "@/server/services/system-backup.servi
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "حدث خطأ غير متوقع أثناء الاستعادة.";

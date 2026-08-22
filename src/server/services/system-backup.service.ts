@@ -171,8 +171,8 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
   const data = snapshot.data;
   // JSON snapshots serialize DateTime columns as ISO strings. Rehydrate only fields declared as DateTime in the Prisma schema before any insert runs.
   for (const table of TABLES) data[table] = rehydrateDateRows(table, asRows(data, table));
-  // A full relational snapshot legitimately takes longer than an invoice. This stays bounded and is paired with the route's 60-second execution budget.
-  const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 60_000 } as const;
+  // A full relational snapshot legitimately takes longer than an invoice. Keep this bounded below the 90-second route budget so parsing, password checks, and the final response have time to complete.
+  const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 75_000 } as const;
   let restoreStage = "بدء تجهيز قاعدة البيانات";
 
   try {
