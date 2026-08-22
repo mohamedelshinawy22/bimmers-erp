@@ -9,7 +9,7 @@ import { withTxRetry } from "@/server/services/tx";
 
 const SNAPSHOT_FORMAT = "bimmers-erp.snapshot.v1";
 const RESTORE_CONFIRMATION_PHRASE = "استعادة نسخة احتياطية";
-const MAX_RESTORE_BYTES = 20 * 1024 * 1024;
+const MAX_RESTORE_BYTES = 50 * 1024 * 1024;
 
 export type BackupSnapshot = {
   metadata: { format: typeof SNAPSHOT_FORMAT; createdAt: string; generatedBy: string; checksum: string };
@@ -89,7 +89,7 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
   if (input.actor.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية استعادة النسخ الاحتياطية متاحة لمدير النظام فقط.");
   if (input.confirmationPhrase !== RESTORE_CONFIRMATION_PHRASE) throw new BusinessRuleError("عبارة تأكيد الاستعادة غير مطابقة.");
   if (!input.adminPassword || input.adminPassword.length > 256) throw new BusinessRuleError("كلمة مرور مدير النظام مطلوبة.");
-  if (input.serializedBytes > MAX_RESTORE_BYTES) throw new BusinessRuleError("حجم النسخة الاحتياطية يتجاوز الحد الآمن للاستعادة عبر الويب (20MB).");
+  if (input.serializedBytes > MAX_RESTORE_BYTES) throw new BusinessRuleError("حجم النسخة الاحتياطية يتجاوز الحد الآمن للاستعادة عبر الويب (50MB).");
   const snapshot = parseBackupSnapshot(input.snapshot);
   const actorRow = await prisma.user.findUnique({ where: { id: input.actor.id }, select: { passwordHash: true, isActive: true } });
   const passwordMatches = Boolean(actorRow?.isActive) && await bcrypt.compare(input.adminPassword, actorRow?.passwordHash ?? "");

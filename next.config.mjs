@@ -13,9 +13,8 @@ const nextConfig = {
     // externalising it gains nothing and only risks the file not being traced
     // into the serverless bundle. Let the bundler include it normally.
     serverComponentsExternalPackages: ["@prisma/client", "ioredis"],
-    // A 2MB source logo becomes roughly 2.7MB after base64 encoding. The disaster-recovery workflow additionally accepts a validated JSON snapshot capped at 20MB.
-    // Keep a narrow margin for confirmation fields; the restore action rejects anything above the documented file limit.
-    serverActions: { bodySizeLimit: "25mb" },
+    // A 2MB source logo becomes roughly 2.7MB after base64 encoding. Backup restoration uses a dedicated multipart route, so server actions retain their narrow profile-edit limit.
+    serverActions: { bodySizeLimit: "6mb" },
   },
   logging: {
     fetches: { fullUrl: false },
