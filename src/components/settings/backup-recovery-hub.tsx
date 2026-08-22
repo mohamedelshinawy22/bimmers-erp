@@ -72,7 +72,8 @@ function RestoreBackupModal({ onClose }: { onClose: () => void }) {
 
   const restore = async () => {
     const selectedFile = selectedFileRef.current;
-    if (!selectedFile || !phraseMatches || !adminPassword) return;
+    if (!selectedFile) { setError("ملف النسخة الاحتياطية مفقود. أعد اختياره من الخطوة الأولى."); return; }
+    if (!phraseMatches || !adminPassword) return;
     setError(null); setRestoring(true);
     try {
       const formData = new FormData();
@@ -80,11 +81,18 @@ function RestoreBackupModal({ onClose }: { onClose: () => void }) {
       formData.append("adminPassword", adminPassword);
       formData.append("confirmationPhrase", confirmationPhrase);
       const response = await fetch("/api/admin/restore-backup", { method: "POST", body: formData });
-      const result = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) throw new Error(result.error || "فشلت عملية استعادة النسخة الاحتياطية.");
+      const contentType = response.headers.get("content-type") ?? "";
+      const result = (contentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : { error: `استجابة غير متوقعة من الخادم (HTTP ${response.status}): ${(await response.text()).slice(0, 180)}` }) as { success?: boolean; error?: string };
+      if (!response.ok || !result.success) {
+        setError(result.error || `فشلت الاستعادة؛ أعاد الخادم HTTP ${response.status}.`);
+        setRestoring(false);
+        return;
+      }
       window.setTimeout(() => window.location.assign("/settings?restore=success"), 900);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "حدث خطأ أثناء الاستعادة.");
+      setError(`تعذر الاتصال بمسار الاستعادة: ${cause instanceof Error ? cause.message : "خطأ شبكة غير معروف."}`);
       setRestoring(false);
     }
   };
