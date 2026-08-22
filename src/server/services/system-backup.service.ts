@@ -23,6 +23,12 @@ const TABLES = [
 
 type SnapshotTable = (typeof TABLES)[number];
 
+const SNAPSHOT_MODELS: Record<SnapshotTable, string> = {
+  users: "User", userPermissions: "UserPermission", brands: "Brand", categories: "Category", chassis: "BmwChassis", engines: "BmwEngine", warehouseBins: "WarehouseBin", parts: "PartItem", partChassis: "PartChassis", partEngines: "PartEngine", accounts: "Account", accountBalanceAdjustments: "AccountBalanceAdjustment", customerVehicles: "CustomerVehicle", treasuries: "Treasury", treasuryShifts: "TreasuryShift", invoices: "Invoice", invoiceItems: "InvoiceItem", heldSales: "HeldSale", heldSaleItems: "HeldSaleItem", accountChecks: "AccountCheck", installmentPlans: "InstallmentPlan", installments: "Installment", stockMovements: "StockMovement", treasuryTransfers: "TreasuryTransfer", treasuryTransactions: "TreasuryTransaction", barcodeConfigs: "BarcodeConfig", importJobs: "ImportJob", systemAuditTrail: "SystemAuditTrail", documentCounters: "DocumentCounter", systemSettings: "SystemSetting",
+};
+
+const SCALAR_FIELDS = Object.fromEntries(Prisma.dmmf.datamodel.models.map((model) => [model.name, new Set(model.fields.filter((field) => field.kind !== "object").map((field) => field.name))])) as Record<string, Set<string>>;
+
 const DATE_FIELDS: Partial<Record<SnapshotTable, readonly string[]>> = {
   users: ["lastLoginAt", "createdAt", "updatedAt"],
   userPermissions: ["createdAt", "updatedAt"],
@@ -88,10 +94,12 @@ function asRows(data: Record<string, unknown[]>, key: SnapshotTable) {
 }
 
 function rehydrateDateRows(table: SnapshotTable, rows: Array<Record<string, unknown>>) {
+  const scalarFields = SCALAR_FIELDS[SNAPSHOT_MODELS[table]];
+  if (!scalarFields) throw new BusinessRuleError(`تعذر تحميل حقول جدول الاستعادة «${table}».`);
   const dateFields = DATE_FIELDS[table] ?? [];
-  if (!dateFields.length) return rows;
   return rows.map((row) => {
-    const restored = { ...row };
+    // Snapshots made by older builds may carry included relations. Keep only Prisma-declared scalar/enum columns; JSON columns remain scalar and are preserved.
+    const restored = Object.fromEntries(Object.entries(row).filter(([field]) => scalarFields.has(field))) as Record<string, unknown>;
     for (const field of dateFields) {
       const value = restored[field];
       if (value === null || value === undefined || value instanceof Date) continue;
@@ -165,12 +173,16 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
   for (const table of TABLES) data[table] = rehydrateDateRows(table, asRows(data, table));
   // A full relational snapshot legitimately takes longer than an invoice. This stays bounded and is paired with the route's 60-second execution budget.
   const restoreOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10_000, timeout: 60_000 } as const;
+  let restoreStage = "بدء تجهيز قاعدة البيانات";
 
-  await withTxRetry(() => prisma.$transaction(async (tx) => {
+  try {
+    await withTxRetry(() => prisma.$transaction(async (tx) => {
     // Keep the currently authenticated administrator and its permission profile so the restore can never invalidate the in-flight session.
+    restoreStage = "تفريغ البيانات التشغيلية الحالية";
     await tx.user.updateMany({ data: { allowedTreasuryIds: [], allowedWarehouseIds: [], transferToTreasuryId: null } });
     await tx.treasuryTransaction.deleteMany(); await tx.treasuryTransfer.deleteMany(); await tx.stockMovement.deleteMany(); await tx.invoiceItem.deleteMany(); await tx.heldSaleItem.deleteMany(); await tx.heldSale.deleteMany(); await tx.invoice.deleteMany(); await tx.treasuryShift.deleteMany(); await tx.installment.deleteMany(); await tx.installmentPlan.deleteMany(); await tx.accountCheck.deleteMany(); await tx.accountBalanceAdjustment.deleteMany(); await tx.customerVehicle.deleteMany(); await tx.importJob.deleteMany(); await tx.partChassis.deleteMany(); await tx.partEngine.deleteMany(); await tx.partItem.deleteMany(); await tx.warehouseBin.deleteMany(); await tx.account.deleteMany(); await tx.treasury.deleteMany(); await tx.category.updateMany({ data: { parentId: null } }); await tx.category.deleteMany(); await tx.brand.deleteMany(); await tx.bmwChassis.deleteMany(); await tx.bmwEngine.deleteMany(); await tx.barcodeConfig.deleteMany(); await tx.documentCounter.deleteMany(); await tx.systemSetting.deleteMany(); await tx.systemAuditTrail.deleteMany();
 
+    restoreStage = "استعادة المستخدمين والصلاحيات";
     const snapshotUsers = asRows(data, "users").filter((row) => row.id !== input.actor.id);
     for (const raw of snapshotUsers) {
       const user: Record<string, unknown> = { ...raw, transferToTreasuryId: null };
@@ -180,18 +192,21 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     const permissions = asRows(data, "userPermissions").filter((row) => row.userId !== input.actor.id);
     if (permissions.length) await tx.userPermission.createMany({ data: permissions as never[] });
 
+    restoreStage = "استعادة البيانات المرجعية والمخازن";
     if (asRows(data, "brands").length) await tx.brand.createMany({ data: asRows(data, "brands") as never[] });
     const categories = asRows(data, "categories");
     if (categories.length) { await tx.category.createMany({ data: categories.map((row) => ({ ...row, parentId: null })) as never[] }); for (const row of categories.filter((item) => item.parentId)) await tx.category.update({ where: { id: String(row.id) }, data: { parentId: String(row.parentId) } }); }
     if (asRows(data, "chassis").length) await tx.bmwChassis.createMany({ data: asRows(data, "chassis") as never[] });
     if (asRows(data, "engines").length) await tx.bmwEngine.createMany({ data: asRows(data, "engines") as never[] });
     if (asRows(data, "warehouseBins").length) await tx.warehouseBin.createMany({ data: asRows(data, "warehouseBins") as never[] });
+    restoreStage = "استعادة الحسابات والخزائن وكتالوج الأصناف";
     await insertInChunks(asRows(data, "accounts"), async (chunk) => tx.account.createMany({ data: chunk as never[] }));
     if (asRows(data, "treasuries").length) await tx.treasury.createMany({ data: asRows(data, "treasuries") as never[] });
     await insertInChunks(asRows(data, "parts"), async (chunk) => tx.partItem.createMany({ data: chunk as never[] }));
     if (asRows(data, "partChassis").length) await tx.partChassis.createMany({ data: asRows(data, "partChassis") as never[] });
     if (asRows(data, "partEngines").length) await tx.partEngine.createMany({ data: asRows(data, "partEngines") as never[] });
     if (asRows(data, "customerVehicles").length) await tx.customerVehicle.createMany({ data: asRows(data, "customerVehicles") as never[] });
+    restoreStage = "استعادة الفواتير وبنودها";
     await insertInChunks(asRows(data, "invoices"), async (chunk) => tx.invoice.createMany({ data: chunk as never[] }));
     await insertInChunks(asRows(data, "invoiceItems"), async (chunk) => tx.invoiceItem.createMany({ data: chunk as never[] }));
     if (asRows(data, "heldSales").length) await tx.heldSale.createMany({ data: asRows(data, "heldSales") as never[] });
@@ -199,6 +214,7 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     if (asRows(data, "accountChecks").length) await tx.accountCheck.createMany({ data: asRows(data, "accountChecks") as never[] });
     if (asRows(data, "installmentPlans").length) await tx.installmentPlan.createMany({ data: asRows(data, "installmentPlans") as never[] });
     if (asRows(data, "installments").length) await tx.installment.createMany({ data: asRows(data, "installments") as never[] });
+    restoreStage = "استعادة السندات والحركات المالية والمخزنية";
     if (asRows(data, "treasuryShifts").length) await tx.treasuryShift.createMany({ data: asRows(data, "treasuryShifts") as never[] });
     if (asRows(data, "treasuryTransfers").length) await tx.treasuryTransfer.createMany({ data: asRows(data, "treasuryTransfers") as never[] });
     await insertInChunks(asRows(data, "treasuryTransactions"), async (chunk) => tx.treasuryTransaction.createMany({ data: chunk as never[] }));
@@ -211,12 +227,17 @@ export async function restoreFullBackupSnapshot(input: { actor: { id: string; fu
     if (asRows(data, "systemSettings").length) await tx.systemSetting.createMany({ data: asRows(data, "systemSettings") as never[] });
     await insertInChunks(asRows(data, "systemAuditTrail"), async (chunk) => tx.systemAuditTrail.createMany({ data: chunk as never[] }));
 
+    restoreStage = "إعادة ربط المدير وإنهاء التدقيق";
     const restoredActor = asRows(data, "users").find((row) => row.id === input.actor.id);
     if (restoredActor) await tx.user.update({ where: { id: input.actor.id }, data: { allowedTreasuryIds: (restoredActor.allowedTreasuryIds as string[] | undefined) ?? [], allowedWarehouseIds: (restoredActor.allowedWarehouseIds as string[] | undefined) ?? [], transferToTreasuryId: restoredActor.transferToTreasuryId ? String(restoredActor.transferToTreasuryId) : null } });
     for (const row of snapshotUsers.filter((user) => user.transferToTreasuryId)) await tx.user.update({ where: { id: String(row.id) }, data: { transferToTreasuryId: String(row.transferToTreasuryId) } });
     await tx.$executeRawUnsafe('SELECT setval(pg_get_serial_sequence(\'"StockMovement"\', \'seq\'), COALESCE((SELECT MAX(seq) FROM "StockMovement"), 1), EXISTS (SELECT 1 FROM "StockMovement"))');
     await tx.systemAuditTrail.create({ data: { tableName: "System", recordId: "BACKUP_RESTORE", action: "SYSTEM_BACKUP_RESTORED", newData: { restoredBy: input.actor.fullName, backupCreatedAt: snapshot.metadata.createdAt, summary: summary(snapshot) }, performedBy: input.actor.id } });
-  }, restoreOptions), 2);
+    }, restoreOptions), 2);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "خطأ غير معروف في قاعدة البيانات";
+    throw new BusinessRuleError(`فشلت الاستعادة عند مرحلة «${restoreStage}»: ${detail}`);
+  }
 
   return summary(snapshot);
 }
