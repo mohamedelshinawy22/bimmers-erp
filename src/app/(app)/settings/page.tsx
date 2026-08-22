@@ -8,6 +8,8 @@ import { SettingsForm } from "./settings-form";
 export const metadata = { title: "الإعدادات" };
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+// Recovery actions are atomic and may replay a complete verified snapshot.
+export const maxDuration = 60;
 
 export default async function SettingsPage() {
   const user = await requireUser();

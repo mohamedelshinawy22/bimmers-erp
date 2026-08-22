@@ -9,6 +9,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/modal";
 import { UsersPanel } from "./users-panel";
 import { FullSystemResetModal } from "@/components/settings/full-system-reset-modal";
+import { BackupRecoveryHub } from "@/components/settings/backup-recovery-hub";
 import type { ManagedUser } from "@/server/services/audit.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { updateCompanySettingsAction, updateSettingsAction } from "@/server/actions/settings.actions";
@@ -205,6 +206,8 @@ export function SettingsForm({ groups, canWrite, canFactoryReset, users, current
       </div>
 
       {users ? <UsersPanel users={users} currentUserId={currentUserId} /> : null}
+
+      {canFactoryReset ? <BackupRecoveryHub /> : null}
 
       {canFactoryReset ? <Card className="border-2 border-bmw-mRed/50 bg-bmw-mRed/5"><CardHeader><CardTitle className="text-rose-300"><Flame size={18} /> منطقة الخطر: إعادة ضبط المصنع وتصفير النظام</CardTitle><p className="text-xs text-bmw-muted">يحذف هذا الإجراء جميع البيانات التشغيلية نهائياً، ثم ينشئ خط أساس نظيفاً. لا يمكن تنفيذه إلا من حساب مدير النظام وبعد إدخال عبارة التأكيد وكلمة المرور الحالية.</p></CardHeader><CardContent className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-rose-200">تتضمن العملية الفواتير والسندات والأرصدة والأصناف والمخزون والحركات والسجل التدقيقي السابق.</div><Button variant="danger" onClick={() => setFactoryResetOpen(true)}><Flame size={16} /> مسح وتصفير كافة البيانات</Button></CardContent></Card> : null}
 
