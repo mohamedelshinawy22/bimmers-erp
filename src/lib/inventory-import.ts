@@ -37,7 +37,10 @@ export function parseSpreadsheetNumber(value: unknown): number | null {
     .replace(/٬/g, ",")
     .replace(/٫/g, ".")
     .replace(/[^0-9,\.\-+]/g, "")
-    .replace(/\s/g, "");
+    .replace(/\s/g, "")
+    // Currency abbreviations such as "ج.م" leave a trailing dot after their
+    // letters are removed; it is not part of the numeric value.
+    .replace(/[,.]+$/g, "");
 
   if (!westernDigits || !/[0-9]/.test(westernDigits) || !/^[+-]?[0-9.,]+$/.test(westernDigits)) return null;
 

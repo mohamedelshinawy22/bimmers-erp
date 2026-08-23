@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { getCompanyProfile, type CompanyProfile } from "@/server/services/settings.service";
@@ -18,7 +19,8 @@ import {
 export async function getCompanyProfileForPrintAction(): Promise<ActionResult<CompanyProfile>> {
   try {
     await requirePermission("reports.dailyMovement");
-    return ok(await getCompanyProfile());
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => ok(await getCompanyProfile()));
   } catch (error) {
     return toActionError(error, "getCompanyProfileForPrintAction");
   }

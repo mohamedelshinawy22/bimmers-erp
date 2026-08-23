@@ -15,7 +15,9 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:probe": "tsx scripts/db-probe.ts",
-    "test": "tsc --noEmit",
+    "test": "vitest run && tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:routes:authenticated": "node scripts/authenticated-route-smoke.mjs",
     "verify:db:dangerous": "tsx --conditions=react-server scripts/verify-db.ts",
     "test:tenant-isolation": "tsx --conditions=react-server scripts/tenant-isolation-probe.ts",
     "test:tenant-session": "tsx --conditions=react-server scripts/tenant-session-probe.ts",
@@ -68,7 +70,8 @@
     "tailwindcss-animate": "^1.0.7",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.12",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { ok, toActionError } from "@/lib/action-result";
 import { dailyMovementReportSchema, type DailyMovementReportInput } from "@/lib/validations/reports";
 
@@ -12,6 +13,8 @@ type InvoiceKind = "SALE" | "SALE_RETURN" | "PURCHASE" | "PURCHASE_RETURN";
 export async function getDailyMovementReportAction(raw: DailyMovementReportInput) {
   try {
     await requirePermission("reports.dailyMovement");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = dailyMovementReportSchema.parse(raw);
     const operatorId = input.operatorId || undefined;
     const warehouseName = input.warehouseName || undefined;
@@ -100,6 +103,7 @@ export async function getDailyMovementReportAction(raw: DailyMovementReportInput
         { key: "net", label: "صافي حركة الخزينة", amount: netMovement }, { key: "closing", label: "الرصيد النهائي", amount: openingBalance + netMovement },
       ],
       drillDowns: { sales, saleReturns, purchases, purchaseReturns, receipts: receiptsRows, payments: paymentsRows, stocktakes: stocktakeRows, adjustments: adjustmentRows, treasuryMovements: treasuryRows },
+    });
     });
   } catch (error) {
     return toActionError(error, "getDailyMovementReportAction");

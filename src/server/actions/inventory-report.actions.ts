@@ -1,8 +1,8 @@
 "use server";
 
-import { can, requirePermission, requireUser } from "@/lib/auth";
+import { can, requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
-import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { num } from "@/lib/utils";
 
 type Input = { fromDate: string; toDate: string; chassisId?: string; categoryId?: string; brandId?: string; warehouseName?: string };
@@ -18,7 +18,9 @@ const asDate = (value: string, fallback: Date) => { const parsed = new Date(valu
 export async function getInventoryMovementReportAction(input: Input): Promise<ActionResult<ReportData>> {
   try {
     await requirePermission("reports.dailyMovement");
-    const user = await requireUser();
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+    const user = tenant.user;
     const canViewCost = can(user.role, "part.viewCost");
     const from = asDate(input.fromDate, new Date(new Date().setHours(0, 0, 0, 0)));
     const to = asDate(input.toDate, new Date());
@@ -34,7 +36,7 @@ export async function getInventoryMovementReportAction(input: Input): Promise<Ac
     };
 
     const [parts, chassis, categories, brands, bins] = await Promise.all([
-      prisma.partItem.findMany({
+      tenant.prisma.partItem.findMany({
         where,
         select: {
           id: true, oemNumber: true, nameAr: true, category: true, stockQuantity: true, buyPriceAvg: true, createdAt: true,
@@ -45,10 +47,10 @@ export async function getInventoryMovementReportAction(input: Input): Promise<Ac
           invoiceItems: { where: { invoice: { type: "SALE", isVoided: false, createdAt: { gte: from, lte: to } } }, select: { quantity: true, unitPrice: true, unitCostSnapshot: true, lineDiscount: true } },
         },
       }),
-      prisma.bmwChassis.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true } }),
-      prisma.category.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      prisma.warehouseBin.findMany({ distinct: ["warehouseName"], orderBy: { warehouseName: "asc" }, select: { warehouseName: true } }),
+      tenant.prisma.bmwChassis.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true } }),
+      tenant.prisma.category.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+      tenant.prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+      tenant.prisma.warehouseBin.findMany({ distinct: ["warehouseName"], orderBy: { warehouseName: "asc" }, select: { warehouseName: true } }),
     ]);
 
     const now = Date.now();
@@ -98,6 +100,7 @@ export async function getInventoryMovementReportAction(input: Input): Promise<Ac
       options: { chassis, categories, brands, warehouses: bins.map((bin) => bin.warehouseName) },
     };
     return ok(data);
+    });
   } catch (error) {
     return toActionError(error, "getInventoryMovementReportAction");
   }

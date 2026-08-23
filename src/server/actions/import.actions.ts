@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { writeAudit } from "@/lib/audit";
 import { ok, toActionError } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
@@ -55,6 +56,8 @@ function cleanBarcode(value?: string): string | null { const barcode = value?.tr
 export async function executeInventoryImportAction(raw: ImportInput) {
   try {
     const user = await requirePermission("inventory.import");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = importSchema.parse(raw);
     const validation = input.rows.map((row, index) => ({ sourceRowNumber: index + 1, result: importRowSchema.safeParse(row) }));
     const invalidRows = validation
@@ -80,10 +83,10 @@ export async function executeInventoryImportAction(raw: ImportInput) {
     if (rows.length === 0) throw new BusinessRuleError("لا توجد أصناف سليمة قابلة للاستيراد بعد استبعاد الصفوف غير الصالحة.");
 
     const checksum = createHash("sha256").update(JSON.stringify(rows.map((row) => ({ ...row, barcode: row.barcode || null })))).digest("hex");
-    const previous = await prisma.importJob.findFirst({ where: { checksum, type: "INVENTORY", status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
+    const previous = await tenant.prisma.importJob.findFirst({ where: { checksum, type: "INVENTORY", status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
     if (previous) return ok({ jobId: previous.id, duplicate: true, total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created: 0, skipped: rows.length, summary: previous.summary });
 
-    const job = await prisma.importJob.create({ data: { type: "INVENTORY", status: "PROCESSING", checksum, mapping: input.mapping, createdById: user.id } });
+    const job = await tenant.prisma.importJob.create({ data: { type: "INVENTORY", status: "PROCESSING", checksum, mapping: input.mapping, createdById: user.id } });
     let created = 0;
     let skipped = 0;
     let barcodeCollisions = 0;
@@ -91,7 +94,7 @@ export async function executeInventoryImportAction(raw: ImportInput) {
     try {
       for (let start = 0; start < rows.length; start += 100) {
         const chunk = rows.slice(start, start + 100);
-        const chunkResult = await withTxRetry(() => prisma.$transaction(async (tx) => {
+        const chunkResult = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
           let chunkCreated = 0;
           let chunkSkipped = 0;
           let chunkBarcodeCollisions = 0;
@@ -147,15 +150,16 @@ export async function executeInventoryImportAction(raw: ImportInput) {
       }
 
       const summary = { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions, chunkSize: 100 };
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
-      await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
+      await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
+      await writeAudit(tenant.prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
       revalidatePath("/inventory");
       revalidatePath("/pos");
       return ok({ jobId: job.id, duplicate: false, ...summary });
     } catch (error) {
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions } } });
+      await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions } } });
       throw error;
     }
+    });
   } catch (error) {
     return toActionError(error, "executeInventoryImportAction");
   }
