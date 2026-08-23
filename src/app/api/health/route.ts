@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +25,9 @@ type ConfigStatus = "set" | "missing" | "too_short" | "optional_missing";
  */
 export async function GET() {
   const checks: Record<string, "up" | "down" | "disabled"> = {
-    database: "down",
+    database: "disabled",
     redis: "disabled",
   };
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    checks.database = "up";
-  } catch {
-    checks.database = "down";
-  }
 
   const redis = getRedis();
   if (redis) {
@@ -56,6 +48,9 @@ export async function GET() {
 
   const config: Record<string, ConfigStatus> = {
     DATABASE_URL: process.env.DATABASE_URL ? "set" : "missing",
+    MASTER_CONSOLE_URL: (process.env.MASTER_CONSOLE_URL ?? process.env.NEXT_PUBLIC_MASTER_CONSOLE_URL) ? "set" : "missing",
+    LICENSE_API_SHARED_SECRET: process.env.LICENSE_API_SHARED_SECRET ? "set" : "missing",
+    TENANT_ROUTE_ENCRYPTION_KEY: process.env.TENANT_ROUTE_ENCRYPTION_KEY ? "set" : "missing",
     JWT_SECRET: jwtStatus,
     NEXT_PUBLIC_CURRENCY: process.env.NEXT_PUBLIC_CURRENCY ? "set" : "missing",
     REDIS_URL: process.env.REDIS_URL ? "set" : "optional_missing",
@@ -63,7 +58,7 @@ export async function GET() {
 
   // A reachable database is not enough to call the instance healthy: a bad
   // signing key means nobody can authenticate.
-  const healthy = checks.database === "up" && jwtStatus === "set";
+  const healthy = jwtStatus === "set" && config.MASTER_CONSOLE_URL === "set" && config.LICENSE_API_SHARED_SECRET === "set" && config.TENANT_ROUTE_ENCRYPTION_KEY === "set";
   return NextResponse.json(
     {
       status: healthy ? "ok" : "degraded",

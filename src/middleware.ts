@@ -56,12 +56,13 @@ async function inspectSession(token: string | undefined): Promise<SessionState> 
     // login page rather than 500 on every route. A cookie this deployment
     // cannot verify is unusable by it, so it is treated as stale and dropped.
     if (!secret || secret.length < 32) return "stale";
-    await jwtVerify(token, new TextEncoder().encode(secret), {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
       // Pinned explicitly: refuses `alg` substitution outright.
       algorithms: ["HS256"],
       issuer: "bimmer-erp",
       audience: "bimmer-erp-web",
     });
+    if (typeof payload.tenantId !== "string" || !/^[a-zA-Z0-9-]{3,64}$/.test(payload.tenantId)) return "stale";
     return "valid";
   } catch {
     // Expired, tampered, wrong secret, wrong alg, malformed — indistinguishable

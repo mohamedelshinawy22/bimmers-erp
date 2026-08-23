@@ -1,12 +1,14 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
 import type { Role } from "@prisma/client";
 import { prisma } from "./prisma";
+import { establishTenantContext } from "./tenant-routing";
 import { SESSION_COOKIE } from "./auth-constants";
 import { AuthError, ConfigurationError, ForbiddenError } from "./errors";
 import { can, PERMISSIONS, type Permission } from "./permissions";
 import { getUserAccess, hasApplicationPermission } from "./user-permissions";
+import { sessionSecretKey, verifySessionToken } from "./session-token";
 
 // Re-exported so server code has one import site for auth + authorisation.
 export { SESSION_COOKIE, AuthError, ForbiddenError, can, PERMISSIONS };
@@ -17,20 +19,7 @@ export interface SessionUser {
   username: string;
   fullName: string;
   role: Role;
-}
-
-function secretKey(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret || secret.length < 32) {
-    // ConfigurationError (not a bare Error) so `toActionError` can surface the
-    // cause instead of collapsing it into "حدث خطأ غير متوقع", which made a
-    // missing JWT_SECRET indistinguishable from a bug in production.
-    // Names the variable but never echoes its value.
-    throw new ConfigurationError(
-      "إعداد الخادم غير مكتمل: متغير البيئة JWT_SECRET غير مضبوط أو أقل من ٣٢ حرفاً. راجع مسؤول النظام.",
-    );
-  }
-  return new TextEncoder().encode(secret);
+  tenantId: string;
 }
 
 function ttlHours(): number {
@@ -45,13 +34,14 @@ export async function createSession(user: SessionUser): Promise<void> {
     username: user.username,
     fullName: user.fullName,
     role: user.role,
+    tenantId: user.tenantId,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setIssuer("bimmer-erp")
     .setAudience("bimmer-erp-web")
     .setExpirationTime(`${hours}h`)
-    .sign(secretKey());
+    .sign(sessionSecretKey());
 
   cookies().set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -67,21 +57,8 @@ export function destroySession(): void {
 }
 
 export async function verifyToken(token: string): Promise<SessionUser | null> {
-  try {
-    const { payload } = await jwtVerify(token, secretKey(), {
-      issuer: "bimmer-erp",
-      audience: "bimmer-erp-web",
-    });
-    if (!payload.sub || typeof payload.username !== "string") return null;
-    return {
-      id: payload.sub,
-      username: payload.username,
-      fullName: String(payload.fullName ?? payload.username),
-      role: payload.role as Role,
-    };
-  } catch {
-    return null;
-  }
+  const session = await verifySessionToken(token);
+  return session ? { ...session, role: session.role as Role } : null;
 }
 
 /** Cheap read: trusts the signed cookie, no DB round-trip. */
@@ -99,6 +76,7 @@ export async function getSession(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const session = await getSession();
   if (!session) throw new AuthError("الجلسة منتهية. يرجى تسجيل الدخول من جديد.");
+  await establishTenantContext(session.username, session.tenantId);
 
   const user = await prisma.user.findUnique({
     where: { id: session.id },
@@ -107,7 +85,7 @@ export async function requireUser(): Promise<SessionUser> {
   if (!user || !user.isActive) {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
-  return { id: user.id, username: user.username, fullName: user.fullName, role: user.role };
+  return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId };
 }
 
 

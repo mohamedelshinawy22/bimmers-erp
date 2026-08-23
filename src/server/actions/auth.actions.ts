@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { createUserSchema, loginSchema, type LoginInput } from "@/lib/validations/accounts";
 import { toJsonSafe } from "@/lib/audit";
 import { headers } from "next/headers";
+import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername } from "@/lib/tenant-routing";
 
 /** Constant-time-ish decoy hash so a missing username costs the same as a wrong password. */
 const DECOY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.q8n0PtPYQhbP8Yq9m8kK1lYQ0lM3z2i";
@@ -18,8 +19,10 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
   try {
     const input = loginSchema.parse(raw);
 
-    const user = await prisma.user.findUnique({
-      where: { username: input.username },
+    const username = input.username.toLowerCase();
+    const tenant = await establishTenantContext(username);
+    const user = await tenant.prisma.user.findUnique({
+      where: { username },
       select: { id: true, username: true, fullName: true, role: true, isActive: true, passwordHash: true },
     });
 
@@ -29,12 +32,12 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
     const ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 
     if (!user || !passwordOk || !user.isActive) {
-      await prisma.systemAuditTrail.create({
+      await tenant.prisma.systemAuditTrail.create({
         data: {
           tableName: "User",
           recordId: user?.id ?? "unknown",
           action: "LOGIN_FAILED",
-          newData: toJsonSafe({ username: input.username, reason: !user ? "NO_USER" : !passwordOk ? "BAD_PASSWORD" : "INACTIVE" }),
+          newData: toJsonSafe({ username, reason: !user ? "NO_USER" : !passwordOk ? "BAD_PASSWORD" : "INACTIVE" }),
           performedBy: "anonymous",
           ipAddress: ip,
         },
@@ -48,11 +51,12 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
       username: user.username,
       fullName: user.fullName,
       role: user.role,
+      tenantId: tenant.route.tenantId,
     });
 
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
-      prisma.systemAuditTrail.create({
+    await tenant.prisma.$transaction([
+      tenant.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
+      tenant.prisma.systemAuditTrail.create({
         data: {
           tableName: "User",
           recordId: user.id,
@@ -79,14 +83,20 @@ export async function logoutAction(): Promise<void> {
 export async function createUserAction(
   raw: unknown,
 ): Promise<ActionResult<{ id: string; username: string }>> {
+  let reservation: { username: string; route: ReturnType<typeof getTenantContext>["route"] } | null = null;
+  let createdId: string | null = null;
   try {
     const actor = await requirePermission("user.manage");
     const input = createUserSchema.parse(raw);
+    const username = input.username.toLowerCase();
+    const tenant = getTenantContext();
+    await reserveTenantUsername(tenant.route, username, input.role);
+    reservation = { username, route: tenant.route };
 
     const created = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
-          username: input.username,
+          username,
           fullName: input.fullName,
           passwordHash: await bcrypt.hash(input.password, 12),
           role: input.role,
@@ -105,10 +115,15 @@ export async function createUserAction(
       });
       return user;
     });
+    createdId = created.id;
+    await activateTenantUsername(tenant.route, username);
+    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true } }));
 
     revalidatePath("/settings");
     return ok({ id: created.id, username: created.username });
   } catch (error) {
+    if (createdId) await prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
+    if (reservation) await releaseTenantUsername(reservation.route, reservation.username).catch(() => undefined);
     return toActionError(error, "createUserAction");
   }
 }

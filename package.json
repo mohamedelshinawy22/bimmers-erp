@@ -17,6 +17,8 @@
     "db:probe": "tsx scripts/db-probe.ts",
     "test": "tsc --noEmit",
     "verify:db:dangerous": "tsx --conditions=react-server scripts/verify-db.ts",
+    "test:tenant-isolation": "tsx --conditions=react-server scripts/tenant-isolation-probe.ts",
+    "test:tenant-session": "tsx --conditions=react-server scripts/tenant-session-probe.ts",
     "db:migrate:dev": "prisma migrate dev"
   },
   "keywords": [],

@@ -10,6 +10,7 @@ import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { toJsonSafe } from "@/lib/audit";
 import { createManagedUserSchema, updateManagedUserSchema, type CreateManagedUserInput, type UpdateManagedUserInput, type UserPermissionInput } from "@/lib/validations/users";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { activateTenantUsername, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername } from "@/lib/tenant-routing";
 
 function permissionData(input: UserPermissionInput): Prisma.UserPermissionUncheckedCreateWithoutUserInput {
   return {
@@ -43,14 +44,20 @@ function revalidateUserManagement(): void {
 }
 
 export async function createManagedUserAction(raw: CreateManagedUserInput): Promise<ActionResult<{ id: string; username: string }>> {
+  let reservation: { username: string; route: ReturnType<typeof getTenantContext>["route"] } | null = null;
+  let createdId: string | null = null;
   try {
     const actor = await requirePermission("user.manage");
     const input = createManagedUserSchema.parse(raw);
+    const username = input.username.toLowerCase();
+    const tenant = getTenantContext();
+    await reserveTenantUsername(tenant.route, username, input.role);
+    reservation = { username, route: tenant.route };
     const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
       await validateScopedResources(tx, input);
       const created = await tx.user.create({
         data: {
-          username: input.username,
+          username,
           fullName: input.fullName,
           passwordHash: await bcrypt.hash(input.password, 12),
           role: input.role,
@@ -73,9 +80,14 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
       });
       return created;
     }, TX_OPTIONS));
+    createdId = result.id;
+    await activateTenantUsername(tenant.route, username);
+    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true } }));
     revalidateUserManagement();
     return ok({ id: result.id, username: result.username });
   } catch (error) {
+    if (createdId) await prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
+    if (reservation) await releaseTenantUsername(reservation.route, reservation.username).catch(() => undefined);
     return toActionError(error, "createManagedUserAction");
   }
 }
@@ -87,6 +99,7 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
     const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
       const before = await tx.user.findUnique({ where: { id: input.id }, include: { permissions: true } });
       if (!before) throw new BusinessRuleError("المستخدم غير موجود.");
+      if (before.username !== input.username.toLowerCase()) throw new BusinessRuleError("لا يمكن تغيير اسم المستخدم بعد ربطه بالمستأجر.");
       if (actor.id === before.id && !input.isActive) throw new BusinessRuleError("لا يمكنك إيقاف حسابك الخاص.");
       if (before.role === "SUPER_ADMIN" && before.isActive && (!input.isActive || input.role !== "SUPER_ADMIN")) {
         const remaining = await tx.user.count({ where: { role: "SUPER_ADMIN", isActive: true, id: { not: before.id } } });

@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { getTenantContext } from "./tenant-routing";
 
 /**
  * Singleton Prisma client.
@@ -28,7 +29,7 @@ if (!process.env.DIRECT_URL && process.env.DATABASE_URL) {
   process.env.DIRECT_URL = process.env.DATABASE_URL;
 }
 
-export const prisma =
+export const legacyPrisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log:
@@ -38,8 +39,21 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = legacyPrisma;
 }
+
+/**
+ * Request-scoped tenant Prisma facade. It refuses database access before the
+ * signed session has resolved a tenant; there is intentionally no fallback to
+ * the legacy database. Use `legacyPrisma` only for explicit maintenance paths.
+ */
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = getTenantContext().prisma;
+    const value = Reflect.get(client, property, client);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 
 /** Transaction client type — what `prisma.$transaction(async (tx) => …)` yields. */
 export type TxClient = Omit<
