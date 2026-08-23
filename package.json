@@ -24,6 +24,8 @@
     "test:legacy-root-admin-reconciliation": "tsx --conditions=react-server scripts/legacy-root-admin-reconciliation-probe.ts",
     "test:tenant-route-config": "tsx --conditions=react-server scripts/tenant-route-config-probe.ts",
     "test:login-action-failure": "tsx --conditions=react-server scripts/login-action-failure-probe.ts",
+    "test:live-root-admin-route": "tsx --conditions=react-server scripts/live-root-admin-route-probe.ts",
+    "test:dashboard-tenant-context": "tsx --conditions=react-server scripts/dashboard-tenant-context-probe.ts",
     "db:migrate:dev": "prisma migrate dev"
   },
   "keywords": [],

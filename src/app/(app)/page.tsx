@@ -24,6 +24,7 @@ import {
   getTopSellingParts,
 } from "@/server/services/dashboard.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
+import { requireUser } from "@/lib/auth";
 
 export const metadata = { title: "لوحة القيادة" };
 // Cockpit numbers must reflect the last committed transaction, never a cache.
@@ -84,6 +85,10 @@ const QUICK_ACTIONS = [
 const CHASSIS_QUICK = ["E36", "E46", "E90", "F30", "G20", "E39", "E60", "F10", "G30"] as const;
 
 export default async function DashboardCockpit() {
+  // The app layout authenticates the shell, but React may render this page in a
+  // separate concurrent server-component branch. Establishing here binds the
+  // request-local tenant client before any dashboard service touches Prisma.
+  await requireUser();
   const [metrics, recent, trend, topParts, company] = await Promise.all([
     getDashboardMetrics(),
     getRecentInvoices(8),
