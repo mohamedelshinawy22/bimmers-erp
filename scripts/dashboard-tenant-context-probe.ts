@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 function main() {
   const source = readFileSync(resolve(process.cwd(), "src/app/(app)/page.tsx"), "utf8");
+  const authSource = readFileSync(resolve(process.cwd(), "src/lib/auth.ts"), "utf8");
   const dashboardStart = source.indexOf("export default async function DashboardCockpit() {");
   const requireContext = source.indexOf("withAuthenticatedTenant(() => Promise.all", dashboardStart);
   const firstTenantQuery = source.indexOf('dashboardFallback("metrics"', dashboardStart);
@@ -12,6 +13,8 @@ function main() {
   for (const loader of ["metrics", "recent-invoices", "sales-trend", "top-selling-parts", "company-profile"]) {
     assert.ok(source.includes(`dashboardFallback(\"${loader}\"`), `the ${loader} dashboard loader must have a safe fallback`);
   }
+  assert.ok(authSource.includes("findUser: () => context.prisma.user.findUnique"), "session authority must query the explicit tenant Prisma client");
+  assert.ok(!authSource.includes("findUser: () => prisma.user.findUnique"), "session authority must not rely on an ambient context facade");
   console.log("Dashboard tenant-context contract probe passed.");
 }
 

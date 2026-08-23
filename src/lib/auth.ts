@@ -79,12 +79,15 @@ export async function getSession(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const session = await getSession();
   if (!session) throw new AuthError("الجلسة منتهية. يرجى تسجيل الدخول من جديد.");
-  await establishTenantContext(session.username, session.tenantId);
+  const context = await establishTenantContext(session.username, session.tenantId);
 
-  const user = await resolveTenantSessionAuthority(session, {
-    findUser: () => prisma.user.findUnique({ where: { id: session.id }, select: { id: true, username: true, fullName: true, role: true, isActive: true } }),
-    findLatestPasswordChange: async () => (await prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }))?.timestamp ?? null,
-  });
+  // Next's concurrent Server Component rendering can split AsyncLocalStorage
+  // lineage after an await. Session authority must therefore use the explicit
+  // tenant client that was just resolved, never the context-dependent facade.
+  const user = await runWithTenantContext(context, () => resolveTenantSessionAuthority(session, {
+    findUser: () => context.prisma.user.findUnique({ where: { id: session.id }, select: { id: true, username: true, fullName: true, role: true, isActive: true } }),
+    findLatestPasswordChange: async () => (await context.prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }))?.timestamp ?? null,
+  }));
   if (!user) {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
@@ -97,8 +100,9 @@ export async function requireUser(): Promise<SessionUser> {
  * context established by the layout must never be assumed by the page branch.
  */
 export async function withAuthenticatedTenant<T>(work: () => Promise<T>): Promise<T> {
-  await requireUser();
-  return runWithTenantContext(getTenantContext(), work);
+  const user = await requireUser();
+  const context = await establishTenantContext(user.username, user.tenantId);
+  return runWithTenantContext(context, work);
 }
 
 
