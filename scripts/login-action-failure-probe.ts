@@ -10,6 +10,10 @@ function main() {
   const unavailable = toLoginActionFailure(new TenantRoutingError("MASTER_UNREACHABLE", "تعذر الاتصال ببوابة التراخيص. أعد المحاولة لاحقاً."));
   assert.equal(unavailable.success, false);
   if (!unavailable.success) assert.equal(unavailable.error, "اسم المستخدم أو كلمة المرور غير صحيحة");
+  const deviceLimit = "عفواً، لقد تم الوصول إلى الحد الأقصى لعدد الأجهزة المعتمدة المسموح بها لهذا الاشتراك (2). يرجى تسجيل الخروج من أحد الأجهزة أو طلب ترقية الخطة.";
+  const limited = toLoginActionFailure(new TenantRoutingError("DEVICE_LIMIT", deviceLimit));
+  assert.equal(limited.success, false);
+  if (!limited.success) assert.equal(limited.error, deviceLimit, "device quota denial must preserve the exact Master Console message");
   const missingConfiguration = toLoginActionFailure(new Error("TENANT_ROUTE_ENCRYPTION_KEY is absent"));
   assert.equal(missingConfiguration.success, false);
   if (!missingConfiguration.success) assert.equal(missingConfiguration.error, "اسم المستخدم أو كلمة المرور غير صحيحة");

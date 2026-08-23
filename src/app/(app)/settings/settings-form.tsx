@@ -33,6 +33,7 @@ interface SettingsFormProps {
   users: ManagedUser[] | null;
   currentUserId: string;
   companyProfile: CompanyProfile;
+  tenantQuota: { maxSubUsers: number; activeSubUsers: number } | null;
 }
 
 // Key classification is imported, not redeclared: the server validates against
@@ -41,7 +42,7 @@ interface SettingsFormProps {
 
 const PROFILE_KEYS = new Set(["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"]);
 
-export function SettingsForm({ groups, canWrite, canFactoryReset, users, currentUserId, companyProfile }: SettingsFormProps) {
+export function SettingsForm({ groups, canWrite, canFactoryReset, users, currentUserId, companyProfile, tenantQuota }: SettingsFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -205,7 +206,7 @@ export function SettingsForm({ groups, canWrite, canFactoryReset, users, current
         })}
       </div>
 
-      {users ? <UsersPanel users={users} currentUserId={currentUserId} /> : null}
+      {users ? <UsersPanel users={users} currentUserId={currentUserId} tenantQuota={tenantQuota} /> : null}
 
       {canFactoryReset ? <BackupRecoveryHub /> : null}
 

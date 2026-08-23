@@ -22,12 +22,13 @@ import { ChangePasswordModal } from "@/components/auth/change-password-modal";
  * account-management screen that did not exist — users could only be created by
  * the seed script.
  */
-export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; currentUserId: string }) {
+export function UsersPanel({ users, currentUserId, tenantQuota }: { users: ManagedUser[]; currentUserId: string; tenantQuota: { maxSubUsers: number; activeSubUsers: number } | null }) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const quotaReached = Boolean(tenantQuota && tenantQuota.activeSubUsers >= tenantQuota.maxSubUsers);
 
   const toggle = (userId: string) => {
     setError(null);
@@ -50,7 +51,11 @@ export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; cur
             {users.length}
           </Badge>
         </CardTitle>
-        <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => setPasswordOpen(true)}><KeyRound size={15} /> تعديل بيانات الحساب وتغيير كلمة المرور</Button><Button size="sm" onClick={() => setAddOpen(true)}><UserPlus size={15} /> مستخدم جديد</Button></div>
+        <div className="flex flex-wrap items-center gap-2">
+          {tenantQuota ? <Badge variant={quotaReached ? "danger" : "muted"}>المستخدمون الفرعيون: {tenantQuota.activeSubUsers} / {tenantQuota.maxSubUsers}</Badge> : null}
+          <Button size="sm" variant="outline" onClick={() => setPasswordOpen(true)}><KeyRound size={15} /> تعديل بيانات الحساب وتغيير كلمة المرور</Button>
+          <Button size="sm" onClick={() => setAddOpen(true)} disabled={quotaReached} title={quotaReached ? "تم الوصول إلى حد المستخدمين الفرعيين للخطة" : undefined}><UserPlus size={15} /> مستخدم جديد</Button>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
@@ -116,13 +121,13 @@ export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; cur
         </Table>
       </CardContent>
 
-      <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} quotaReached={quotaReached} />
       <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </Card>
   );
 }
 
-function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AddUserModal({ open, onClose, quotaReached }: { open: boolean; onClose: () => void; quotaReached: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +142,7 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
 
   const submit = () => {
     setError(null);
+    if (quotaReached) { setError("تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين في الخطة الحالية."); return; }
     startTransition(async () => {
       const res = await createUserAction(form);
       if (!res.success) {
@@ -164,7 +170,7 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
           <Button
             onClick={submit}
             loading={pending}
-            disabled={form.username.length < 3 || form.fullName.length < 2 || !passwordOk}
+            disabled={quotaReached || form.username.length < 3 || form.fullName.length < 2 || !passwordOk}
           >
             <UserPlus size={15} /> إنشاء المستخدم
           </Button>
@@ -172,6 +178,7 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
       }
     >
       <div className="space-y-3">
+        {quotaReached ? <Alert variant="warning">تم الوصول إلى حد المستخدمين الفرعيين المسموح به في هذه الخطة.</Alert> : null}
         {error ? <Alert variant="error">{error}</Alert> : null}
         <Field label="اسم المستخدم" required hint="حروف إنجليزية وأرقام فقط">
           <Input

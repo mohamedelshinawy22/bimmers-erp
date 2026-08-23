@@ -150,10 +150,17 @@ export const createVehicleSchema = z.object({
 
 export type CreateVehicleInput = z.infer<typeof createVehicleSchema>;
 
+export const tenantDeviceIdentitySchema = z.object({
+  deviceId: z.string().trim().min(16).max(160),
+  deviceName: z.string().trim().max(160).optional(),
+  browserInfo: z.string().trim().max(240).optional(),
+  os: z.string().trim().max(120).optional(),
+});
+
 export const loginSchema = z.object({
   username: z.string().trim().min(3, "اسم المستخدم قصير جداً").max(50),
   password: z.string().min(8, "كلمة المرور يجب أن تكون ٨ خانات على الأقل").max(200),
-});
+}).merge(tenantDeviceIdentitySchema);
 
 export type LoginInput = z.infer<typeof loginSchema>;
 

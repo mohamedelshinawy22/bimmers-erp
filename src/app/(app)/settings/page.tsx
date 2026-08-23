@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
 import { getCompanyProfile, getSettingsGrouped } from "@/server/services/settings.service";
 import { listUsers } from "@/server/services/audit.service";
+import { getTenantContext } from "@/lib/tenant-routing";
 import { SettingsForm } from "./settings-form";
 
 export const metadata = { title: "الإعدادات" };
@@ -21,6 +22,12 @@ export default async function SettingsPage() {
     canManageUsers ? listUsers() : Promise.resolve(null),
     getCompanyProfile(),
   ]);
+  const tenantQuota = canManageUsers && users
+    ? {
+        maxSubUsers: getTenantContext().route.maxSubUsers,
+        activeSubUsers: users.filter((account) => account.isActive && account.role !== "SUPER_ADMIN").length,
+      }
+    : null;
 
   return (
     <div className="space-y-4">
@@ -35,6 +42,7 @@ export default async function SettingsPage() {
         users={users}
         currentUserId={user.id}
         companyProfile={companyProfile}
+        tenantQuota={tenantQuota}
       />
     </div>
   );

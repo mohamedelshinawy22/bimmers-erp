@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Car, KeyRound, LogIn, UserRound } from "lucide-react";
 import { loginAction } from "@/server/actions/auth.actions";
@@ -17,12 +17,29 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [device, setDevice] = useState<{ deviceId: string; deviceName: string; browserInfo: string; os: string } | null>(null);
+
+  useEffect(() => {
+    const key = "bimmererp.device-id.v1";
+    let deviceId = window.localStorage.getItem(key);
+    if (!deviceId) {
+      deviceId = crypto.randomUUID();
+      window.localStorage.setItem(key, deviceId);
+    }
+    const browserInfo = navigator.userAgent.slice(0, 240);
+    const os = [navigator.platform, navigator.language].filter(Boolean).join(" • ").slice(0, 120);
+    setDevice({ deviceId, deviceName: `${navigator.platform || "Browser"} ERP`, browserInfo, os });
+  }, []);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+    if (!device) {
+      setError("جارٍ تجهيز تعريف الجهاز. أعد المحاولة بعد لحظة.");
+      return;
+    }
     startTransition(async () => {
-      const result = await loginAction({ username, password });
+      const result = await loginAction({ username, password, ...device });
       if (!result.success) {
         setError(result.error);
         setPassword("");

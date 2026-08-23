@@ -12,6 +12,8 @@ export type TenantRoute = {
   deploymentIdentifier: string;
   databaseUrl: string;
   initialAdminUsername?: string | null;
+  maxSubUsers: number;
+  maxDevices: number;
   issuedAt: string;
   expiresAt: string;
 };
@@ -57,7 +59,7 @@ export function decryptTenantRouteEnvelope(envelope: string): TenantRoute {
     const decipher = createDecipheriv("aes-256-gcm", routeKey(), Buffer.from(iv, "base64url"));
     decipher.setAuthTag(Buffer.from(tag, "base64url"));
     const route = JSON.parse(Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8")) as TenantRoute;
-    if (route.version !== 1 || !validTenantId(route.tenantId) || !route.slug || !route.licenseKey || !route.deploymentIdentifier || !validateDatabaseUrl(route.databaseUrl) || Date.parse(route.expiresAt) <= Date.now()) throw new Error("invalid route fields");
+    if (route.version !== 1 || !validTenantId(route.tenantId) || !route.slug || !route.licenseKey || !route.deploymentIdentifier || !validateDatabaseUrl(route.databaseUrl) || !Number.isInteger(route.maxSubUsers) || route.maxSubUsers < 0 || !Number.isInteger(route.maxDevices) || route.maxDevices < 1 || Date.parse(route.expiresAt) <= Date.now()) throw new Error("invalid route fields");
     return route;
   } catch (error) {
     if (error instanceof TenantRoutingError) throw error;
@@ -104,6 +106,17 @@ export async function releaseTenantUsername(route: TenantRoute, username: string
 }
 export async function reportTenantSubUserUsage(route: TenantRoute, activeSubUsers: number) {
   return postTenantIndex<{ accepted: true }>("/api/tenant/usage", route, { activeSubUsers });
+}
+export type TenantDeviceIdentity = { deviceId: string; deviceName?: string; browserInfo?: string; os?: string };
+export async function authorizeTenantDevice(route: TenantRoute, device: TenantDeviceIdentity, intent: "register" | "heartbeat" = "register") {
+  const response = await fetch(new URL(intent === "heartbeat" ? "/api/tenant/heartbeat" : "/api/tenant/register-device", masterUrl()), {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-system-secret": masterSecret() },
+    body: JSON.stringify({ licenseKey: route.licenseKey, deploymentIdentifier: route.deploymentIdentifier, ...device }),
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null) as { valid?: boolean; code?: string; reason?: string } | null;
+  if (!response.ok || !payload?.valid) throw new TenantRoutingError(payload?.code ?? "DEVICE_AUTH_FAILED", payload?.reason || "تعذر اعتماد هذا الجهاز.");
 }
 
 export async function getTenantPrismaClient(tenantId: string, decryptedDbUri: string): Promise<PrismaClient> {

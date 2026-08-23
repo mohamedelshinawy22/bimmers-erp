@@ -12,7 +12,7 @@ function encryptRoute(route: Record<string, unknown>, secret: string) {
 function main() {
   const secret = "tenant-route-test-key-with-at-least-thirty-two-characters";
   process.env.TENANT_ROUTE_ENCRYPTION_KEY = secret;
-  const route = { version: 1, tenantId: "tenant-alpha", slug: "alpha", licenseKey: "BL-ALPHA", deploymentIdentifier: "alpha-prod", databaseUrl: "postgresql://user:pass@db.example.test:5432/tenant_alpha", initialAdminUsername: "elshafei", issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const route = { version: 1, tenantId: "tenant-alpha", slug: "alpha", licenseKey: "BL-ALPHA", deploymentIdentifier: "alpha-prod", databaseUrl: "postgresql://user:pass@db.example.test:5432/tenant_alpha", initialAdminUsername: "elshafei", maxSubUsers: 3, maxDevices: 2, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
   assert.deepEqual(decryptTenantRouteEnvelope(encryptRoute(route, secret)), route, "a valid server envelope must decrypt to a usable PostgreSQL route");
   assert.throws(() => decryptTenantRouteEnvelope("not.a.valid-envelope"), (error: unknown) => error instanceof TenantRoutingError && error.code === "ROUTE_DECRYPTION_FAILED");
   console.log("Tenant route encryption configuration probe passed.");

@@ -53,7 +53,12 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
     const tenant = getTenantContext();
     await reserveTenantUsername(tenant.route, username, input.role);
     reservation = { username, route: tenant.route };
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      if (input.isActive && input.role !== "SUPER_ADMIN") {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.route.tenantId}`}))`;
+        const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
+        if (activeSubUsers >= tenant.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.route.maxSubUsers}).`);
+      }
       await validateScopedResources(tx, input);
       const created = await tx.user.create({
         data: {
@@ -82,7 +87,7 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
     }, TX_OPTIONS));
     createdId = result.id;
     await activateTenantUsername(tenant.route, username);
-    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true } }));
+    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
     revalidateUserManagement();
     return ok({ id: result.id, username: result.username });
   } catch (error) {

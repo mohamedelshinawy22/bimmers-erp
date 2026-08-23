@@ -7,12 +7,13 @@ import { createSession, destroySession, requirePermission, requireUser } from "@
 import { fail, ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { revalidatePath } from "next/cache";
-import { changeOwnPasswordSchema, createUserSchema, loginSchema, type ChangeOwnPasswordInput, type LoginInput } from "@/lib/validations/accounts";
+import { changeOwnPasswordSchema, createUserSchema, loginSchema, tenantDeviceIdentitySchema, type ChangeOwnPasswordInput, type LoginInput } from "@/lib/validations/accounts";
 import { toJsonSafe } from "@/lib/audit";
 import { headers } from "next/headers";
-import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername, TenantRoutingError } from "@/lib/tenant-routing";
+import { activateTenantUsername, authorizeTenantDevice, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername, TenantRoutingError } from "@/lib/tenant-routing";
 import { reconcileConfiguredRootAdminAlias } from "@/lib/root-admin-alias-reconciliation";
 import { toLoginActionFailure } from "@/lib/login-action-failure";
+import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
 /** Constant-time-ish decoy hash so a missing username costs the same as a wrong password. */
 const DECOY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.q8n0PtPYQhbP8Yq9m8kK1lYQ0lM3z2i";
@@ -23,6 +24,7 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
 
     const username = input.username.toLowerCase();
     const tenant = await establishTenantContext(username);
+    await authorizeTenantDevice(tenant.route, { deviceId: input.deviceId, deviceName: input.deviceName, browserInfo: input.browserInfo, os: input.os });
     const ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
     let user = await tenant.prisma.user.findUnique({
       where: { username },
@@ -81,6 +83,19 @@ export async function logoutAction(): Promise<void> {
   redirect("/login");
 }
 
+/** Refreshes the approved device presence using the authenticated session's tenant route only. */
+export async function tenantDeviceHeartbeatAction(raw: unknown): Promise<ActionResult<{ authorized: true }>> {
+  try {
+    await requireUser();
+    const device = tenantDeviceIdentitySchema.parse(raw);
+    const tenant = getTenantContext();
+    await authorizeTenantDevice(tenant.route, device, "heartbeat");
+    return ok({ authorized: true });
+  } catch (error) {
+    return toActionError(error, "tenantDeviceHeartbeatAction");
+  }
+}
+
 /** Changes only the authenticated tenant-local account and invalidates all earlier signed sessions. */
 export async function changeOwnPasswordAction(raw: ChangeOwnPasswordInput): Promise<ActionResult<{ signedOut: true }>> {
   try {
@@ -116,7 +131,12 @@ export async function createUserAction(
     await reserveTenantUsername(tenant.route, username, input.role);
     reservation = { username, route: tenant.route };
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      if (input.role !== "SUPER_ADMIN") {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.route.tenantId}`}))`;
+        const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
+        if (activeSubUsers >= tenant.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.route.maxSubUsers}).`);
+      }
       const user = await tx.user.create({
         data: {
           username,
@@ -137,10 +157,10 @@ export async function createUserAction(
         },
       });
       return user;
-    });
+    }, TX_OPTIONS));
     createdId = created.id;
     await activateTenantUsername(tenant.route, username);
-    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true } }));
+    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
 
     revalidatePath("/settings");
     return ok({ id: created.id, username: created.username });

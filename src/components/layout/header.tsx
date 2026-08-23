@@ -11,6 +11,7 @@ import { HotkeyBadges } from "./hotkeys-listener";
 import { useSidebar } from "./sidebar-context";
 import { BackButton } from "@/components/navigation/back-button";
 import { ChangePasswordModal } from "@/components/auth/change-password-modal";
+import { DeviceHeartbeat } from "@/components/auth/device-heartbeat";
 
 interface HeaderProps {
   user: { fullName: string; username: string; role: Role };
@@ -24,6 +25,7 @@ export function Header({ user, branding }: HeaderProps) {
 
   return (
     <header className="no-print sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-bmw-cardBorder bg-bmw-carbon/80 px-4 py-4 backdrop-blur-md sm:px-6">
+      <DeviceHeartbeat />
       <div className="flex min-w-0 items-center gap-3 sm:gap-4">
         <button type="button" onClick={toggleMobileSidebar} className="rounded-xl border border-bmw-cardBorder bg-bmw-card p-2 text-bmw-muted transition-colors hover:border-bmw-blue/50 hover:text-white lg:hidden" aria-label={isMobileOpen ? "إغلاق القائمة الجانبية" : "فتح القائمة الجانبية"} aria-expanded={isMobileOpen}>
           {isMobileOpen ? <X size={21} className="text-bmw-mRed" /> : <Menu size={21} />}

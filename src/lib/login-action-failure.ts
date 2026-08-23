@@ -11,6 +11,7 @@ export function toLoginActionFailure(error: unknown): ActionResult<never> {
     // authorization hints. Do not fall back to the primary tenant database:
     // that would make a Master Console outage a cross-tenant authentication path.
     console.warn("[loginAction] tenant routing rejected", { code: error.code });
+    if (error.code === "DEVICE_LIMIT") return fail(error.safeMessage);
     return fail(INVALID_CREDENTIALS);
   }
   if (error instanceof ZodError) return toActionError(error, "loginAction");
