@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
@@ -19,17 +20,25 @@ export type PrintableBarcodePart = {
   sellPriceRetail: number;
 };
 
-export async function getPrintableBarcodePartsAction(query = ""): Promise<ActionResult<PrintableBarcodePart[]>> {
+const printableBarcodeSearchSchema = z.object({ query: z.string().trim().max(120).default("") });
+
+export async function getPrintableBarcodePartsAction(raw: unknown = {}): Promise<ActionResult<PrintableBarcodePart[]>> {
   try {
     await requirePermission("part.read");
     const tenant = await getTenantDbFromSession();
     return tenant.run(async () => {
+      const { query } = printableBarcodeSearchSchema.parse(typeof raw === "string" ? { query: raw } : raw);
       const term = query.trim();
       const parts = await tenant.prisma.partItem.findMany({
         where: {
           isActive: true,
           isDeleted: false,
-          ...(term ? { OR: [{ nameAr: { contains: term, mode: "insensitive" } }, { oemNumber: { contains: term, mode: "insensitive" } }, { barcode: { contains: term, mode: "insensitive" } }] } : {}),
+          ...(term ? { OR: [
+            { nameAr: { contains: term, mode: "insensitive" } },
+            { oemNumber: { contains: term, mode: "insensitive" } },
+            { barcode: { contains: term, mode: "insensitive" } },
+            { compatibleChassis: { some: { chassis: { code: { contains: term.toUpperCase(), mode: "insensitive" } } } } },
+          ] } : {}),
         },
         take: 100,
         orderBy: [{ nameAr: "asc" }, { oemNumber: "asc" }],

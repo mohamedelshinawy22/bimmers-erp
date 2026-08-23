@@ -7,3 +7,8 @@
 - [x] Add a non-secret authenticated-route smoke harness with clear session requirements and validate its no-cookie guard.
 - [x] Run ERP unit tests, typecheck, production build, commit, push, and production deployment.
 - [x] Run Master Hub verification tests, typecheck, build, checkpoint, and production deployment.
+- [ ] Re-audit all authenticated page loaders, layouts, and API routes for explicit tenant-context rebinding and safe fallbacks.
+- [ ] Harden spreadsheet export/import actions for tenant scope, Arabic/BMW data formatting, batch transaction safety, and duplicate summaries.
+- [ ] Extend Thermal Barcode Studio with tenant-catalog instant search by chassis, OEM/part number, and name, plus safe print preview defaults.
+- [ ] Add and run targeted SSR, spreadsheet export, and barcode payload regression coverage.
+- [ ] Run production validation, deploy the renewed ERP release, and verify live health boundaries.

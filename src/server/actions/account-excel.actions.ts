@@ -12,6 +12,8 @@ import { BusinessRuleError } from "@/lib/errors";
 import { money, num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
+import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 import { nextAccountNumber } from "@/server/services/numbering.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
@@ -20,12 +22,7 @@ const balanceFilterSchema = z.enum(["ALL", "DEBIT", "CREDIT", "ZERO"]);
 const exportSchema = z.object({ query: z.string().trim().max(120).optional(), type: z.enum(["ALL", ...accountTypes]).default("ALL"), balanceFilter: balanceFilterSchema.default("ALL"), format: z.enum(["XLSX", "CSV"]).default("XLSX") });
 const accountPrefix: Record<(typeof accountTypes)[number], string> = { CUSTOMER: "ACC", WORKSHOP_BMW: "WRK", SUPPLIER: "SUP", EXPENSE: "EXP" };
 const typeLabel: Record<(typeof accountTypes)[number], string> = { CUSTOMER: "عميل", WORKSHOP_BMW: "ورشة BMW", SUPPLIER: "مورد", EXPENSE: "مصروف" };
-const parseNumber = (value: unknown) => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  const cleaned = String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, "");
-  const number = Number(cleaned);
-  return Number.isFinite(number) ? number : 0;
-};
+const parseNumber = (value: unknown) => parseSpreadsheetNumber(value);
 const normalizeType = (value: unknown) => {
   const token = String(value ?? "").trim().toUpperCase();
   if (["CUSTOMER", "عميل", "عملاء"].includes(token)) return "CUSTOMER";
@@ -69,8 +66,10 @@ function accountWhere(input: z.infer<typeof exportSchema>): Prisma.AccountWhereI
 export async function exportAccountsToExcelAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string; count: number }>> {
   try {
     await requirePermission("account.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = exportSchema.parse(raw);
-    const accounts = await prisma.account.findMany({ where: accountWhere(input), orderBy: [{ currentBalance: "asc" }, { name: "asc" }], select: { accountNumber: true, name: true, type: true, phone: true, taxNumber: true, currentBalance: true, creditLimit: true, defaultPriceTier: true, address: true, category: true, isActive: true } });
+    const accounts = await tenant.prisma.account.findMany({ where: accountWhere(input), orderBy: [{ currentBalance: "asc" }, { name: "asc" }], select: { accountNumber: true, name: true, type: true, phone: true, taxNumber: true, currentBalance: true, creditLimit: true, defaultPriceTier: true, address: true, category: true, isActive: true } });
     const records = accounts.map((account) => {
       const balance = num(account.currentBalance);
       return {
@@ -103,6 +102,7 @@ export async function exportAccountsToExcelAction(raw: unknown): Promise<ActionR
     XLSX.utils.book_append_sheet(workbook, sheet, "الحسابات");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
     return ok({ fileName: `bimmer_accounts_${date}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: records.length });
+    });
   } catch (error) { return toActionError(error, "exportAccountsToExcelAction"); }
 }
 
@@ -149,6 +149,8 @@ export async function downloadAccountsImportTemplateAction(): Promise<ActionResu
 export async function importAccountsAction(raw: unknown): Promise<ActionResult<{ jobId: string; total: number; valid: number; invalid: Array<{ row: number; reason: string }>; created: number; updated: number; skipped: number }>> {
   try {
     const user = await requirePermission("account.write");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = importSchema.parse(raw);
     const parsed = input.rows.map((row, index) => ({ row: index + 1, result: importRowSchema.safeParse(row) }));
     const invalid = parsed.filter((entry) => !entry.result.success).map((entry) => ({ row: entry.row, reason: (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
@@ -156,14 +158,14 @@ export async function importAccountsAction(raw: unknown): Promise<ActionResult<{
     const rows = parsed.filter((entry): entry is { row: number; result: { success: true; data: ImportRow } } => entry.result.success).map((entry) => ({ ...entry.result.data, sourceRowNumber: entry.result.data.sourceRowNumber ?? entry.row, accountNumber: entry.result.data.accountNumber?.trim() || "", phone: entry.result.data.phone?.trim() || "", email: entry.result.data.email?.trim() || "", taxNumber: entry.result.data.taxNumber?.trim() || "", address: entry.result.data.address?.trim() || "", category: entry.result.data.category?.trim() || "" }));
     if (!rows.length) throw new BusinessRuleError("لا توجد حسابات سليمة قابلة للاستيراد.");
     const checksum = createHash("sha256").update(JSON.stringify(rows)).digest("hex");
-    const previous = await prisma.importJob.findFirst({ where: { type: "ACCOUNTS", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
+    const previous = await tenant.prisma.importJob.findFirst({ where: { type: "ACCOUNTS", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
     if (previous) return ok({ jobId: previous.id, total: input.rows.length, valid: rows.length, invalid, created: 0, updated: 0, skipped: rows.length });
-    const job = await prisma.importJob.create({ data: { type: "ACCOUNTS", status: "PROCESSING", checksum, mapping: { duplicateMode: input.duplicateMode }, createdById: user.id } });
+    const job = await tenant.prisma.importJob.create({ data: { type: "ACCOUNTS", status: "PROCESSING", checksum, mapping: { duplicateMode: input.duplicateMode }, createdById: user.id } });
     let created = 0; let updated = 0; let skipped = 0;
     try {
       for (let start = 0; start < rows.length; start += 100) {
         const chunk = rows.slice(start, start + 100);
-        const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+        const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
           let chunkCreated = 0; let chunkUpdated = 0; let chunkSkipped = 0;
           for (const row of chunk) {
             const duplicate = await tx.account.findFirst({ where: { OR: [...(row.accountNumber ? [{ accountNumber: row.accountNumber }] : []), ...(row.phone ? [{ phone: row.phone }] : [])] }, select: { id: true, currentBalance: true } });
@@ -182,27 +184,31 @@ export async function importAccountsAction(raw: unknown): Promise<ActionResult<{
         created += result.chunkCreated; updated += result.chunkUpdated; skipped += result.chunkSkipped;
       }
       const summary = { total: input.rows.length, valid: rows.length, invalid: invalid.length, created, updated, skipped, duplicateMode: input.duplicateMode, chunkSize: 100 };
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
-      await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
+      await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
+      await writeAudit(tenant.prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
       revalidatePath("/accounts"); revalidatePath("/pos");
       return ok({ jobId: job.id, total: input.rows.length, valid: rows.length, invalid, created, updated, skipped });
     } catch (error) {
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, invalid: invalid.length, created, updated, skipped } } });
+      await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, invalid: invalid.length, created, updated, skipped } } });
       throw error;
     }
+    });
   } catch (error) { return toActionError(error, "importAccountsAction"); }
 }
 
 export async function previewAccountsImportAction(raw: unknown): Promise<ActionResult<{ duplicateRows: number[] }>> {
   try {
     await requirePermission("account.write");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = z.object({ rows: z.array(z.object({ sourceRowNumber: z.coerce.number().int().positive(), accountNumber: z.string().trim().max(80).optional(), phone: z.string().trim().max(30).optional() })).max(5_000) }).parse(raw);
     const numbers = [...new Set(input.rows.map((row) => row.accountNumber?.trim()).filter((value): value is string => Boolean(value)))];
     const phones = [...new Set(input.rows.map((row) => row.phone?.trim()).filter((value): value is string => Boolean(value)))];
     if (!numbers.length && !phones.length) return ok({ duplicateRows: [] });
-    const existing = await prisma.account.findMany({ where: { OR: [...(numbers.length ? [{ accountNumber: { in: numbers } }] : []), ...(phones.length ? [{ phone: { in: phones } }] : [])] }, select: { accountNumber: true, phone: true } });
+    const existing = await tenant.prisma.account.findMany({ where: { OR: [...(numbers.length ? [{ accountNumber: { in: numbers } }] : []), ...(phones.length ? [{ phone: { in: phones } }] : [])] }, select: { accountNumber: true, phone: true } });
     const existingNumbers = new Set(existing.map((account) => account.accountNumber));
     const existingPhones = new Set(existing.flatMap((account) => account.phone ? [account.phone] : []));
     return ok({ duplicateRows: input.rows.filter((row) => (row.accountNumber && existingNumbers.has(row.accountNumber.trim())) || (row.phone && existingPhones.has(row.phone.trim()))).map((row) => row.sourceRowNumber) });
+    });
   } catch (error) { return toActionError(error, "previewAccountsImportAction"); }
 }

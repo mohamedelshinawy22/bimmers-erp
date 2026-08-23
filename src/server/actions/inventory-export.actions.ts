@@ -7,6 +7,7 @@ import { can, requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
 const inventoryExportSchema = z.object({
@@ -36,6 +37,8 @@ function scopeFileToken(scope: "ALL" | "CRITICAL" | "OUT_OF_STOCK" | "FILTERED")
 export async function exportInventoryDataAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string; count: number; costIncluded: boolean }>> {
   try {
     const user = await requirePermission("part.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = inventoryExportSchema.parse(raw);
     const filters = input.filters ?? {};
     const and: Prisma.PartItemWhereInput[] = [];
@@ -60,7 +63,7 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
     if (input.scope === "OUT_OF_STOCK") and.push({ stockQuantity: 0 });
     if (input.scope === "CRITICAL" || (input.scope === "FILTERED" && filters.lowStockOnly)) and.push({ stockQuantity: { gt: 0 } });
 
-    const parts = await prisma.partItem.findMany({
+    const parts = await tenant.prisma.partItem.findMany({
       where: { isDeleted: false, isActive: true, ...(and.length ? { AND: and } : {}) },
       orderBy: [{ nameAr: "asc" }, { oemNumber: "asc" }],
       select: {
@@ -122,6 +125,7 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
     XLSX.utils.book_append_sheet(workbook, sheet, "المخزون");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
     return ok({ fileName, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: records.length, costIncluded });
+    });
   } catch (error) {
     console.error("[INVENTORY_EXPORT_ERROR]", error);
     return toActionError(error, "exportInventoryDataAction");

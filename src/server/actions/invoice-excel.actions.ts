@@ -6,6 +6,7 @@ import { z } from "zod";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { formatOemNumber, num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
@@ -96,8 +97,10 @@ function applySheetStyle(sheet: XLSX.WorkSheet, rowCount: number, detail = false
 export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string; count: number }>> {
   try {
     await requirePermission("invoice.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = exportSchema.parse(raw);
-    const invoices = await prisma.invoice.findMany({
+    const invoices = await tenant.prisma.invoice.findMany({
       where: whereFrom(input),
       orderBy: { createdAt: "desc" },
       take: 10_000,
@@ -154,6 +157,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true });
     const stamp = new Date().toISOString().slice(0, 10);
     return ok({ fileName: `bimmer_invoice_${input.mode === "SUMMARY" ? "summary" : "detailed"}_${stamp}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: invoices.length });
+    });
   } catch (error) {
     return toActionError(error, "exportInvoicesToExcelAction");
   }

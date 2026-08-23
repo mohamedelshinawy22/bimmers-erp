@@ -11,13 +11,14 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { CURRENCY, formatMoney, formatOemNumber } from "@/lib/utils";
 import { DEFAULT_THERMAL_BARCODE_PROFILE, fontCssForThermalFamily, lineWidthForDensity, THERMAL_FONT_FAMILIES, THERMAL_LABEL_PRESETS, thermalBarcodeProfileSchema, type ThermalBarcodeProfile } from "@/lib/thermal-barcode-profile";
 import { printThermalLabelsViaIframe } from "@/lib/thermal-printer";
+import { barcodePayloadValue } from "@/lib/barcode-payload";
 
 export type BarcodeLabelPart = { id: string; nameAr: string; oemNumber: string; barcode?: string | null; brandName?: string | null; chassisCodes?: string[]; sellPriceRetail?: number | null };
 type PrintMode = "quick" | "designer";
 const LOCAL_PROFILE_KEY = "bimmererp:thermal-barcode-profile:v1";
 const weight = { NORMAL: 400, BOLD: 700, EXTRA_BOLD: 800 } as const;
 
-function codeFor(value: string, symbology: ThermalBarcodeProfile["symbology"]) { return symbology !== "EAN13" ? value || "000000000000" : value.replace(/\D/g, "").slice(0, 12).padEnd(12, "0"); }
+function codeFor(value: string, symbology: ThermalBarcodeProfile["symbology"]) { return barcodePayloadValue(value, symbology); }
 function VectorBarcode({ value, profile }: { value: string; profile: ThermalBarcodeProfile }) {
   const ref = useRef<SVGSVGElement | null>(null);
   useEffect(() => {
