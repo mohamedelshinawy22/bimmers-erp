@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { SignJWT } from "jose";
 import type { Role } from "@prisma/client";
 import { prisma } from "./prisma";
-import { establishTenantContext } from "./tenant-routing";
+import { establishTenantContext, getTenantContext, runWithTenantContext } from "./tenant-routing";
 import { SESSION_COOKIE } from "./auth-constants";
 import { AuthError, ConfigurationError, ForbiddenError } from "./errors";
 import { can, PERMISSIONS, type Permission } from "./permissions";
@@ -89,6 +89,16 @@ export async function requireUser(): Promise<SessionUser> {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
   return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId, issuedAtMs: session.issuedAtMs };
+}
+
+/**
+ * Rebinds the authenticated tenant context around concurrent Server Component
+ * work. React may render a layout and its page in separate async branches, so a
+ * context established by the layout must never be assumed by the page branch.
+ */
+export async function withAuthenticatedTenant<T>(work: () => Promise<T>): Promise<T> {
+  await requireUser();
+  return runWithTenantContext(getTenantContext(), work);
 }
 
 

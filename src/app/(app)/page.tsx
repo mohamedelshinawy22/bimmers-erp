@@ -24,12 +24,37 @@ import {
   getTopSellingParts,
 } from "@/server/services/dashboard.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
-import { requireUser } from "@/lib/auth";
+import { withAuthenticatedTenant } from "@/lib/auth";
 
 export const metadata = { title: "لوحة القيادة" };
 // Cockpit numbers must reflect the last committed transaction, never a cache.
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const EMPTY_METRICS = {
+  salesToday: 0,
+  salesYesterday: 0,
+  salesDeltaPercent: null,
+  invoiceCountToday: 0,
+  cashOnHand: 0,
+  totalLiquidity: 0,
+  workshopReceivables: 0,
+  overdueWorkshopCount: 0,
+  supplierPayables: 0,
+  lowStockCount: 0,
+  inventoryValue: 0,
+  grossProfitToday: 0,
+  openShift: null,
+} as const;
+
+async function dashboardFallback<T>(label: string, work: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    console.error(`[dashboard] ${label} fallback:`, error);
+    return fallback;
+  }
+}
 
 const QUICK_ACTIONS = [
   {
@@ -85,17 +110,24 @@ const QUICK_ACTIONS = [
 const CHASSIS_QUICK = ["E36", "E46", "E90", "F30", "G20", "E39", "E60", "F10", "G30"] as const;
 
 export default async function DashboardCockpit() {
-  // The app layout authenticates the shell, but React may render this page in a
-  // separate concurrent server-component branch. Establishing here binds the
-  // request-local tenant client before any dashboard service touches Prisma.
-  await requireUser();
-  const [metrics, recent, trend, topParts, company] = await Promise.all([
-    getDashboardMetrics(),
-    getRecentInvoices(8),
-    getSalesTrend(7),
-    getTopSellingParts(5),
-    getCompanyProfile(),
-  ]);
+  const [metrics, recent, trend, topParts, company] = await withAuthenticatedTenant(() => Promise.all([
+    dashboardFallback("metrics", getDashboardMetrics, EMPTY_METRICS),
+    dashboardFallback("recent-invoices", () => getRecentInvoices(8), []),
+    dashboardFallback("sales-trend", () => getSalesTrend(7), []),
+    dashboardFallback("top-selling-parts", () => getTopSellingParts(5), []),
+    dashboardFallback("company-profile", getCompanyProfile, {
+      name: "BimmerERP",
+      commercialName: "",
+      phone: "",
+      phonePrimary: "",
+      phoneSecondary: "",
+      address: "",
+      taxNumber: "",
+      commercialRegister: "",
+      logoUrl: "",
+      invoiceFooter: "",
+    }),
+  ]));
 
   const peak = Math.max(...trend.map((t) => t.total), 1);
 
