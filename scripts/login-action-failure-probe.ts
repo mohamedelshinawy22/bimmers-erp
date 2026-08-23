@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { TenantRoutingError } from "../src/lib/tenant-routing";
 import { toLoginActionFailure } from "../src/lib/login-action-failure";
 
@@ -11,6 +13,10 @@ function main() {
   const missingConfiguration = toLoginActionFailure(new Error("TENANT_ROUTE_ENCRYPTION_KEY is absent"));
   assert.equal(missingConfiguration.success, false);
   if (!missingConfiguration.success) assert.equal(missingConfiguration.error, "اسم المستخدم أو كلمة المرور غير صحيحة");
+  const loginSource = readFileSync(resolve(process.cwd(), "src/server/actions/auth.actions.ts"), "utf8");
+  assert.ok(loginSource.includes("await establishTenantContext(username)"), "login must route centrally before querying a tenant database");
+  assert.ok(!loginSource.includes("legacyPrisma"), "login must never fall back broadly to the primary database after tenant routing fails");
+  assert.ok(!loginSource.includes("DATABASE_URL"), "login must not derive tenant authorization from a deployment database URL");
   console.log("Login action routing-error translation probe passed.");
 }
 
