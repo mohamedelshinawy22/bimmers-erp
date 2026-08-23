@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
+import { establishTenantContext, runWithTenantContext } from "@/lib/tenant-routing";
 import {
   getClosedShifts,
   getZReport,
@@ -19,6 +20,8 @@ interface PageProps {
 
 export default async function TreasuryPage({ searchParams }: PageProps) {
   const user = await requireUser();
+  const context = await establishTenantContext(user.username, user.tenantId);
+  return runWithTenantContext(context, async () => {
   // Cash balances, the Z-report and the full transaction history are all on this
   // page, so the read permission has to gate the page itself — hiding the action
   // buttons is not access control.
@@ -65,4 +68,5 @@ export default async function TreasuryPage({ searchParams }: PageProps) {
       initialVoucher={can(user.role, "treasury.transact") ? voucher : null}
     />
   );
+  });
 }

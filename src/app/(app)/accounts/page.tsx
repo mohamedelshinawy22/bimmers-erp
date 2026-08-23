@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { AccountType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
+import { establishTenantContext, runWithTenantContext } from "@/lib/tenant-routing";
 import { num } from "@/lib/utils";
 import { getVehicleFormOptions, listAccounts } from "@/server/services/accounts.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
@@ -18,6 +19,8 @@ interface PageProps {
 
 export default async function AccountsPage({ searchParams }: PageProps) {
   const user = await requireUser();
+  const context = await establishTenantContext(user.username, user.tenantId);
+  return runWithTenantContext(context, async () => {
   if (!can(user.role, "account.read")) redirect("/");
 
   const rawType = searchParams.type ?? "";
@@ -61,4 +64,5 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       }}
     />
   );
+  });
 }

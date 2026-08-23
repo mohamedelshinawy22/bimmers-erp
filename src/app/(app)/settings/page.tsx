@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
 import { getCompanyProfile, getSettingsGrouped } from "@/server/services/settings.service";
 import { listUsers } from "@/server/services/audit.service";
-import { getTenantContext } from "@/lib/tenant-routing";
+import { establishTenantContext, getTenantContext, runWithTenantContext } from "@/lib/tenant-routing";
 import { SettingsForm } from "./settings-form";
 
 export const metadata = { title: "الإعدادات" };
@@ -14,6 +14,8 @@ export const maxDuration = 60;
 
 export default async function SettingsPage() {
   const user = await requireUser();
+  const context = await establishTenantContext(user.username, user.tenantId);
+  return runWithTenantContext(context, async () => {
   if (!can(user.role, "settings.read")) redirect("/");
 
   const canManageUsers = can(user.role, "user.manage");
@@ -46,4 +48,5 @@ export default async function SettingsPage() {
       />
     </div>
   );
+  });
 }
