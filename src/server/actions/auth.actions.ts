@@ -3,11 +3,11 @@
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { createSession, destroySession, requirePermission } from "@/lib/auth";
+import { createSession, destroySession, requirePermission, requireUser } from "@/lib/auth";
 import { fail, ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { revalidatePath } from "next/cache";
-import { createUserSchema, loginSchema, type LoginInput } from "@/lib/validations/accounts";
+import { changeOwnPasswordSchema, createUserSchema, loginSchema, type ChangeOwnPasswordInput, type LoginInput } from "@/lib/validations/accounts";
 import { toJsonSafe } from "@/lib/audit";
 import { headers } from "next/headers";
 import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername } from "@/lib/tenant-routing";
@@ -77,6 +77,27 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
 export async function logoutAction(): Promise<void> {
   destroySession();
   redirect("/login");
+}
+
+/** Changes only the authenticated tenant-local account and invalidates all earlier signed sessions. */
+export async function changeOwnPasswordAction(raw: ChangeOwnPasswordInput): Promise<ActionResult<{ signedOut: true }>> {
+  try {
+    const actor = await requireUser();
+    const input = changeOwnPasswordSchema.parse(raw);
+    const ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    const account = await prisma.user.findUnique({ where: { id: actor.id }, select: { id: true, username: true, passwordHash: true } });
+    if (!account || !await bcrypt.compare(input.currentPassword, account.passwordHash)) return fail("كلمة المرور الحالية غير صحيحة.");
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: actor.id }, data: { passwordHash: await bcrypt.hash(input.newPassword, 12) } });
+      await tx.systemAuditTrail.create({ data: { tableName: "User", recordId: actor.id, action: "PASSWORD_CHANGED", newData: toJsonSafe({ username: account.username, sessionsInvalidated: true }), performedBy: actor.id, ipAddress: ip } });
+    });
+    destroySession();
+    revalidatePath("/");
+    revalidatePath("/settings");
+    return ok({ signedOut: true });
+  } catch (error) {
+    return toActionError(error, "changeOwnPasswordAction");
+  }
 }
 
 /** Creates an operator account. Surfaced in Settings behind `user.manage`. */

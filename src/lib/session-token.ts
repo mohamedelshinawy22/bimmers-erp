@@ -6,6 +6,7 @@ export type VerifiedSessionClaims = {
   fullName: string;
   role: string;
   tenantId: string;
+  issuedAtMs: number;
 };
 
 export function sessionSecretKey(): Uint8Array {
@@ -22,13 +23,14 @@ export async function verifySessionToken(token: string): Promise<VerifiedSession
       issuer: "bimmer-erp",
       audience: "bimmer-erp-web",
     });
-    if (!payload.sub || typeof payload.username !== "string" || typeof payload.tenantId !== "string" || !/^[a-zA-Z0-9-]{3,64}$/.test(payload.tenantId)) return null;
+    if (!payload.sub || typeof payload.username !== "string" || typeof payload.tenantId !== "string" || !/^[a-zA-Z0-9-]{3,64}$/.test(payload.tenantId) || typeof payload.issuedAtMs !== "number" || !Number.isSafeInteger(payload.issuedAtMs) || payload.issuedAtMs <= 0) return null;
     return {
       id: payload.sub,
       username: payload.username,
       fullName: String(payload.fullName ?? payload.username),
       role: String(payload.role ?? ""),
       tenantId: payload.tenantId,
+      issuedAtMs: payload.issuedAtMs,
     };
   } catch {
     return null;

@@ -20,6 +20,7 @@ export interface SessionUser {
   fullName: string;
   role: Role;
   tenantId: string;
+  issuedAtMs: number;
 }
 
 function ttlHours(): number {
@@ -27,7 +28,7 @@ function ttlHours(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
 }
 
-export async function createSession(user: SessionUser): Promise<void> {
+export async function createSession(user: Omit<SessionUser, "issuedAtMs">): Promise<void> {
   const hours = ttlHours();
   const token = await new SignJWT({
     sub: user.id,
@@ -35,6 +36,7 @@ export async function createSession(user: SessionUser): Promise<void> {
     fullName: user.fullName,
     role: user.role,
     tenantId: user.tenantId,
+    issuedAtMs: Date.now(),
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -82,10 +84,11 @@ export async function requireUser(): Promise<SessionUser> {
     where: { id: session.id },
     select: { id: true, username: true, fullName: true, role: true, isActive: true },
   });
-  if (!user || !user.isActive) {
+  const passwordChanged = user ? await prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }) : null;
+  if (!user || !user.isActive || (passwordChanged && passwordChanged.timestamp.getTime() >= session.issuedAtMs)) {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
-  return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId };
+  return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId, issuedAtMs: session.issuedAtMs };
 }
 
 

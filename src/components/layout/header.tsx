@@ -1,8 +1,8 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Car, LogOut, Menu, ShieldCheck, UserRound, X } from "lucide-react";
+import { Car, KeyRound, LogOut, Menu, ShieldCheck, UserRound, X } from "lucide-react";
 import type { Role } from "@prisma/client";
 import { logoutAction } from "@/server/actions/auth.actions";
 import { ARABIC_LABELS } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { HotkeyBadges } from "./hotkeys-listener";
 import { useSidebar } from "./sidebar-context";
 import { BackButton } from "@/components/navigation/back-button";
+import { ChangePasswordModal } from "@/components/auth/change-password-modal";
 
 interface HeaderProps {
   user: { fullName: string; username: string; role: Role };
@@ -18,6 +19,7 @@ interface HeaderProps {
 
 export function Header({ user, branding }: HeaderProps) {
   const [pending, startTransition] = useTransition();
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const { isMobileOpen, toggleMobileSidebar } = useSidebar();
 
   return (
@@ -54,6 +56,8 @@ export function Header({ user, branding }: HeaderProps) {
           </Badge>
         </div>
 
+        <button type="button" onClick={() => setPasswordOpen(true)} title="تعديل بيانات الحساب وتغيير كلمة المرور" className="rounded-xl border border-bmw-cardBorder bg-bmw-card p-2.5 text-bmw-muted transition-colors hover:border-bmw-blue/50 hover:text-bmw-blue"><KeyRound size={16} /></button>
+
         <form action={() => startTransition(() => void logoutAction())}>
           <button
             type="submit"
@@ -65,6 +69,7 @@ export function Header({ user, branding }: HeaderProps) {
           </button>
         </form>
       </div>
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </header>
   );
 }

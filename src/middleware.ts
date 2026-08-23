@@ -62,7 +62,7 @@ async function inspectSession(token: string | undefined): Promise<SessionState> 
       issuer: "bimmer-erp",
       audience: "bimmer-erp-web",
     });
-    if (typeof payload.tenantId !== "string" || !/^[a-zA-Z0-9-]{3,64}$/.test(payload.tenantId)) return "stale";
+    if (typeof payload.tenantId !== "string" || !/^[a-zA-Z0-9-]{3,64}$/.test(payload.tenantId) || typeof payload.issuedAtMs !== "number" || !Number.isSafeInteger(payload.issuedAtMs) || payload.issuedAtMs <= 0) return "stale";
     return "valid";
   } catch {
     // Expired, tampered, wrong secret, wrong alg, malformed — indistinguishable

@@ -13,6 +13,7 @@ import { formatDateTime, formatInt } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { ManagedUser } from "@/server/services/audit.service";
 import { createUserAction, toggleUserActiveAction } from "@/server/actions/auth.actions";
+import { ChangePasswordModal } from "@/components/auth/change-password-modal";
 
 /**
  * Operator management.
@@ -24,6 +25,7 @@ import { createUserAction, toggleUserActiveAction } from "@/server/actions/auth.
 export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; currentUserId: string }) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -48,9 +50,7 @@ export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; cur
             {users.length}
           </Badge>
         </CardTitle>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <UserPlus size={15} /> مستخدم جديد
-        </Button>
+        <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => setPasswordOpen(true)}><KeyRound size={15} /> تعديل بيانات الحساب وتغيير كلمة المرور</Button><Button size="sm" onClick={() => setAddOpen(true)}><UserPlus size={15} /> مستخدم جديد</Button></div>
       </CardHeader>
 
       <CardContent className="space-y-3">
@@ -117,6 +117,7 @@ export function UsersPanel({ users, currentUserId }: { users: ManagedUser[]; cur
       </CardContent>
 
       <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </Card>
   );
 }

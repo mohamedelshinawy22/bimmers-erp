@@ -125,7 +125,7 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
         data: {
           tableName: "User",
           recordId: before.id,
-          action: "UPDATE",
+          action: input.password ? "PASSWORD_CHANGED" : "UPDATE",
           oldData: toJsonSafe({ username: before.username, fullName: before.fullName, role: before.role, isActive: before.isActive, allowedWarehouseIds: before.allowedWarehouseIds, allowedTreasuryIds: before.allowedTreasuryIds, transferToTreasuryId: before.transferToTreasuryId, permissions: before.permissions }),
           newData: toJsonSafe({ ...updated, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions, passwordChanged: Boolean(input.password) }),
           performedBy: actor.id,

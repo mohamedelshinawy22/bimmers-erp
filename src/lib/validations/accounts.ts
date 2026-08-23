@@ -157,6 +157,23 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+const passwordPolicy = z.string()
+  .min(10, "كلمة المرور يجب أن تكون ١٠ خانات على الأقل")
+  .max(200)
+  .regex(/[A-Za-z]/, "كلمة المرور يجب أن تحتوي حروفاً")
+  .regex(/[0-9]/, "كلمة المرور يجب أن تحتوي أرقاماً");
+
+export const changeOwnPasswordSchema = z.object({
+  currentPassword: z.string().min(1, "أدخل كلمة المرور الحالية").max(200),
+  newPassword: passwordPolicy,
+  confirmPassword: z.string().min(1, "أعد تأكيد كلمة المرور الجديدة").max(200),
+}).refine((value) => value.newPassword === value.confirmPassword, {
+  message: "تأكيد كلمة المرور الجديدة غير مطابق.",
+  path: ["confirmPassword"],
+});
+
+export type ChangeOwnPasswordInput = z.infer<typeof changeOwnPasswordSchema>;
+
 export const createUserSchema = z.object({
   username: z
     .string()
@@ -165,12 +182,7 @@ export const createUserSchema = z.object({
     .max(50)
     .regex(/^[a-zA-Z0-9._-]+$/, "اسم المستخدم يقبل الحروف الإنجليزية والأرقام فقط"),
   fullName: arabicName,
-  password: z
-    .string()
-    .min(10, "كلمة المرور يجب أن تكون ١٠ خانات على الأقل")
-    .max(200)
-    .regex(/[A-Za-z]/, "يجب أن تحتوي كلمة المرور على حروف")
-    .regex(/[0-9]/, "يجب أن تحتوي كلمة المرور على أرقام"),
+  password: passwordPolicy,
   role: z.enum(["SUPER_ADMIN", "MANAGER", "CASHIER", "STOREKEEPER"]),
 });
 

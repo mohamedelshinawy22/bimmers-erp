@@ -13,12 +13,13 @@ async function main() {
     .setExpirationTime("1h")
     .sign(key);
 
-  const boundToken = await issue({ sub: "user-123", username: "operator", fullName: "Operator", role: "ADMIN", tenantId: "tenant-alpha" });
+  const boundToken = await issue({ sub: "user-123", username: "operator", fullName: "Operator", role: "SUPER_ADMIN", tenantId: "tenant-alpha", issuedAtMs: 1_700_000_000_000 });
   const boundSession = await verifySessionToken(boundToken);
   assert.equal(boundSession?.tenantId, "tenant-alpha", "a valid session must retain its resolved tenant identifier");
+  assert.equal(boundSession?.issuedAtMs, 1_700_000_000_000, "a valid session must retain its password-invalidation issue marker");
 
-  const legacyToken = await issue({ sub: "user-123", username: "operator", fullName: "Operator", role: "ADMIN" });
-  assert.equal(await verifySessionToken(legacyToken), null, "a token without a tenant identifier must be rejected");
+  const legacyToken = await issue({ sub: "user-123", username: "operator", fullName: "Operator", role: "SUPER_ADMIN", tenantId: "tenant-alpha" });
+  assert.equal(await verifySessionToken(legacyToken), null, "a token without a password-invalidation issue marker must be rejected");
 
   console.log("Tenant-bound session probe passed.");
 }
