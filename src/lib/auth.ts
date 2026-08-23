@@ -9,7 +9,7 @@ import { AuthError, ConfigurationError, ForbiddenError } from "./errors";
 import { can, PERMISSIONS, type Permission } from "./permissions";
 import { getUserAccess, hasApplicationPermission } from "./user-permissions";
 import { sessionSecretKey, verifySessionToken } from "./session-token";
-import { isSessionInvalidatedByPasswordChange } from "./password-session-invalidation";
+import { resolveTenantSessionAuthority } from "./tenant-session-authority";
 
 // Re-exported so server code has one import site for auth + authorisation.
 export { SESSION_COOKIE, AuthError, ForbiddenError, can, PERMISSIONS };
@@ -81,12 +81,11 @@ export async function requireUser(): Promise<SessionUser> {
   if (!session) throw new AuthError("الجلسة منتهية. يرجى تسجيل الدخول من جديد.");
   await establishTenantContext(session.username, session.tenantId);
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.id },
-    select: { id: true, username: true, fullName: true, role: true, isActive: true },
+  const user = await resolveTenantSessionAuthority(session, {
+    findUser: () => prisma.user.findUnique({ where: { id: session.id }, select: { id: true, username: true, fullName: true, role: true, isActive: true } }),
+    findLatestPasswordChange: async () => (await prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }))?.timestamp ?? null,
   });
-  const passwordChanged = user ? await prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }) : null;
-  if (!user || !user.isActive || isSessionInvalidatedByPasswordChange(session.issuedAtMs, passwordChanged?.timestamp ?? null)) {
+  if (!user) {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
   return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId, issuedAtMs: session.issuedAtMs };
