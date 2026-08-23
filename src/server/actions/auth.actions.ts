@@ -10,7 +10,8 @@ import { revalidatePath } from "next/cache";
 import { changeOwnPasswordSchema, createUserSchema, loginSchema, type ChangeOwnPasswordInput, type LoginInput } from "@/lib/validations/accounts";
 import { toJsonSafe } from "@/lib/audit";
 import { headers } from "next/headers";
-import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername } from "@/lib/tenant-routing";
+import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername, TenantRoutingError } from "@/lib/tenant-routing";
+import { reconcileConfiguredRootAdminAlias } from "@/lib/root-admin-alias-reconciliation";
 
 /** Constant-time-ish decoy hash so a missing username costs the same as a wrong password. */
 const DECOY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.q8n0PtPYQhbP8Yq9m8kK1lYQ0lM3z2i";
@@ -21,15 +22,15 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
 
     const username = input.username.toLowerCase();
     const tenant = await establishTenantContext(username);
-    const user = await tenant.prisma.user.findUnique({
+    const ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    let user = await tenant.prisma.user.findUnique({
       where: { username },
       select: { id: true, username: true, fullName: true, role: true, isActive: true, passwordHash: true },
     });
+    if (!user) user = await reconcileConfiguredRootAdminAlias({ tenant, username, password: input.password, ipAddress: ip });
 
     const hash = user?.passwordHash ?? DECOY_HASH;
     const passwordOk = await bcrypt.compare(input.password, hash);
-
-    const ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 
     if (!user || !passwordOk || !user.isActive) {
       await tenant.prisma.systemAuditTrail.create({
@@ -41,7 +42,7 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
           performedBy: "anonymous",
           ipAddress: ip,
         },
-      });
+      }).catch((auditError) => console.error("[loginAction] failed-login audit:", auditError));
       // Never disclose which of the two was wrong.
       return fail("اسم المستخدم أو كلمة المرور غير صحيحة.");
     }
@@ -66,10 +67,11 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
           ipAddress: ip,
         },
       }),
-    ]);
+    ]).catch((auditError) => console.error("[loginAction] successful-login audit:", auditError));
 
     return ok({ redirectTo: "/" });
   } catch (error) {
+    if (error instanceof TenantRoutingError) return fail(error.safeMessage);
     return toActionError(error, "loginAction");
   }
 }

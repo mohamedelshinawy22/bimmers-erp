@@ -21,6 +21,8 @@
     "test:tenant-session": "tsx --conditions=react-server scripts/tenant-session-probe.ts",
     "test:password-change": "tsx --conditions=react-server scripts/password-change-probe.ts",
     "test:password-invalidation-authority": "tsx --conditions=react-server scripts/password-invalidation-auth-path-probe.ts",
+    "test:legacy-root-admin-reconciliation": "tsx --conditions=react-server scripts/legacy-root-admin-reconciliation-probe.ts",
+    "test:tenant-route-config": "tsx --conditions=react-server scripts/tenant-route-config-probe.ts",
     "db:migrate:dev": "prisma migrate dev"
   },
   "keywords": [],

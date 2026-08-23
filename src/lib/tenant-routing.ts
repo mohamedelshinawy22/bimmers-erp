@@ -11,10 +11,18 @@ export type TenantRoute = {
   licenseKey: string;
   deploymentIdentifier: string;
   databaseUrl: string;
+  initialAdminUsername?: string | null;
   issuedAt: string;
   expiresAt: string;
 };
 export type TenantContext = { route: TenantRoute; prisma: PrismaClient };
+
+export class TenantRoutingError extends Error {
+  constructor(public readonly code: string, public readonly safeMessage: string, public readonly cause?: unknown) {
+    super(safeMessage);
+    this.name = "TenantRoutingError";
+  }
+}
 
 const contextStore = new AsyncLocalStorage<TenantContext>();
 const globalPool = globalThis as unknown as { bimmersTenantPrismaPool?: ReturnType<typeof createTenantClientPool<PrismaClient>> };
@@ -33,29 +41,49 @@ function validateDatabaseUrl(value: unknown): value is string {
 }
 function masterUrl() {
   const value = process.env.MASTER_CONSOLE_URL ?? process.env.NEXT_PUBLIC_MASTER_CONSOLE_URL;
-  if (!value) throw new Error("إعداد MASTER_CONSOLE_URL غير مكتمل.");
-  return value;
+  if (!value) throw new TenantRoutingError("MASTER_URL_MISSING", "إعداد اتصال بوابة التراخيص غير مكتمل.");
+  try { return new URL(value).toString(); } catch { throw new TenantRoutingError("MASTER_URL_INVALID", "إعداد عنوان بوابة التراخيص غير صالح."); }
 }
 function masterSecret() {
   const value = process.env.LICENSE_API_SHARED_SECRET;
-  if (!value) throw new Error("إعداد LICENSE_API_SHARED_SECRET غير مكتمل.");
+  if (!value) throw new TenantRoutingError("MASTER_SECRET_MISSING", "إعداد ربط بوابة التراخيص غير مكتمل.");
   return value;
 }
 
 export function decryptTenantRouteEnvelope(envelope: string): TenantRoute {
-  const [iv, tag, ciphertext] = envelope.split(".");
-  if (!iv || !tag || !ciphertext) throw new Error("حزمة مسار المستأجر غير صالحة.");
-  const decipher = createDecipheriv("aes-256-gcm", routeKey(), Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  const route = JSON.parse(Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8")) as TenantRoute;
-  if (route.version !== 1 || !validTenantId(route.tenantId) || !route.slug || !route.licenseKey || !route.deploymentIdentifier || !validateDatabaseUrl(route.databaseUrl) || Date.parse(route.expiresAt) <= Date.now()) throw new Error("مسار المستأجر غير مكتمل أو منتهي الصلاحية.");
-  return route;
+  try {
+    const [iv, tag, ciphertext] = envelope.split(".");
+    if (!iv || !tag || !ciphertext) throw new Error("invalid envelope parts");
+    const decipher = createDecipheriv("aes-256-gcm", routeKey(), Buffer.from(iv, "base64url"));
+    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    const route = JSON.parse(Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8")) as TenantRoute;
+    if (route.version !== 1 || !validTenantId(route.tenantId) || !route.slug || !route.licenseKey || !route.deploymentIdentifier || !validateDatabaseUrl(route.databaseUrl) || Date.parse(route.expiresAt) <= Date.now()) throw new Error("invalid route fields");
+    return route;
+  } catch (error) {
+    if (error instanceof TenantRoutingError) throw error;
+    throw new TenantRoutingError("ROUTE_DECRYPTION_FAILED", "تعذر التحقق من مسار قاعدة بيانات المستأجر. تواصل مع مسؤول النظام.", error);
+  }
+}
+
+function routingFailureMessage(code?: string, fallback?: string) {
+  if (code === "SUSPENDED") return "تم تعليق ترخيص هذه النسخة من قبل المورد.";
+  if (code === "EXPIRED") return "انتهت صلاحية ترخيص هذه النسخة. تواصل مع المورد.";
+  if (code === "REVOKED") return "تم سحب ترخيص هذه النسخة من قبل المورد.";
+  if (code === "TENANT_ROUTE_NOT_FOUND") return "اسم المستخدم غير مسجل لدى مستأجر نشط.";
+  if (code === "ROUTE_NOT_CONFIGURED") return "لم يتم إعداد اتصال قاعدة بيانات هذه النسخة بعد.";
+  return fallback || "تعذر تحديد قاعدة بيانات المستأجر حالياً.";
 }
 
 export async function resolveTenantRouteByUsername(username: string): Promise<TenantRoute> {
-  const response = await fetch(new URL("/api/tenant/resolve-by-username", masterUrl()), { method: "POST", headers: { "content-type": "application/json", "x-system-secret": masterSecret() }, body: JSON.stringify({ username }), cache: "no-store" });
-  const payload = await response.json().catch(() => null) as { valid?: boolean; routeEnvelope?: string; reason?: string } | null;
-  if (!response.ok || !payload?.valid || !payload.routeEnvelope) throw new Error(payload?.reason || "تعذر تحديد مستأجر اسم المستخدم.");
+  let response: Response;
+  try {
+    response = await fetch(new URL("/api/tenant/resolve-by-username", masterUrl()), { method: "POST", headers: { "content-type": "application/json", "x-system-secret": masterSecret() }, body: JSON.stringify({ username }), cache: "no-store" });
+  } catch (error) {
+    if (error instanceof TenantRoutingError) throw error;
+    throw new TenantRoutingError("MASTER_UNREACHABLE", "تعذر الاتصال ببوابة التراخيص. أعد المحاولة لاحقاً.", error);
+  }
+  const payload = await response.json().catch(() => null) as { valid?: boolean; code?: string; routeEnvelope?: string; reason?: string } | null;
+  if (!response.ok || !payload?.valid || !payload.routeEnvelope) throw new TenantRoutingError(payload?.code ?? "TENANT_ROUTE_FAILED", routingFailureMessage(payload?.code, payload?.reason));
   return decryptTenantRouteEnvelope(payload.routeEnvelope);
 }
 
