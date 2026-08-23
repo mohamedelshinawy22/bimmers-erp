@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { tenantDeviceHeartbeatAction } from "@/server/actions/auth.actions";
 
 const DEVICE_KEY = "bimmererp.device-id.v1";
-const HEARTBEAT_INTERVAL_MS = 5 * 60_000;
+const HEARTBEAT_INTERVAL_MS = 2 * 60_000;
 
 function currentDeviceIdentity() {
   let deviceId = window.localStorage.getItem(DEVICE_KEY);
