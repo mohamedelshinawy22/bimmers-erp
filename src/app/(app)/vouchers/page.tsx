@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getCompanyProfile } from "@/server/services/settings.service";
 import { getOpenInvoicesForVouchers, getVoucherAccounts, getVoucherFilterTreasuries, getVoucherRegister, normalizeVoucherFilters } from "@/server/services/vouchers.service";
 import { VouchersClient } from "./vouchers-client";
@@ -12,7 +13,9 @@ interface PageProps {
 }
 
 export default async function VouchersPage({ searchParams }: PageProps) {
-  const user = await requireUser();
+  const tenant = await getTenantDbFromSession();
+  const user = tenant.user;
+  return tenant.run(async () => {
   if (!can(user.role, "treasury.read")) redirect("/");
   const filters = normalizeVoucherFilters(searchParams);
   const [data, treasuries, accounts, openInvoices, company] = await Promise.all([
@@ -33,4 +36,5 @@ export default async function VouchersPage({ searchParams }: PageProps) {
     permissions={{ canTransact: can(user.role, "treasury.transact"), canManage: can(user.role, "treasury.manage"), canPurge: user.role === "SUPER_ADMIN" }}
     initialAction={searchParams.action === "new_receipt" ? "RECEIPT" : searchParams.action === "new_payment" ? "PAYMENT" : null}
   />;
+  });
 }

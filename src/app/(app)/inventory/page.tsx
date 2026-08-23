@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { can, requireUser } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPartFormOptions, searchParts } from "@/server/services/parts.service";
 import { getPurchaseFormOptions } from "@/server/services/invoices.service";
@@ -23,7 +24,9 @@ interface PageProps {
 }
 
 export default async function InventoryPage({ searchParams }: PageProps) {
-  const user = await requireUser();
+  const tenant = await getTenantDbFromSession();
+  const user = tenant.user;
+  return tenant.run(async () => {
   const access = await getUserAccess(user.id);
   if (!hasApplicationPermission(access, "part.read")) redirect("/");
 
@@ -43,10 +46,10 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       lowStockOnly,
       page,
       pageSize: 25,
-    }),
-    getPartFormOptions(),
-    getPartCategories(),
-    canPurchase ? getPurchaseFormOptions() : Promise.resolve({ suppliers: [], treasuries: [] }),
+    }).catch(() => ({ rows: [], total: 0, page, pageSize: 25 })),
+    getPartFormOptions().catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
+    getPartCategories().catch(() => []),
+    (canPurchase ? getPurchaseFormOptions() : Promise.resolve({ suppliers: [], treasuries: [] })).catch(() => ({ suppliers: [], treasuries: [] })),
     getSetting("TAX_RATE_PERCENT", "0"),
     getCompanyProfile(),
   ]);
@@ -89,4 +92,5 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       company={company}
     />
   );
+  });
 }
