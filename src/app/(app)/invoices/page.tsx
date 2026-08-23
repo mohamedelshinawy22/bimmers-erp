@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { InvoiceType, PaymentStatus } from "@prisma/client";
 import { can, requireUser } from "@/lib/auth";
-import { establishTenantContext, runWithTenantContext } from "@/lib/tenant-routing";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { listInvoices } from "@/server/services/invoices.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
 import { prisma } from "@/lib/prisma";
@@ -18,9 +18,9 @@ interface PageProps {
 }
 
 export default async function InvoicesPage({ searchParams }: PageProps) {
-  const user = await requireUser();
-  const context = await establishTenantContext(user.username, user.tenantId);
-  return runWithTenantContext(context, async () => {
+  const tenant = await getTenantDbFromSession();
+  const user = tenant.user;
+  return tenant.run(async () => {
   if (!can(user.role, "invoice.read")) redirect("/");
 
   const rawType = searchParams.type ?? "";

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Receipt } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
-import { establishTenantContext, runWithTenantContext } from "@/lib/tenant-routing";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { canUseTreasury, getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPosAccounts } from "@/server/services/accounts.service";
 import { getSetting } from "@/server/services/settings.service";
@@ -12,9 +12,9 @@ export const metadata = { title: "نقطة البيع" };
 export const dynamic = "force-dynamic";
 
 export default async function PosPage() {
-  const user = await requireUser();
-  const context = await establishTenantContext(user.username, user.tenantId);
-  return runWithTenantContext(context, async () => {
+  const tenant = await getTenantDbFromSession();
+  const user = tenant.user;
+  return tenant.run(async () => {
   const access = await getUserAccess(user.id);
   if (!hasApplicationPermission(access, "invoice.sale")) redirect("/");
 
