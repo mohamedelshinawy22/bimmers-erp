@@ -9,6 +9,7 @@ import { AuthError, ConfigurationError, ForbiddenError } from "./errors";
 import { can, PERMISSIONS, type Permission } from "./permissions";
 import { getUserAccess, hasApplicationPermission } from "./user-permissions";
 import { sessionSecretKey, verifySessionToken } from "./session-token";
+import { isSessionInvalidatedByPasswordChange } from "./password-session-invalidation";
 
 // Re-exported so server code has one import site for auth + authorisation.
 export { SESSION_COOKIE, AuthError, ForbiddenError, can, PERMISSIONS };
@@ -85,7 +86,7 @@ export async function requireUser(): Promise<SessionUser> {
     select: { id: true, username: true, fullName: true, role: true, isActive: true },
   });
   const passwordChanged = user ? await prisma.systemAuditTrail.findFirst({ where: { tableName: "User", recordId: session.id, action: "PASSWORD_CHANGED" }, orderBy: { timestamp: "desc" }, select: { timestamp: true } }) : null;
-  if (!user || !user.isActive || (passwordChanged && passwordChanged.timestamp.getTime() >= session.issuedAtMs)) {
+  if (!user || !user.isActive || isSessionInvalidatedByPasswordChange(session.issuedAtMs, passwordChanged?.timestamp ?? null)) {
     throw new AuthError("هذا الحساب موقوف أو غير موجود.");
   }
   return { id: user.id, username: user.username, fullName: user.fullName, role: user.role, tenantId: session.tenantId, issuedAtMs: session.issuedAtMs };
