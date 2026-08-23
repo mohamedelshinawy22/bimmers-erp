@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 function main() {
   const source = readFileSync(resolve(process.cwd(), "src/app/(app)/page.tsx"), "utf8");
   const authSource = readFileSync(resolve(process.cwd(), "src/lib/auth.ts"), "utf8");
+  const layoutSource = readFileSync(resolve(process.cwd(), "src/app/(app)/layout.tsx"), "utf8");
   const dashboardStart = source.indexOf("export default async function DashboardCockpit() {");
   const requireContext = source.indexOf("withAuthenticatedTenant(() => Promise.all", dashboardStart);
   const firstTenantQuery = source.indexOf('dashboardFallback("metrics"', dashboardStart);
@@ -15,6 +16,8 @@ function main() {
   }
   assert.ok(authSource.includes("findUser: () => context.prisma.user.findUnique"), "session authority must query the explicit tenant Prisma client");
   assert.ok(!authSource.includes("findUser: () => prisma.user.findUnique"), "session authority must not rely on an ambient context facade");
+  assert.ok(layoutSource.includes("withAuthenticatedTenant(async () =>"), "the protected layout must bind its branding query to an authenticated tenant context");
+  assert.ok(layoutSource.includes("[app-layout] company-profile fallback"), "the protected layout must not crash when tenant branding data is unavailable");
   console.log("Dashboard tenant-context contract probe passed.");
 }
 

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError, requireUser, withAuthenticatedTenant } from "@/lib/auth";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MStripe } from "@/components/layout/m-stripe";
@@ -38,7 +38,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     throw error;
   }
 
-  const company = await getCompanyProfile();
+  const company = await withAuthenticatedTenant(async () => {
+    try {
+      return await getCompanyProfile();
+    } catch (error) {
+      console.error("[app-layout] company-profile fallback:", error);
+      return {
+        name: "BimmerERP",
+        commercialName: "",
+        phone: "",
+        phonePrimary: "",
+        phoneSecondary: "",
+        address: "",
+        taxNumber: "",
+        commercialRegister: "",
+        logoUrl: "",
+        invoiceFooter: "",
+      };
+    }
+  });
   const branding = { name: company.name, logoUrl: company.logoUrl };
   return (
     <SidebarProvider>
