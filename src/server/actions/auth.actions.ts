@@ -12,6 +12,7 @@ import { toJsonSafe } from "@/lib/audit";
 import { headers } from "next/headers";
 import { activateTenantUsername, establishTenantContext, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername, TenantRoutingError } from "@/lib/tenant-routing";
 import { reconcileConfiguredRootAdminAlias } from "@/lib/root-admin-alias-reconciliation";
+import { toLoginActionFailure } from "@/lib/login-action-failure";
 
 /** Constant-time-ish decoy hash so a missing username costs the same as a wrong password. */
 const DECOY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.q8n0PtPYQhbP8Yq9m8kK1lYQ0lM3z2i";
@@ -71,8 +72,7 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
 
     return ok({ redirectTo: "/" });
   } catch (error) {
-    if (error instanceof TenantRoutingError) return fail(error.safeMessage);
-    return toActionError(error, "loginAction");
+    return toLoginActionFailure(error);
   }
 }
 

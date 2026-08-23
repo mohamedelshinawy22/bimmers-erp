@@ -23,6 +23,7 @@
     "test:password-invalidation-authority": "tsx --conditions=react-server scripts/password-invalidation-auth-path-probe.ts",
     "test:legacy-root-admin-reconciliation": "tsx --conditions=react-server scripts/legacy-root-admin-reconciliation-probe.ts",
     "test:tenant-route-config": "tsx --conditions=react-server scripts/tenant-route-config-probe.ts",
+    "test:login-action-failure": "tsx --conditions=react-server scripts/login-action-failure-probe.ts",
     "db:migrate:dev": "prisma migrate dev"
   },
   "keywords": [],
