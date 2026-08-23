@@ -86,9 +86,9 @@ export async function logoutAction(): Promise<void> {
 /** Refreshes the approved device presence using the authenticated session's tenant route only. */
 export async function tenantDeviceHeartbeatAction(raw: unknown): Promise<ActionResult<{ authorized: true }>> {
   try {
-    await requireUser();
+    const user = await requireUser();
     const device = tenantDeviceIdentitySchema.parse(raw);
-    const tenant = getTenantContext();
+    const tenant = await establishTenantContext(user.username, user.tenantId);
     await authorizeTenantDevice(tenant.route, device, "heartbeat");
     return ok({ authorized: true });
   } catch (error) {

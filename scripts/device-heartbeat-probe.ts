@@ -8,6 +8,8 @@ function main() {
   assert.ok(source.includes("window.localStorage.getItem"), "heartbeat must retrieve the persistent browser device ID");
   assert.ok(source.includes("tenantDeviceHeartbeatAction(currentDeviceIdentity())"), "heartbeat must submit the stored device identity through the protected server action");
   assert.ok(source.includes("2 * 60_000"), "heartbeat cadence must run every two minutes");
+  const actionSource = readFileSync(resolve(process.cwd(), "src/server/actions/auth.actions.ts"), "utf8");
+  assert.ok(actionSource.includes("await establishTenantContext(user.username, user.tenantId)"), "heartbeat must explicitly restore tenant context after session validation");
   console.log("Device heartbeat wiring probe passed.");
 }
 
