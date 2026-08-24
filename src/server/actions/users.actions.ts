@@ -21,23 +21,31 @@ function permissionData(input: UserPermissionInput): Prisma.UserPermissionUnchec
   };
 }
 
-async function validateScopedResources(
+type CleanScopedResources = Pick<CreateManagedUserInput, "allowedWarehouseIds" | "allowedTreasuryIds"> & { transferToTreasuryId: string | null };
+
+async function resolveScopedResources(
   tx: Prisma.TransactionClient,
-  input: Pick<CreateManagedUserInput, "allowedWarehouseIds" | "allowedTreasuryIds" | "transferToTreasuryId">,
-): Promise<void> {
+  input: Pick<CreateManagedUserInput, "username" | "role" | "allowedWarehouseIds" | "allowedTreasuryIds" | "transferToTreasuryId">,
+  existingUser?: { username: string; role: string } | null,
+): Promise<CleanScopedResources> {
+  const isRoot = input.role === "SUPER_ADMIN" || input.username.trim().toLowerCase() === "admin" || existingUser?.role === "SUPER_ADMIN" || existingUser?.username.trim().toLowerCase() === "admin";
+  if (isRoot) return { allowedWarehouseIds: [], allowedTreasuryIds: [], transferToTreasuryId: null };
   const treasuryIds = [...new Set([...input.allowedTreasuryIds, ...(input.transferToTreasuryId ? [input.transferToTreasuryId] : [])])];
+  let allowedTreasuryIds: string[] = [];
   if (treasuryIds.length) {
     const treasuries = await tx.treasury.findMany({ where: { id: { in: treasuryIds }, isActive: true }, select: { id: true } });
-    if (treasuries.length !== treasuryIds.length) throw new BusinessRuleError("تتضمن صلاحيات المستخدم خزينة غير موجودة أو معطلة.");
-  }
-  if (input.transferToTreasuryId && !input.allowedTreasuryIds.includes(input.transferToTreasuryId)) {
-    throw new BusinessRuleError("يجب أن تكون خزينة التحويل المقيّدة ضمن الخزائن المسموح بها للمستخدم.");
+    const activeIds = new Set(treasuries.map((treasury) => treasury.id));
+    allowedTreasuryIds = [...new Set(input.allowedTreasuryIds)].filter((id) => activeIds.has(id));
   }
   const warehouseNames = [...new Set(input.allowedWarehouseIds)];
+  let allowedWarehouseIds: string[] = [];
   if (warehouseNames.length) {
     const bins = await tx.warehouseBin.findMany({ where: { warehouseName: { in: warehouseNames } }, distinct: ["warehouseName"], select: { warehouseName: true } });
-    if (bins.length !== warehouseNames.length) throw new BusinessRuleError("تتضمن صلاحيات المستخدم مخزناً غير موجود.");
+    const validNames = new Set(bins.map((bin) => bin.warehouseName));
+    allowedWarehouseIds = warehouseNames.filter((name) => validNames.has(name));
   }
+  const transferToTreasuryId = input.transferToTreasuryId && allowedTreasuryIds.includes(input.transferToTreasuryId) ? input.transferToTreasuryId : null;
+  return { allowedWarehouseIds, allowedTreasuryIds, transferToTreasuryId };
 }
 
 function revalidateUserManagement(): void {
@@ -62,7 +70,7 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
         const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
         if (activeSubUsers >= tenant.context.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.context.route.maxSubUsers}).`);
       }
-      await validateScopedResources(tx, input);
+      const scopes = await resolveScopedResources(tx, input);
       const created = await tx.user.create({
         data: {
           username,
@@ -70,9 +78,9 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
           passwordHash: await bcrypt.hash(input.password, 12),
           role: input.role,
           isActive: input.isActive,
-          allowedWarehouseIds: [...new Set(input.allowedWarehouseIds)],
-          allowedTreasuryIds: [...new Set(input.allowedTreasuryIds)],
-          transferToTreasuryId: input.transferToTreasuryId ?? null,
+          allowedWarehouseIds: scopes.allowedWarehouseIds,
+          allowedTreasuryIds: scopes.allowedTreasuryIds,
+          transferToTreasuryId: scopes.transferToTreasuryId,
           permissions: { create: permissionData(input.permissions) },
         },
         select: { id: true, username: true, fullName: true, role: true, isActive: true },
@@ -82,7 +90,7 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
           tableName: "User",
           recordId: created.id,
           action: "INSERT",
-          newData: toJsonSafe({ ...created, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions }),
+          newData: toJsonSafe({ ...created, ...scopes, permissions: input.permissions }),
           performedBy: actor.id,
         },
       });
@@ -115,7 +123,7 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
         const remaining = await tx.user.count({ where: { role: "SUPER_ADMIN", isActive: true, id: { not: before.id } } });
         if (remaining === 0) throw new BusinessRuleError("لا يمكن إيقاف أو تخفيض آخر مدير نظام نشط.");
       }
-      await validateScopedResources(tx, input);
+      const scopes = await resolveScopedResources(tx, input, before);
       const updated = await tx.user.update({
         where: { id: before.id },
         data: {
@@ -123,9 +131,9 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
           fullName: input.fullName,
           role: input.role,
           isActive: input.isActive,
-          allowedWarehouseIds: [...new Set(input.allowedWarehouseIds)],
-          allowedTreasuryIds: [...new Set(input.allowedTreasuryIds)],
-          transferToTreasuryId: input.transferToTreasuryId ?? null,
+          allowedWarehouseIds: scopes.allowedWarehouseIds,
+          allowedTreasuryIds: scopes.allowedTreasuryIds,
+          transferToTreasuryId: scopes.transferToTreasuryId,
           ...(password ? { passwordHash: await bcrypt.hash(password, 12) } : {}),
           permissions: { upsert: { create: permissionData(input.permissions), update: permissionData(input.permissions) } },
         },
@@ -137,7 +145,7 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
           recordId: before.id,
           action: password ? "PASSWORD_CHANGED" : "UPDATE",
           oldData: toJsonSafe({ username: before.username, fullName: before.fullName, role: before.role, isActive: before.isActive, allowedWarehouseIds: before.allowedWarehouseIds, allowedTreasuryIds: before.allowedTreasuryIds, transferToTreasuryId: before.transferToTreasuryId, permissions: before.permissions }),
-          newData: toJsonSafe({ ...updated, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions, passwordChanged: Boolean(password) }),
+          newData: toJsonSafe({ ...updated, ...scopes, permissions: input.permissions, passwordChanged: Boolean(password) }),
           performedBy: actor.id,
         },
       });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { KeyRound, Save, ShieldCheck } from "lucide-react";
 import { Alert, Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,14 @@ export function UserPermissionsModal({ user, treasuries, warehouses, onClose, on
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const isNew = !user;
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      allowedTreasuryIds: current.allowedTreasuryIds.filter((id) => treasuries.some((treasury) => treasury.id === id)),
+      allowedWarehouseIds: current.allowedWarehouseIds.filter((name) => warehouses.includes(name)),
+      transferToTreasuryId: treasuries.some((treasury) => treasury.id === current.transferToTreasuryId) ? current.transferToTreasuryId : "",
+    }));
+  }, [treasuries, warehouses]);
   const passwordOk = form.password.trim().length === 0 || (form.password.trim().length >= 10 && /[A-Za-z]/.test(form.password) && /[0-9]/.test(form.password));
   const setPermission = (key: PermissionBooleanKey, value: boolean) => setForm((current) => ({ ...current, permissions: { ...current.permissions, [key]: value } }));
   const setSetValue = (field: "allowedWarehouseIds" | "allowedTreasuryIds", value: string, checked: boolean) => setForm((current) => ({ ...current, [field]: checked ? [...new Set([...current[field], value])] : current[field].filter((item) => item !== value) }));
