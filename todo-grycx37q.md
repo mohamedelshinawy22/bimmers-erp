@@ -31,6 +31,6 @@
 - [x] Trace the user-profile and permissions update action plus its modal save handler failure.
 - [x] Make optional password changes tenant-scoped, serialized, and safe when the password field is blank.
 - [x] Add user-update regression coverage, validate, deploy, and verify the save flow.
-- [ ] Inspect user scope validation and modal prefill behavior for stale treasury and warehouse references.
-- [ ] Prune inactive or deleted scope IDs on save while preserving root-admin unrestricted scope.
-- [ ] Add pruning regression coverage, validate, deploy, and verify the user-permission save flow.
+- [x] Inspect user scope validation and modal prefill behavior for stale treasury and warehouse references.
+- [x] Prune inactive or deleted scope IDs on save while preserving root-admin unrestricted scope.
+- [ ] Run authenticated production user-permission saves to confirm legacy scopes are pruned in the live tenant database.
