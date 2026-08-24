@@ -64,3 +64,6 @@
 - [ ] Trace reconciled transfer rows entering the standard voucher execution stream.
 - [ ] Separate standard voucher and transfer posting with tenant-scoped detailed batch result handling.
 - [ ] Validate, deploy, and confirm unified receipt execution advances past the first batch.
+- [ ] Inspect production receipt-import failure evidence and identify the exact crashing action path.
+- [ ] Normalize receipt batch payloads and satisfy the tenant schema's required posting fields with explicit error results.
+- [ ] Validate, deploy, and confirm receipt batches advance in production without generic action errors.

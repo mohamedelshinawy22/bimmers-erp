@@ -195,9 +195,11 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
   try {
     const input = importSchema.parse(raw);
     const user = await requirePermission("treasury.transact");
-    const defaultTreasury = await prisma.treasury.findFirst({ where: { isActive: true }, select: { id: true, name: true } });
+    const tenant = await getTenantDbFromSession();
+    const db = tenant.prisma;
+    const defaultTreasury = await tenant.run(() => db.treasury.findFirst({ where: { isActive: true }, select: { id: true, name: true } }));
     if (!defaultTreasury) {
-      await prisma.treasury.create({ data: { name: "الخزينة الرئيسية", type: "CASH_DRAWER", currentBalance: 0, isActive: true, isDefault: true, notes: "خزينة أساسية أُنشئت تلقائياً قبل ترحيل السندات" } });
+      await tenant.run(() => db.treasury.create({ data: { name: "الخزينة الرئيسية", type: "CASH_DRAWER", currentBalance: 0, isActive: true, isDefault: true, notes: "خزينة أساسية أُنشئت تلقائياً قبل ترحيل السندات" } }));
     }
     const parsed = input.rows.map((rawRow) => ({ rawRow, parsed: voucherLineSchema.safeParse(rawRow) }));
     const invalid = parsed.filter((entry) => !entry.parsed.success).map((entry) => ({ row: Number((entry.rawRow as { sourceRowNumber?: number })?.sourceRowNumber ?? 0), reason: (entry.parsed as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
@@ -215,15 +217,15 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
     if (invalid.length && !input.skipInvalidRows) throw new BusinessRuleError(`يوجد ${invalid.length} صف غير صالح. صحح الملف أو فعّل التخطي.`);
     if (!validLines.length && !input.reconciledTransfers.length) throw new BusinessRuleError("لا توجد سندات صالحة للاستيراد.");
     const checksum = createHash("sha256").update(JSON.stringify({ type: input.type, lines: validLines, reconciledTransfers: input.reconciledTransfers })).digest("hex");
-    const prior = await prisma.importJob.findFirst({ where: { type: "VOUCHERS", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
+    const prior = await tenant.run(() => db.importJob.findFirst({ where: { type: "VOUCHERS", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } }));
     if (prior) return ok({ jobId: prior.id, created: 0, skipped: validLines.length, transfers: 0, invalid });
-    const job = await prisma.importJob.create({ data: { type: "VOUCHERS", status: "PROCESSING", checksum, mapping: { type: input.type, autoCreateAccounts: input.autoCreateAccounts, skipInvalidRows: input.skipInvalidRows }, createdById: user.id } });
+    const job = await tenant.run(() => db.importJob.create({ data: { type: "VOUCHERS", status: "PROCESSING", checksum, mapping: { type: input.type, autoCreateAccounts: input.autoCreateAccounts, skipInvalidRows: input.skipInvalidRows }, createdById: user.id } }));
     let created = 0; let skipped = invalid.length; let transfers = 0;
     try {
       for (const line of validLines) {
         try {
           const kind = voucherMovementKind(line.movementType, input.type);
-          await withTxRetry(() => prisma.$transaction(async (tx) => {
+          await withTxRetry(() => tenant.run(() => db.$transaction(async (tx) => {
             const channels = channelsFor(line);
             const treasuryByName = await resolveOrCreateImportTreasuries(tx, [...channels.map((channel) => channel.name), line.treasuryName].filter(Boolean), user.id);
             const anchorName = line.treasuryName.trim() || channels[0]?.name || "درج النقدية";
@@ -251,7 +253,7 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
             // Expense accounts categorize operational costs; they do not represent receivables or payables.
             if (account && account.type !== "EXPENSE") await tx.account.update({ where: { id: account.id }, data: kind === "RECEIPT" ? { currentBalance: { increment: money(line.amount) } } : { currentBalance: { decrement: money(line.amount) } } });
             return { transfer: false, transactions: channels.length };
-          }, TX_OPTIONS));
+          }, TX_OPTIONS)));
           created += 1;
           if (kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") transfers += 1;
         } catch (error) {
@@ -263,9 +265,9 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
       }
       for (const pair of input.reconciledTransfers) {
         try {
-          await withTxRetry(() => prisma.$transaction(async (tx) => {
+          await withTxRetry(() => tenant.run(() => db.$transaction(async (tx) => {
             await postImportedTransfer(tx, { fromTreasuryName: pair.fromTreasuryName, toTreasuryName: pair.toTreasuryName, amount: money(pair.amount), notes: pair.notes, date: pair.date, time: pair.time, reference: pair.key }, user.id);
-          }, TX_OPTIONS));
+          }, TX_OPTIONS)));
           created += 1; transfers += 1;
         } catch (error) {
           const reason = error instanceof Error ? error.message : "تعذر ترحيل التحويل الداخلي.";
@@ -275,12 +277,12 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
         }
       }
       const summary = { total: input.rows.length + input.reconciledTransfers.length, created, skipped, transfers, invalid: invalid.length };
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
-      await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: { ...summary, source: "VOUCHER_EXCEL_IMPORT" }, performedBy: user.id });
+      await tenant.run(() => db.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } }));
+      await tenant.run(() => writeAudit(db, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: { ...summary, source: "VOUCHER_EXCEL_IMPORT" }, performedBy: user.id }));
       ["/vouchers", "/treasury", "/accounts", "/"].forEach((path) => revalidatePath(path));
       return ok({ jobId: job.id, created, skipped, transfers, invalid });
     } catch (error) {
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, created, skipped, transfers, invalid: invalid.length } } });
+      await tenant.run(() => db.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, created, skipped, transfers, invalid: invalid.length } } }));
       throw error;
     }
   } catch (error) { return toActionError(error, "executeVoucherImportAction"); }
