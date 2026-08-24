@@ -89,3 +89,4 @@
 - [x] Implement an idempotent tenant bootstrap compatible with the actual ERP schema models for treasuries, categories, brands, BMW fitment, accounts, settings, bins, barcode configuration, and counters.
 - [x] Verify `/pos` under Bavaria after the confirmed bootstrap; `/catalog`, `/receipts`, and `/pos` rendered successfully in the authenticated browser session.
 - [x] User confirmed the guarded Bavaria null-category backfill; authenticated Bavaria `/catalog` opened after deployment with seeded BMW filters and category options, without an SSR error boundary.
+- [ ] Diagnose and restore visibility of the reported Bavaria imported products when the authenticated Catalog renders an empty result set.

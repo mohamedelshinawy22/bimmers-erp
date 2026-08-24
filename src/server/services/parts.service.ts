@@ -175,6 +175,10 @@ export async function searchParts(
   ]);
 
   const duplicates = await getDuplicateMetadata(db, rows);
+  if (total === 0 && !input.query && !input.chassisCode && !input.engineCode && !input.category && !input.brandId && !input.lowStockOnly) {
+    const visibility = await db.partItem.groupBy({ by: ["isDeleted", "isActive"], _count: { _all: true } });
+    console.warn("CATALOG_EMPTY_VISIBILITY_SUMMARY", visibility.map((group) => ({ isDeleted: group.isDeleted, isActive: group.isActive, count: group._count._all })));
+  }
   return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.isForPrint ? rows.length : input.pageSize };
 }
 
