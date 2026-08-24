@@ -18,6 +18,10 @@ describe("Catalog resilience boundaries", () => {
     expect(page).toContain("getPartFormOptions(tenant.prisma)");
     expect(page).toContain("getPartCategories(tenant.prisma)");
     expect(page).toContain("Unable to load tenant-scoped Catalog");
+    expect(page).toContain("const tenant = await getTenantDbFromSession()");
+    expect(page).toContain("return <CatalogRecovery />");
+    expect(page).toContain("rows={serializeData(rows)}");
+    expect(page).toContain("company={serializeData(company)}");
   });
 
   it("coerces sparse spreadsheet cells, links the normalized category, and only assigns an existing bin", () => {

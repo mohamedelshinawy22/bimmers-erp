@@ -84,3 +84,4 @@
 - [x] Fix tenant-scoped manual product creation with resilient brand, category, price, and optional bin handling.
 - [ ] Add regression coverage, deploy, and obtain authenticated confirmation for large Catalog loading and custom product creation.
 - [ ] Diagnose and resolve recurring production `/catalog` SSR digest `1688063370` for the 899-product tenant.
+- [ ] Capture and fix the authenticated GET `/catalog` SSR path, including top-level fallback serialization, for digest `1688063370`.
