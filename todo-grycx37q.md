@@ -76,3 +76,7 @@
 - [ ] Trace the actual action input contract responsible for the persistent voucher import rejection.
 - [ ] Return explicit Zod validation diagnostics and align the client request shape with that action contract.
 - [ ] Validate, deploy, and collect authenticated evidence of the resolved validation boundary.
+- [ ] Trace and fix accountless manual voucher creation with tenant-safe treasury posting.
+- [ ] Harden Catalog SSR and product Excel normalization for sparse imported data.
+- [ ] Build BMW chassis and engine fitment autocomplete with quick preset tags in the product form.
+- [ ] Validate, deploy, and confirm accountless vouchers and imported catalog rows work in production.
