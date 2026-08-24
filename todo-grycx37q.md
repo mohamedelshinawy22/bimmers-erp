@@ -67,3 +67,6 @@
 - [ ] Inspect production receipt-import failure evidence and identify the exact crashing action path.
 - [ ] Normalize receipt batch payloads and satisfy the tenant schema's required posting fields with explicit error results.
 - [ ] Validate, deploy, and confirm receipt batches advance in production without generic action errors.
+- [ ] Trace the voucher-import Zod rejection and manual voucher null-account failure path.
+- [ ] Add permissive import coercion and tenant-scoped manual voucher posting with null-account support.
+- [ ] Validate, deploy, and confirm the import batch and accountless manual voucher flows in production.

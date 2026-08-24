@@ -29,22 +29,31 @@ const numeric = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const importText = (value: unknown) => value == null ? "" : String(value).trim();
+const importDate = (value: unknown) => {
+  if (value == null || value === "") return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000).toISOString().slice(0, 10);
+  return importText(value);
+};
+const optionalImportText = (max: number) => z.preprocess(importText, z.string().max(max).optional().default(""));
+
 const voucherLineSchema = z.object({
   sourceRowNumber: z.coerce.number().int().positive(),
   seq: z.coerce.number().int().positive().optional().default(1),
-  date: z.string().trim().optional().nullable().default(null),
-  time: z.string().trim().optional().nullable().default(null),
-  movementType: z.string().trim().max(120).optional().default(""),
-  transactionReference: z.string().trim().min(1).max(180),
-  externalReference: z.string().trim().max(180).optional().default(""),
+  date: z.preprocess(importDate, z.string().trim().optional().nullable().default(null)),
+  time: z.preprocess(importText, z.string().trim().optional().nullable().default(null)),
+  movementType: optionalImportText(120),
+  transactionReference: z.preprocess(importText, z.string().min(1).max(180)),
+  externalReference: optionalImportText(180),
   amount: z.preprocess(numeric, z.number().finite().positive().max(99_999_999)),
-  itemCategory: z.string().trim().max(200).optional().default(""),
-  accountName: z.string().trim().max(200).optional().default(""),
-  treasuryName: z.string().trim().max(160).optional().default(""),
-  transferCounterpartyTreasuryName: z.string().trim().max(160).optional().default(""),
+  itemCategory: optionalImportText(200),
+  accountName: optionalImportText(200),
+  treasuryName: optionalImportText(160),
+  transferCounterpartyTreasuryName: optionalImportText(160),
   paymentChannels: z.array(z.object({ name: z.string().trim().min(1).max(160), amount: z.preprocess(numeric, z.number().finite().positive().max(99_999_999)) })).max(30).optional().default([]),
-  notes: z.string().trim().max(1000).optional().default(""),
-  createdByName: z.string().trim().max(180).optional().default(""),
+  notes: optionalImportText(1000),
+  createdByName: optionalImportText(180),
   defaultType: z.enum(voucherImportTypes),
 });
 
@@ -52,8 +61,8 @@ type ValidVoucherLine = z.infer<typeof voucherLineSchema>;
 
 const transferPairSchema = z.object({
   key: z.string().trim().min(1).max(300),
-  date: z.string().trim().nullable().optional().default(null),
-  time: z.string().trim().nullable().optional().default(null),
+  date: z.preprocess(importDate, z.string().trim().nullable().optional().default(null)),
+  time: z.preprocess(importText, z.string().trim().nullable().optional().default(null)),
   amount: z.preprocess(numeric, z.number().finite().positive().max(99_999_999)),
   fromTreasuryName: z.string().trim().min(1).max(160),
   toTreasuryName: z.string().trim().min(1).max(160),
