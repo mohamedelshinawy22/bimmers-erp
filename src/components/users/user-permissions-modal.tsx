@@ -62,16 +62,20 @@ export function UserPermissionsModal({ user, treasuries, warehouses, onClose, on
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const isNew = !user;
-  const passwordOk = !isNew || (form.password.length >= 10 && /[A-Za-z]/.test(form.password) && /[0-9]/.test(form.password));
+  const passwordOk = form.password.trim().length === 0 || (form.password.trim().length >= 10 && /[A-Za-z]/.test(form.password) && /[0-9]/.test(form.password));
   const setPermission = (key: PermissionBooleanKey, value: boolean) => setForm((current) => ({ ...current, permissions: { ...current.permissions, [key]: value } }));
   const setSetValue = (field: "allowedWarehouseIds" | "allowedTreasuryIds", value: string, checked: boolean) => setForm((current) => ({ ...current, [field]: checked ? [...new Set([...current[field], value])] : current[field].filter((item) => item !== value) }));
   const changeRole = (role: Role) => setForm((current) => ({ ...current, role, permissions: user?.permissions ? current.permissions : basePermissions(role) }));
   const submit = () => startTransition(async () => {
     setError(null);
-    const payload = { ...form, transferToTreasuryId: form.transferToTreasuryId || undefined };
-    const result = user ? await updateManagedUserAction({ ...payload, id: user.id }) : await createManagedUserAction(payload);
-    if (!result.success) { setError(result.error); return; }
-    onSaved();
+    try {
+      const payload = { ...form, password: form.password.trim(), transferToTreasuryId: form.transferToTreasuryId || undefined };
+      const result = user ? await updateManagedUserAction({ ...payload, id: user.id }) : await createManagedUserAction(payload);
+      if (!result?.success) { setError(result?.error ?? "فشل في حفظ التعديلات."); return; }
+      onSaved();
+    } catch {
+      setError("فشل في حفظ التعديلات. أعد المحاولة.");
+    }
   });
   const renderChecks = (items: Array<[PermissionBooleanKey, string, string?]>) => <div className="grid gap-2 md:grid-cols-2">{items.map(([key, label, hint]) => <PermissionCheck key={key} label={label} hint={hint} checked={form.permissions[key]} onChange={(value) => setPermission(key, value)} />)}</div>;
 

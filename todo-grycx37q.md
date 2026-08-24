@@ -28,3 +28,6 @@
 - [x] Add a secure root-admin permission bypass while preserving tenant-scoped authorization for all sub-users.
 - [x] Harden users SSR and voucher/Daily Movement action payloads with explicit tenant queries, serialization, and safe zero-state results.
 - [ ] Run authenticated production click-through verification for root-admin access to `/dead-stock`, `/barcode`, `/users`, voucher details, and Daily Movement.
+- [ ] Trace the user-profile and permissions update action plus its modal save handler failure.
+- [ ] Make optional password changes tenant-scoped, serialized, and safe when the password field is blank.
+- [ ] Add user-update regression coverage, validate, deploy, and verify the save flow.

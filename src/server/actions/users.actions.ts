@@ -3,11 +3,12 @@
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { toJsonSafe } from "@/lib/audit";
+import { serializeData } from "@/lib/serialize";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { createManagedUserSchema, updateManagedUserSchema, type CreateManagedUserInput, type UpdateManagedUserInput, type UserPermissionInput } from "@/lib/validations/users";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { activateTenantUsername, getTenantContext, releaseTenantUsername, reportTenantSubUserUsage, reserveTenantUsername } from "@/lib/tenant-routing";
@@ -46,18 +47,20 @@ function revalidateUserManagement(): void {
 export async function createManagedUserAction(raw: CreateManagedUserInput): Promise<ActionResult<{ id: string; username: string }>> {
   let reservation: { username: string; route: ReturnType<typeof getTenantContext>["route"] } | null = null;
   let createdId: string | null = null;
+  let scopedTenant: Awaited<ReturnType<typeof getTenantDbFromSession>> | null = null;
   try {
     const actor = await requirePermission("user.manage");
     const input = createManagedUserSchema.parse(raw);
     const username = input.username.toLowerCase();
-    const tenant = getTenantContext();
-    await reserveTenantUsername(tenant.route, username, input.role);
-    reservation = { username, route: tenant.route };
+    const tenant = await getTenantDbFromSession();
+    scopedTenant = tenant;
+    await reserveTenantUsername(tenant.context.route, username, input.role);
+    reservation = { username, route: tenant.context.route };
     const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       if (input.isActive && input.role !== "SUPER_ADMIN") {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.route.tenantId}`}))`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.context.route.tenantId}`}))`;
         const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
-        if (activeSubUsers >= tenant.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.route.maxSubUsers}).`);
+        if (activeSubUsers >= tenant.context.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.context.route.maxSubUsers}).`);
       }
       await validateScopedResources(tx, input);
       const created = await tx.user.create({
@@ -86,22 +89,24 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
       return created;
     }, TX_OPTIONS));
     createdId = result.id;
-    await activateTenantUsername(tenant.route, username);
-    await reportTenantSubUserUsage(tenant.route, await prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
+    await activateTenantUsername(tenant.context.route, username);
+    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
     revalidateUserManagement();
     return ok({ id: result.id, username: result.username });
   } catch (error) {
-    if (createdId) await prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
+    if (createdId && scopedTenant) await scopedTenant.prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
     if (reservation) await releaseTenantUsername(reservation.route, reservation.username).catch(() => undefined);
     return toActionError(error, "createManagedUserAction");
   }
 }
 
-export async function updateManagedUserAction(raw: UpdateManagedUserInput): Promise<ActionResult<{ id: string }>> {
+export async function updateManagedUserAction(raw: UpdateManagedUserInput): Promise<ActionResult<{ id: string; user: { id: string; username: string; fullName: string; role: string; isActive: boolean; permissions: unknown; createdAt: string } }>> {
   try {
     const actor = await requirePermission("user.manage");
     const input = updateManagedUserSchema.parse(raw);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const tenant = await getTenantDbFromSession();
+    const password = input.password?.trim() ?? "";
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const before = await tx.user.findUnique({ where: { id: input.id }, include: { permissions: true } });
       if (!before) throw new BusinessRuleError("المستخدم غير موجود.");
       if (before.username !== input.username.toLowerCase()) throw new BusinessRuleError("لا يمكن تغيير اسم المستخدم بعد ربطه بالمستأجر.");
@@ -121,25 +126,25 @@ export async function updateManagedUserAction(raw: UpdateManagedUserInput): Prom
           allowedWarehouseIds: [...new Set(input.allowedWarehouseIds)],
           allowedTreasuryIds: [...new Set(input.allowedTreasuryIds)],
           transferToTreasuryId: input.transferToTreasuryId ?? null,
-          ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
+          ...(password ? { passwordHash: await bcrypt.hash(password, 12) } : {}),
           permissions: { upsert: { create: permissionData(input.permissions), update: permissionData(input.permissions) } },
         },
-        select: { id: true, username: true, fullName: true, role: true, isActive: true },
+        select: { id: true, username: true, fullName: true, role: true, isActive: true, permissions: true, createdAt: true },
       });
       await tx.systemAuditTrail.create({
         data: {
           tableName: "User",
           recordId: before.id,
-          action: input.password ? "PASSWORD_CHANGED" : "UPDATE",
+          action: password ? "PASSWORD_CHANGED" : "UPDATE",
           oldData: toJsonSafe({ username: before.username, fullName: before.fullName, role: before.role, isActive: before.isActive, allowedWarehouseIds: before.allowedWarehouseIds, allowedTreasuryIds: before.allowedTreasuryIds, transferToTreasuryId: before.transferToTreasuryId, permissions: before.permissions }),
-          newData: toJsonSafe({ ...updated, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions, passwordChanged: Boolean(input.password) }),
+          newData: toJsonSafe({ ...updated, allowedWarehouseIds: input.allowedWarehouseIds, allowedTreasuryIds: input.allowedTreasuryIds, transferToTreasuryId: input.transferToTreasuryId, permissions: input.permissions, passwordChanged: Boolean(password) }),
           performedBy: actor.id,
         },
       });
       return updated;
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
     revalidateUserManagement();
-    return ok({ id: result.id });
+    return ok({ id: result.id, user: serializeData({ ...result, createdAt: result.createdAt.toISOString() }) });
   } catch (error) {
     return toActionError(error, "updateManagedUserAction");
   }
