@@ -90,3 +90,5 @@
 - [x] Verify `/pos` under Bavaria after the confirmed bootstrap; `/catalog`, `/receipts`, and `/pos` rendered successfully in the authenticated browser session.
 - [x] User confirmed the guarded Bavaria null-category backfill; authenticated Bavaria `/catalog` opened after deployment with seeded BMW filters and category options, without an SSR error boundary.
 - [ ] Diagnose and restore visibility of the reported Bavaria imported products when the authenticated Catalog renders an empty result set.
+- [x] Confirm that the authenticated Bavaria Catalog query returned `rows: []` and `total: 0`; production visibility diagnostics found no PartItem rows in the tenant database.
+- [ ] Obtain the authorized Bavaria product source (original Excel or an approved source-tenant migration) before restoring inventory records.
