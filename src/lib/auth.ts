@@ -110,7 +110,10 @@ export async function withAuthenticatedTenant<T>(work: () => Promise<T>): Promis
 /** Authenticate + authorise in one call. Throws on failure. */
 export async function requirePermission(permission: Permission): Promise<SessionUser> {
   const user = await requireUser();
-  const access = await getUserAccess(user.id);
+  const role = String(user.role).toUpperCase();
+  if (role === "SUPER_ADMIN" || role === "ADMIN" || user.username.trim().toLowerCase() === "admin") return user;
+  const context = await establishTenantContext(user.username, user.tenantId);
+  const access = await runWithTenantContext(context, () => getUserAccess(user.id));
   if (!hasApplicationPermission(access, permission)) {
     throw new ForbiddenError(
       `ليس لديك صلاحية (${permission}) — دورك أو إعداداتك التفصيلية لا تسمح بهذا الإجراء.`,
