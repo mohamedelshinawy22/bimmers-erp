@@ -11,6 +11,7 @@ import { reconcileInternalTransfers, type ReconciledTransfer } from "@/lib/vouch
 
 type Preview = { total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; reference: string; kind: "RECEIPT" | "PAYMENT" | "TRANSFER_IN" | "TRANSFER_OUT"; amount: number; accountName: string; itemCategory: string; channels: Array<{ name: string; amount: number }>; isValid: boolean; reason?: string }> };
 type Treasury = { id: string; name: string; currentBalance: number; isDefault: boolean };
+const VOUCHER_CHUNK_SIZE = 20;
 
 function rowKey(type: "RECEIPT" | "PAYMENT", row: ParsedVoucherRow) { return `${type}:${row.sourceRowNumber}`; }
 function kindLabel(kind: Preview["rows"][number]["kind"]) { return kind === "RECEIPT" ? "قبض" : kind === "PAYMENT" ? "صرف" : kind === "TRANSFER_IN" ? "تحويل وارد" : "تحويل صادر"; }
@@ -21,6 +22,7 @@ export function CombinedVoucherImportModal({ treasuries, onClose, onDone }: { tr
   const [receiptName, setReceiptName] = useState(""); const [paymentName, setPaymentName] = useState("");
   const [manualCounterparts, setManualCounterparts] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<Preview | null>(null); const [autoCreateAccounts, setAutoCreateAccounts] = useState(false); const [skipInvalidRows, setSkipInvalidRows] = useState(true);
+  const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const [pending, startTransition] = useTransition();
 
   const reconciliation = useMemo(() => reconcileInternalTransfers(receiptRows, paymentRows), [receiptRows, paymentRows]);
@@ -55,11 +57,26 @@ export function CombinedVoucherImportModal({ treasuries, onClose, onDone }: { tr
 
   const missingManualPair = unmatched.some(({ type, row }) => !counterpartyFor(type, row).trim());
   const runPreview = () => startTransition(async () => { setError(null); if (!payload.rows.length) { setError("ارفع ملف قبض أو صرف واحداً على الأقل."); return; } if (missingManualPair) { setError("اختر الخزينة المقابلة لكل تحويل غير مطابق قبل الفحص."); return; } const result = await previewVoucherImportAction(payload); if (!result.success) { setError(result.error); return; } setPreview(result.data); });
-  const execute = () => startTransition(async () => { setError(null); const result = await executeVoucherImportAction(payload); if (!result.success) { setError(result.error); return; } setMessage(`تم ترحيل ${result.data.created} سند وتحويل ${result.data.transfers} حركة داخلية موحدة.`); onDone(); });
+  const execute = () => startTransition(async () => {
+    setError(null); const validRowIds = new Set(preview?.rows.filter((row) => row.isValid).map((row) => row.row) ?? []); const validRows = preview ? payload.rows.filter((row) => validRowIds.has(Number(row.sourceRowNumber))) : payload.rows;
+    let created = 0; let transfers = 0; let processed = 0; setProgress({ processed, total: validRows.length });
+    for (let start = 0; start < validRows.length; start += VOUCHER_CHUNK_SIZE) {
+      const rows = validRows.slice(start, start + VOUCHER_CHUNK_SIZE);
+      const result = await executeVoucherImportAction({ ...payload, rows, reconciledTransfers: [] });
+      if (!result.success) { setError(result.error); setProgress(null); return; }
+      created += result.data.created; transfers += result.data.transfers; processed += rows.length; setProgress({ processed, total: validRows.length });
+    }
+    if (payload.reconciledTransfers.length) {
+      const transfersResult = await executeVoucherImportAction({ ...payload, rows: [], reconciledTransfers: payload.reconciledTransfers });
+      if (!transfersResult.success) { setError(transfersResult.error); setProgress(null); return; }
+      created += transfersResult.data.created; transfers += transfersResult.data.transfers;
+    }
+    setProgress(null); setMessage(`تم ترحيل ${created} سند وتحويل ${transfers} حركة داخلية موحدة.`); onDone();
+  });
   const canExecute = Boolean(preview && preview.valid > 0 && (skipInvalidRows || preview.invalid.length === 0));
 
   return <Modal open onClose={onClose} title="استيراد شامل للسندات والتحويلات" description="ارفع قبض.xlsx وصرف.xlsx معاً لمطابقة التحويلات الداخلية تلقائياً، أو حدّد الخزينة المقابلة للملف المنفرد." size="xl" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button>{!preview ? <Button onClick={runPreview} loading={pending} disabled={!receiptRows.length && !paymentRows.length}><CheckCircle2 size={15} /> فحص ومطابقة التحويلات</Button> : <Button variant="success" onClick={execute} loading={pending} disabled={!canExecute}><UploadCloud size={15} /> تنفيذ الترحيل الموحد</Button>}</>}>
-    <div className="space-y-4" dir="rtl">{error ? <Alert variant="error">{error}</Alert> : null}{message ? <Alert variant="success">{message}</Alert> : null}
+    <div className="space-y-4" dir="rtl">{error ? <Alert variant="error">{error}</Alert> : null}{message ? <Alert variant="success">{message}</Alert> : null}{progress ? <div className="rounded-xl border border-bmw-blue/40 bg-bmw-blue/10 p-3 text-sm text-bmw-blue"><div className="mb-2 flex justify-between"><span>جارٍ ترحيل السندات: {progress.processed} من أصل {progress.total}</span><b>{Math.round((progress.processed / Math.max(1, progress.total)) * 100)}%</b></div><div className="h-2 overflow-hidden rounded-full bg-bmw-carbon"><div className="h-full bg-bmw-blue transition-all" style={{ width: `${Math.round((progress.processed / Math.max(1, progress.total)) * 100)}%` }} /></div></div> : null}
       <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2 rounded-2xl border-2 border-dashed border-emerald-500/40 bg-emerald-950/20 p-4 text-center"><div className="text-2xl">🟢</div><p className="text-xs font-bold text-emerald-300">ملف سندات القبض والإيداع (قبض.xlsx)</p><Button size="sm" variant="outline" onClick={() => receiptRef.current?.click()}><FileSpreadsheet size={14} /> اختيار ملف قبض</Button><input ref={receiptRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file, "RECEIPT"); event.currentTarget.value = ""; }} />{receiptName ? <p className="font-mono text-[11px] text-emerald-400">{receiptName} — {receiptRows.length} صف</p> : null}</div><div className="space-y-2 rounded-2xl border-2 border-dashed border-rose-500/40 bg-rose-950/20 p-4 text-center"><div className="text-2xl">🔴</div><p className="text-xs font-bold text-rose-300">ملف سندات الصرف والمصروفات (صرف.xlsx)</p><Button size="sm" variant="outline" onClick={() => paymentRef.current?.click()}><FileSpreadsheet size={14} /> اختيار ملف صرف</Button><input ref={paymentRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file, "PAYMENT"); event.currentTarget.value = ""; }} />{paymentName ? <p className="font-mono text-[11px] text-rose-400">{paymentName} — {paymentRows.length} صف</p> : null}</div></div>
       <section className="grid grid-cols-3 gap-2 text-xs"><div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-center">قبض: <b>{receiptRows.length}</b></div><div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-center">صرف: <b>{paymentRows.length}</b></div><div className="rounded-xl border border-bmw-blue/30 bg-bmw-blue/10 p-3 text-center text-bmw-blue">تحويلات مطابقة: <b>{reconciliation.matchedTransfers.length}</b></div></section>
       {reconciliation.matchedTransfers.length ? <Alert variant="success">تمت مطابقة {reconciliation.matchedTransfers.length} تحويل داخلي تلقائياً حسب التاريخ والوقت والمبلغ. كل مطابقة ستنشئ تحويلاً واحداً فقط وحركتين متقابلتين.</Alert> : null}

@@ -54,3 +54,7 @@
 - [ ] Trace tenant-scoped factory-reset authentication, dependency ordering, and post-reset session safety.
 - [ ] Harden voucher-transfer preview parsing, bulk tenant resolution, pairing, and serialized error results.
 - [ ] Add regression coverage, validate, deploy, and obtain authenticated confirmation for reset and transfer-preview flows.
+- [ ] Trace receipt-import unified posting and establish a safe 20-record batch boundary.
+- [ ] Add tenant-scoped account/treasury pre-resolution and serializable receipt batch execution results.
+- [ ] Add client-side receipt chunk dispatch with live progress and detailed failed-batch reporting.
+- [ ] Validate, deploy, and confirm the 315-voucher/16-transfer posting flow in production.
