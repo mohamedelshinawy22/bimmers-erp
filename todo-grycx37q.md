@@ -24,7 +24,7 @@
 - [x] Correct inventory-movement and barcode navigation paths and route guards without weakening tenant security.
 - [x] Harden Daily Movement defaults and client result handling for reports, voucher details, and account statements.
 - [ ] Run the authenticated production smoke harness against all sidebar-compatible routes and confirm the live modal click-through flows.
-- [ ] Trace the root-admin access denial, `/users` digest 3511740688, and remaining voucher and Daily Movement runtime failures.
-- [ ] Add a secure root-admin permission bypass while preserving tenant-scoped authorization for all sub-users.
-- [ ] Harden users SSR and voucher/Daily Movement action payloads with explicit tenant queries, serialization, and safe zero-state results.
-- [ ] Add regression coverage, run validation, deploy, and verify the admin-access release.
+- [x] Trace the root-admin access denial, `/users` digest 3511740688, and remaining voucher and Daily Movement runtime failures.
+- [x] Add a secure root-admin permission bypass while preserving tenant-scoped authorization for all sub-users.
+- [x] Harden users SSR and voucher/Daily Movement action payloads with explicit tenant queries, serialization, and safe zero-state results.
+- [ ] Run authenticated production click-through verification for root-admin access to `/dead-stock`, `/barcode`, `/users`, voucher details, and Daily Movement.
