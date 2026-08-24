@@ -27,10 +27,10 @@
 - [x] Trace the root-admin access denial, `/users` digest 3511740688, and remaining voucher and Daily Movement runtime failures.
 - [x] Add a secure root-admin permission bypass while preserving tenant-scoped authorization for all sub-users.
 - [x] Harden users SSR and voucher/Daily Movement action payloads with explicit tenant queries, serialization, and safe zero-state results.
-- [ ] Run authenticated production click-through verification for root-admin access to `/dead-stock`, `/barcode`, `/users`, voucher details, and Daily Movement.
+- [x] Run authenticated production click-through verification for root-admin access to `/dead-stock`, `/barcode`, `/users`, voucher details, and Daily Movement.
 - [x] Trace the user-profile and permissions update action plus its modal save handler failure.
 - [x] Make optional password changes tenant-scoped, serialized, and safe when the password field is blank.
 - [x] Add user-update regression coverage, validate, deploy, and verify the save flow.
 - [x] Inspect user scope validation and modal prefill behavior for stale treasury and warehouse references.
 - [x] Prune inactive or deleted scope IDs on save while preserving root-admin unrestricted scope.
-- [ ] Run authenticated production user-permission saves to confirm legacy scopes are pruned in the live tenant database.
+- [x] Run authenticated production user-permission saves to confirm legacy scopes are pruned in the live tenant database.
