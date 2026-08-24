@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import type { AccountType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { num } from "@/lib/utils";
@@ -33,9 +32,9 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   const [result, options, workshops, company, treasuries] = await Promise.all([
     listAccounts({ query: searchParams.q, type, debtorsOnly, balanceFilter, includeInactive, page, pageSize: 25 }),
     getVehicleFormOptions(),
-    prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }),
-    getCompanyProfile(),
-    prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
+    tenant.prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }).catch(() => 0),
+    getCompanyProfile(tenant.prisma),
+    tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }).catch(() => []),
   ]);
 
   return (

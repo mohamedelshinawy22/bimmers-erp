@@ -43,3 +43,7 @@
 - [x] Trace the sales-invoice Excel matching crash and map normalization, tenant lookup, and batch execution paths.
 - [x] Add resilient date/number parsing, tenant-scoped customer/product matching, safe serialization, and import regression coverage.
 - [ ] Validate, deploy, and confirm the authenticated invoice matching preview works for the reported spreadsheet.
+- [ ] Trace and correct invoice preview auto-account state handling for missing customer rows.
+- [ ] Add resumable client/server invoice import chunks with bulk account preparation and visible progress.
+- [ ] Harden the accounts page loader and receipts-import preview for null-safe tenant-scoped data and serialized responses.
+- [ ] Validate, deploy, and confirm the 319-row invoice preview/import, accounts page, and voucher matching flows in production.
