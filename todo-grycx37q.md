@@ -70,3 +70,6 @@
 - [ ] Trace the voucher-import Zod rejection and manual voucher null-account failure path.
 - [ ] Add permissive import coercion and tenant-scoped manual voucher posting with null-account support.
 - [ ] Validate, deploy, and confirm the import batch and accountless manual voucher flows in production.
+- [ ] Trace the actual client voucher-batch payload against the server validation contract.
+- [ ] Sanitize voucher chunks to plain primitives and return explicit server validation diagnostics.
+- [ ] Validate, deploy, and confirm voucher execution advances beyond validation in production.

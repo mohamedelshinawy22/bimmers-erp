@@ -15,6 +15,10 @@ const VOUCHER_CHUNK_SIZE = 20;
 
 function rowKey(type: "RECEIPT" | "PAYMENT", row: ParsedVoucherRow) { return `${type}:${row.sourceRowNumber}`; }
 function kindLabel(kind: Preview["rows"][number]["kind"]) { return kind === "RECEIPT" ? "قبض" : kind === "PAYMENT" ? "صرف" : kind === "TRANSFER_IN" ? "تحويل وارد" : "تحويل صادر"; }
+function actionDate(value: unknown) { return value instanceof Date ? value.toISOString() : value == null ? null : String(value); }
+function cleanVoucherRow(row: Record<string, unknown>) {
+  return { sourceRowNumber: Number(row.sourceRowNumber ?? 0), seq: Number(row.seq ?? 1), date: actionDate(row.date), time: row.time == null ? null : String(row.time), movementType: String(row.movementType ?? ""), transactionReference: String(row.transactionReference ?? ""), externalReference: String(row.externalReference ?? ""), amount: Number(String(row.amount ?? 0).replace(/[^0-9.-]+/g, "")) || 0, itemCategory: String(row.itemCategory ?? ""), accountName: row.accountName == null ? "" : String(row.accountName), treasuryName: row.treasuryName == null ? "" : String(row.treasuryName), transferCounterpartyTreasuryName: row.transferCounterpartyTreasuryName == null ? "" : String(row.transferCounterpartyTreasuryName), paymentChannels: Array.isArray(row.paymentChannels) ? row.paymentChannels.map((channel) => ({ name: String((channel as { name?: unknown }).name ?? ""), amount: Number(String((channel as { amount?: unknown }).amount ?? 0).replace(/[^0-9.-]+/g, "")) || 0 })) : [], notes: String(row.notes ?? ""), createdByName: String(row.createdByName ?? ""), defaultType: String(row.defaultType ?? "RECEIPT") };
+}
 
 export function CombinedVoucherImportModal({ treasuries, onClose, onDone }: { treasuries: Treasury[]; onClose: () => void; onDone: () => void }) {
   const receiptRef = useRef<HTMLInputElement>(null); const paymentRef = useRef<HTMLInputElement>(null);
@@ -62,12 +66,12 @@ export function CombinedVoucherImportModal({ treasuries, onClose, onDone }: { tr
     let created = 0; let transfers = 0; let processed = 0; setProgress({ processed, total: validRows.length });
     for (let start = 0; start < validRows.length; start += VOUCHER_CHUNK_SIZE) {
       const rows = validRows.slice(start, start + VOUCHER_CHUNK_SIZE);
-      const result = await executeVoucherImportAction({ ...payload, rows, reconciledTransfers: [] });
+      const result = await executeVoucherImportAction({ ...payload, rows: rows.map(cleanVoucherRow), reconciledTransfers: [] });
       if (!result.success) { setError(result.error); setProgress(null); return; }
       created += result.data.created; transfers += result.data.transfers; processed += rows.length; setProgress({ processed, total: validRows.length });
     }
     if (payload.reconciledTransfers.length) {
-      const transfersResult = await executeVoucherImportAction({ ...payload, rows: [], reconciledTransfers: payload.reconciledTransfers });
+      const transfersResult = await executeVoucherImportAction({ ...payload, rows: [], reconciledTransfers: payload.reconciledTransfers.map((pair) => ({ ...pair, date: actionDate(pair.date), time: pair.time == null ? null : String(pair.time), amount: Number(String(pair.amount).replace(/[^0-9.-]+/g, "")) || 0 })) });
       if (!transfersResult.success) { setError(transfersResult.error); setProgress(null); return; }
       created += transfersResult.data.created; transfers += transfersResult.data.transfers;
     }
