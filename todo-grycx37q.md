@@ -85,3 +85,6 @@
 - [ ] Add regression coverage, deploy, and obtain authenticated confirmation for large Catalog loading and custom product creation.
 - [ ] Diagnose and resolve recurring production `/catalog` SSR digest `1688063370` for the 899-product tenant.
 - [ ] Capture and fix the authenticated GET `/catalog` SSR path, including top-level fallback serialization, for digest `1688063370`.
+- [ ] Inspect the Bavaria tenant schema and provisioning state behind reported digest `3437896015`.
+- [ ] Implement an idempotent tenant bootstrap compatible with the actual Branch, Treasury, Category, Brand, BMW fitment, account, and counter models.
+- [ ] Obtain confirmation before any one-time Bavaria record backfill, then verify `/catalog`, `/receipts`, and `/pos` under that tenant.
