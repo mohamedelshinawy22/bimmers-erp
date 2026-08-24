@@ -27,61 +27,68 @@ import { searchParts } from "@/server/services/parts.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
+function normalizeOptionalPartReference(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized && normalized !== "-" && normalized !== "—" ? normalized : undefined;
+}
+
+function normalizePartNumber(value: unknown, fallback = 0): number {
+  const numeric = Number(typeof value === "string" ? value.replace(/[\s,]/g, "") : value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
+// Product creation may initialise brand/category/fitment references and an opening
+// stock ledger row. It gets a bounded one-off budget without multiplying a timed
+// out request through retries that would exceed the serverless action lifetime.
+const PRODUCT_CREATE_TX_OPTIONS = { ...TX_OPTIONS, maxWait: 1_000, timeout: 8_000 } as const;
+
 
 export async function createPartAction(
   raw: CreatePartInput,
 ): Promise<ActionResult<{ id: string; oemNumber: string }>> {
   try {
     const user = await requirePermission("part.write");
-    const input = createPartSchema.parse(raw);
+    const tenant = await getTenantDbFromSession();
+    const input = createPartSchema.parse({
+      ...raw,
+      binLocationId: normalizeOptionalPartReference(raw.binLocationId),
+      buyPriceLast: normalizePartNumber(raw.buyPriceLast),
+      sellPriceRetail: normalizePartNumber(raw.sellPriceRetail),
+      sellPriceWholesale: normalizePartNumber(raw.sellPriceWholesale),
+      sellPriceMin: normalizePartNumber(raw.sellPriceMin),
+      openingQuantity: Math.trunc(normalizePartNumber(raw.openingQuantity)),
+      minReorderLevel: Math.trunc(normalizePartNumber(raw.minReorderLevel, 2)),
+    });
 
-    const part = await prisma.$transaction(async (tx) => {
-      // Resolve a selected or newly typed brand inside the transaction so concurrent submissions cannot duplicate it.
+    const masters = await tenant.run(async () => {
       let brandId = input.brandId;
       if (!brandId && input.brandName) {
         const normalizedName = input.brandName.trim().toLocaleLowerCase("ar-EG");
-        brandId = (await tx.brand.upsert({
-          where: { normalizedName },
-          update: {},
-          create: { name: input.brandName.trim(), normalizedName },
-          select: { id: true },
-        })).id;
+        brandId = (await tenant.prisma.brand.upsert({ where: { normalizedName }, update: {}, create: { name: input.brandName.trim(), normalizedName }, select: { id: true } })).id;
       }
       if (!brandId) throw new BusinessRuleError("يجب اختيار أو إضافة الماركة.");
-      const brand = await tx.brand.findUnique({ where: { id: brandId }, select: { id: true } });
+      const categoryLabel = input.categoryName?.trim() || input.category.trim() || "عام";
+      const category = input.categoryId
+        ? await tenant.prisma.category.findUnique({ where: { id: input.categoryId }, select: { id: true, name: true } })
+        : await tenant.prisma.category.upsert({ where: { normalizedName: categoryLabel.toLocaleLowerCase("ar-EG") }, update: {}, create: { name: categoryLabel, normalizedName: categoryLabel.toLocaleLowerCase("ar-EG") }, select: { id: true, name: true } });
+      if (!category) throw new BusinessRuleError("التصنيف المحدد غير موجود.");
+      const [brand, bin, chassisCount, engineCount, customChassisIds, customEngineIds] = await Promise.all([
+        tenant.prisma.brand.findUnique({ where: { id: brandId }, select: { id: true } }),
+        input.binLocationId ? tenant.prisma.warehouseBin.findUnique({ where: { id: input.binLocationId }, select: { id: true } }) : Promise.resolve(null),
+        input.chassisIds.length ? tenant.prisma.bmwChassis.count({ where: { id: { in: input.chassisIds } } }) : Promise.resolve(0),
+        input.engineIds.length ? tenant.prisma.bmwEngine.count({ where: { id: { in: input.engineIds } } }) : Promise.resolve(0),
+        Promise.all([...new Set(input.chassisCodes)].map(async (code) => (await tenant.prisma.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id)),
+        Promise.all([...new Set(input.engineCodes)].map(async (code) => (await tenant.prisma.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id)),
+      ]);
       if (!brand) throw new BusinessRuleError("الماركة المحددة غير موجودة.");
+      if (input.binLocationId && !bin) throw new BusinessRuleError("موقع التخزين المحدد غير موجود.");
+      if (input.chassisIds.length && chassisCount !== input.chassisIds.length) throw new BusinessRuleError("أحد أكواد الشاسيه غير صالح.");
+      if (input.engineIds.length && engineCount !== input.engineIds.length) throw new BusinessRuleError("أحد أكواد المحرك غير صالح.");
+      return { brandId, category, allChassisIds: [...new Set([...input.chassisIds, ...customChassisIds])], allEngineIds: [...new Set([...input.engineIds, ...customEngineIds])] };
+    });
 
-      let categoryId = input.categoryId;
-      if (!categoryId && input.categoryName) {
-        const normalizedName = input.categoryName.trim().toLocaleLowerCase("ar-EG");
-        categoryId = (await tx.category.upsert({
-          where: { normalizedName },
-          update: {},
-          create: { name: input.categoryName.trim(), normalizedName },
-          select: { id: true },
-        })).id;
-      }
-
-      if (input.binLocationId) {
-        const bin = await tx.warehouseBin.findUnique({
-          where: { id: input.binLocationId },
-          select: { id: true },
-        });
-        if (!bin) throw new BusinessRuleError("موقع التخزين المحدد غير موجود.");
-      }
-      if (input.chassisIds.length) {
-        const count = await tx.bmwChassis.count({ where: { id: { in: input.chassisIds } } });
-        if (count !== input.chassisIds.length) throw new BusinessRuleError("أحد أكواد الشاسيه غير صالح.");
-      }
-      if (input.engineIds.length) {
-        const count = await tx.bmwEngine.count({ where: { id: { in: input.engineIds } } });
-        if (count !== input.engineIds.length) throw new BusinessRuleError("أحد أكواد المحرك غير صالح.");
-      }
-
-      const customChassisIds = await Promise.all(input.chassisCodes.map(async (code) => (await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id));
-      const customEngineIds = await Promise.all(input.engineCodes.map(async (code) => (await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id));
-      const allChassisIds = [...new Set([...input.chassisIds, ...customChassisIds])];
-      const allEngineIds = [...new Set([...input.engineIds, ...customEngineIds])];
+    const part = await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
       const buyPrice = money(input.buyPriceLast);
       const created = await tx.partItem.create({
         data: {
@@ -90,15 +97,15 @@ export async function createPartAction(
           partNumberFormatted: formatOemNumber(input.oemNumber),
           nameAr: input.nameAr,
           nameEn: input.nameEn || null,
-          brandId,
+          brandId: masters.brandId,
           brandPartNumber: input.brandPartNumber || null,
           barcode: input.barcode || null,
-          category: input.categoryName || input.category,
-          categoryId,
+          category: masters.category.name,
+          categoryId: masters.category.id,
           imageKey: input.imageKey || null,
           imageUrl: input.imageUrl || null,
           sidePosition: input.sidePosition || null,
-          binLocationId: input.binLocationId,
+          binLocationId: input.binLocationId ?? null,
           buyPriceLast: buyPrice,
           // Opening stock establishes the initial average cost.
           buyPriceAvg: input.openingQuantity > 0 ? buyPrice : money(0),
@@ -109,10 +116,10 @@ export async function createPartAction(
           minReorderLevel: input.minReorderLevel,
           isActive: input.isActive,
           compatibleChassis: {
-            createMany: { data: allChassisIds.map((chassisId) => ({ chassisId })) },
+            createMany: { data: masters.allChassisIds.map((chassisId) => ({ chassisId })) },
           },
           compatibleEngines: {
-            createMany: { data: allEngineIds.map((engineId) => ({ engineId })) },
+            createMany: { data: masters.allEngineIds.map((engineId) => ({ engineId })) },
           },
         },
       });
@@ -138,7 +145,7 @@ export async function createPartAction(
       });
 
       return created;
-    }, TX_OPTIONS);
+    }, PRODUCT_CREATE_TX_OPTIONS));
 
     revalidatePath("/inventory");
     revalidatePath("/pos");

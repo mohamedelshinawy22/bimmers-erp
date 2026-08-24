@@ -13,9 +13,11 @@ describe("Catalog resilience boundaries", () => {
     expect(service).toContain("export async function getPartFormOptions(db: PartsDb)");
     expect(service).toContain("c.chassis?.code?.trim()");
     expect(service).toContain("e.engine?.code?.trim()");
+    expect(service).toContain('const nameAr = p.nameAr?.trim() || "صنف بدون اسم"');
     expect(page).toContain("searchParts(tenant.prisma");
     expect(page).toContain("getPartFormOptions(tenant.prisma)");
     expect(page).toContain("getPartCategories(tenant.prisma)");
+    expect(page).toContain("Unable to load tenant-scoped Catalog");
   });
 
   it("coerces sparse spreadsheet cells, links the normalized category, and only assigns an existing bin", () => {
@@ -37,5 +39,16 @@ describe("Catalog resilience boundaries", () => {
     expect(matrix).toContain("chassis.filter((item) => !chassisInput");
     expect(matrix).toContain("engines.filter((item) => !engineInput");
     expect(matrix).toContain("slice(0, 40)");
+  });
+
+  it("creates manual products through the active tenant while resolving master records before the short atomic write", () => {
+    const actions = source("src/server/actions/parts.actions.ts");
+    expect(actions).toContain("const tenant = await getTenantDbFromSession()");
+    expect(actions).toContain("const PRODUCT_CREATE_TX_OPTIONS");
+    expect(actions).toContain("const masters = await tenant.run(async () =>");
+    expect(actions).toContain("tenant.prisma.brand.upsert");
+    expect(actions).toContain("tenant.prisma.category.upsert");
+    expect(actions).toContain("binLocationId: input.binLocationId ?? null");
+    expect(actions).toContain("tenant.prisma.$transaction");
   });
 });

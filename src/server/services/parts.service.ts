@@ -80,18 +80,20 @@ async function getDuplicateMetadata(db: PartsDb, parts: Array<{ oemNumber: strin
 
 function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts: new Map(), nameCounts: new Map(), brandsByOem: new Map() }): PartRow {
   const brandName = p.brand?.name?.trim() || "بدون علامة تجارية";
+  const oemNumber = p.oemNumber?.trim() || p.id;
+  const nameAr = p.nameAr?.trim() || "صنف بدون اسم";
   return {
     id: p.id,
-    oemNumber: p.oemNumber,
+    oemNumber,
     partNumberFormatted: p.partNumberFormatted,
-    nameAr: p.nameAr,
+    nameAr,
     nameEn: p.nameEn,
     brandId: p.brandId,
     brandName,
     isOem: Boolean(p.brand?.isOem),
     brandPartNumber: p.brandPartNumber,
     barcode: p.barcode,
-    category: p.category,
+    category: p.category?.trim() || "عام",
     sidePosition: p.sidePosition,
     binLocationId: p.binLocationId,
     binCode: p.binLocation?.fullCode ?? null,
@@ -99,17 +101,17 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
     sellPriceRetail: num(p.sellPriceRetail),
     sellPriceWholesale: num(p.sellPriceWholesale),
     sellPriceMin: num(p.sellPriceMin),
-    stockQuantity: p.stockQuantity,
-    stockReserved: p.stockReserved,
-    minReorderLevel: p.minReorderLevel,
-    isActive: p.isActive,
+    stockQuantity: Number(p.stockQuantity ?? 0),
+    stockReserved: Number(p.stockReserved ?? 0),
+    minReorderLevel: Number(p.minReorderLevel ?? 0),
+    isActive: p.isActive ?? true,
     chassisIds: (p.compatibleChassis ?? []).map((c) => c.chassisId).filter(Boolean),
     engineIds: (p.compatibleEngines ?? []).map((e) => e.engineId).filter(Boolean),
     chassisCodes: (p.compatibleChassis ?? []).map((c) => c.chassis?.code?.trim()).filter((code): code is string => Boolean(code)),
     engineCodes: (p.compatibleEngines ?? []).map((e) => e.engine?.code?.trim()).filter((code): code is string => Boolean(code)),
-    duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0,
-    duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0,
-    duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [brandName],
+    duplicateOemCount: duplicates.oemCounts.get(oemNumber) ?? 0,
+    duplicateNameCount: duplicates.nameCounts.get(nameAr) ?? 0,
+    duplicateBrands: duplicates.brandsByOem.get(oemNumber) ?? [brandName],
   };
 }
 

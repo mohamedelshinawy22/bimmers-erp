@@ -80,3 +80,6 @@
 - [x] Harden Catalog SSR and product Excel normalization for sparse imported data.
 - [x] Build BMW chassis and engine fitment autocomplete with quick preset tags in the product form.
 - [ ] Validate, deploy, and confirm accountless vouchers and imported catalog rows work in production.
+- [x] Trace and fix the `/catalog` SSR crash with large imported datasets and sparse product relations.
+- [x] Fix tenant-scoped manual product creation with resilient brand, category, price, and optional bin handling.
+- [ ] Add regression coverage, deploy, and obtain authenticated confirmation for large Catalog loading and custom product creation.

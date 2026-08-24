@@ -30,6 +30,8 @@ export default async function InventoryPage({ searchParams }: PageProps) {
   const access = await getUserAccess(user.id);
   if (!hasApplicationPermission(access, "part.read")) redirect("/");
 
+  try {
+
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
   const query = searchParams.q ?? "";
   const chassisCode = searchParams.chassis ?? "";
@@ -92,5 +94,9 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       company={company}
     />
   );
+  } catch (error) {
+    console.error("Unable to load tenant-scoped Catalog", { tenantId: user.tenantId, error });
+    return <main className="space-y-3" dir="rtl"><div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100"><strong>تعذر تحميل كتالوج البضاعة مؤقتاً.</strong><p className="mt-1 text-amber-100/80">أعد المحاولة بعد لحظات. لم يتم تعديل أي بيانات.</p></div></main>;
+  }
   });
 }
