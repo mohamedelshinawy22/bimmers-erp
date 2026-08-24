@@ -39,10 +39,15 @@ export function VoucherDetailsModal({ voucherId, onClose, onChanged }: { voucher
 
   const load = async () => {
     setError(null);
-    const result = await getVoucherDetailsAction({ voucherId });
-    if (!result.success) { setError(result.error); return; }
-    const next = result.data as VoucherDetails;
-    setData(next); setAmount(String(next.voucher.amount)); setTreasuryId(next.voucher.treasury.id); setDescription(next.voucher.description); setPaymentMethod(next.voucher.paymentMethod || "CASH"); setCreatedAt(new Date(next.voucher.createdAt).toISOString().slice(0, 16));
+    try {
+      const result = await getVoucherDetailsAction({ voucherId });
+      if (!result?.success) { setError(result?.error ?? "تعذر تحميل السند حالياً."); return; }
+      const next = result.data as VoucherDetails;
+      const timestamp = new Date(next.voucher.createdAt);
+      setData(next); setAmount(String(next.voucher.amount)); setTreasuryId(next.voucher.treasury.id); setDescription(next.voucher.description); setPaymentMethod(next.voucher.paymentMethod || "CASH"); setCreatedAt(Number.isNaN(timestamp.getTime()) ? "" : timestamp.toISOString().slice(0, 16));
+    } catch {
+      setError("تعذر تحميل السند حالياً. أعد المحاولة.");
+    }
   };
 
   useEffect(() => { void load(); }, [voucherId]);
@@ -50,21 +55,27 @@ export function VoucherDetailsModal({ voucherId, onClose, onChanged }: { voucher
   const resolvedVoucherId = data?.voucher.id ?? voucherId;
   const save = () => startTransition(async () => {
     setError(null);
-    const result = await updateVoucherAction({ voucherId: resolvedVoucherId, amount: Number(amount), treasuryId, description, paymentMethod, createdAt: createdAt ? new Date(createdAt).toISOString() : undefined });
-    if (!result.success) { setError(result.error); return; }
-    closeAfterChange();
+    try {
+      const result = await updateVoucherAction({ voucherId: resolvedVoucherId, amount: Number(amount), treasuryId, description, paymentMethod, createdAt: createdAt ? new Date(createdAt).toISOString() : undefined });
+      if (!result?.success) { setError(result?.error ?? "تعذر حفظ تعديلات السند."); return; }
+      closeAfterChange();
+    } catch { setError("تعذر حفظ تعديلات السند. أعد المحاولة."); }
   });
   const voidVoucher = () => startTransition(async () => {
     setError(null);
-    const result = await voidVoucherAction({ voucherId: resolvedVoucherId, reason: voidReason });
-    if (!result.success) { setError(result.error); return; }
-    closeAfterChange();
+    try {
+      const result = await voidVoucherAction({ voucherId: resolvedVoucherId, reason: voidReason });
+      if (!result?.success) { setError(result?.error ?? "تعذر إلغاء السند."); return; }
+      closeAfterChange();
+    } catch { setError("تعذر إلغاء السند. أعد المحاولة."); }
   });
   const restoreVoucher = () => startTransition(async () => {
     setError(null);
-    const result = await restoreCancelledVoucherAction({ voucherId: resolvedVoucherId, reason: restoreReason });
-    if (!result.success) { setError(result.error); return; }
-    closeAfterChange();
+    try {
+      const result = await restoreCancelledVoucherAction({ voucherId: resolvedVoucherId, reason: restoreReason });
+      if (!result?.success) { setError(result?.error ?? "تعذر استعادة السند."); return; }
+      closeAfterChange();
+    } catch { setError("تعذر استعادة السند. أعد المحاولة."); }
   });
   const print = (format: "THERMAL" | "A4") => {
     if (!data) return;

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ThermalBarcodeSettingsPage() {
   try { await requirePermission("barcode.manage"); }
-  catch { redirect("/settings"); }
+  catch { return <main className="p-6 text-sm text-bmw-mRed">ليس لديك صلاحية للوصول إلى إعدادات طباعة الباركود.</main>; }
   const tenant = await getTenantDbFromSession();
   let company: Awaited<ReturnType<typeof getCompanyProfile>>;
   try {

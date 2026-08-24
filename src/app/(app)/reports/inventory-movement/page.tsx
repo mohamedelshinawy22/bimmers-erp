@@ -9,7 +9,7 @@ export default async function InventoryMovementReportPage() {
   try {
     await requirePermission("reports.dailyMovement");
   } catch {
-    redirect("/");
+    return <main className="p-6 text-sm text-bmw-mRed">ليس لديك صلاحية لعرض تقرير حركة البضاعة والرواكد.</main>;
   }
   return <InventoryMovementReportClient />;
 }

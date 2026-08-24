@@ -1,17 +1,29 @@
 const baseUrl = (process.env.ERP_SMOKE_BASE_URL || "https://bimmers-erp.vercel.app").replace(/\/$/, "");
+const baseUrl = (process.env.ERP_SMOKE_BASE_URL || "https://bimmers-erp.vercel.app").replace(/\/$/, "");
 const cookie = process.env.ERP_SMOKE_COOKIE;
 const routes = [
   "/",
   "/pos",
+  "/catalog",
   "/inventory",
   "/invoices",
+  "/returns",
   "/sales/returns",
   "/purchases/returns",
+  "/accounts",
+  "/cash",
+  "/treasury",
+  "/receipts",
+  "/vouchers",
+  "/reports",
   "/reports/daily-movement",
+  "/dead-stock",
   "/reports/inventory-movement",
+  "/audit-log",
   "/audit",
   "/users",
   "/settings",
+  "/barcode",
   "/settings/barcode",
   "/settings/barcode-designer",
 ];
@@ -28,8 +40,9 @@ for (const route of routes) {
     redirect: "manual",
   });
   const body = await response.text();
-  const passed = response.status === 200 && !/لم يتم تأسيس سياق مستأجر|Application error: a server-side exception/i.test(body);
-  results.push({ route, status: response.status, passed });
+  const redirectedHome = response.status >= 300 && response.status < 400 && response.headers.get("location") === "/";
+  const passed = response.status === 200 && !redirectedHome && !/لم يتم تأسيس سياق مستأجر|Application error: a server-side exception/i.test(body);
+  results.push({ route, status: response.status, redirectedHome, passed });
 }
 
 console.table(results);

@@ -805,11 +805,16 @@ function StatementModal({ account, company, onClose }: { account: AccountRow; co
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    void getAccountDetailedLedgerAction(account.id, { from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, movementTypes: movementType === "ALL" ? undefined : [movementType], query: query || undefined, mode }).then((result) => {
-      if (cancelled) return;
-      if (result.success) setData(result.data as DetailedLedgerData);
-      else setError(result.error);
-    });
+    void (async () => {
+      try {
+        const result = await getAccountDetailedLedgerAction(account.id, { from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, movementTypes: movementType === "ALL" ? undefined : [movementType], query: query || undefined, mode });
+        if (cancelled) return;
+        if (result?.success) setData(result.data as DetailedLedgerData);
+        else setError(result?.error ?? "تعذر تحميل كشف الحساب حالياً.");
+      } catch {
+        if (!cancelled) setError("تعذر تحميل كشف الحساب حالياً. أعد المحاولة.");
+      }
+    })();
     return () => { cancelled = true; };
   }, [account.id, from, to, movementType, query, mode, ledgerRevision]);
 

@@ -20,3 +20,7 @@
 - [x] Add a reusable safe serializer and apply it to voucher and account-statement modal action results with null-safe relation mapping.
 - [x] Correct leading-plus date rendering and verify spreadsheet and print action payload safety.
 - [x] Add serializer/date regression tests, typecheck, build, deploy, and verify production boundaries.
+- [ ] Trace sidebar hrefs, middleware/layout redirects, Daily Movement action failures, and the affected modal response call sites.
+- [ ] Correct inventory-movement and barcode navigation paths and route guards without weakening tenant security.
+- [ ] Harden Daily Movement defaults and client result handling for reports, voucher details, and account statements.
+- [ ] Add sidebar route-boundary and action-result regression checks, then typecheck, build, deploy, and verify production boundaries.
