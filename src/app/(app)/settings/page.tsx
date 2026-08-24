@@ -21,9 +21,9 @@ export default async function SettingsPage() {
 
   const canManageUsers = can(user.role, "user.manage");
   const [groups, users, companyProfile] = await Promise.all([
-    getSettingsGrouped(),
-    canManageUsers ? listUsers() : Promise.resolve(null),
-    getCompanyProfile(),
+    getSettingsGrouped(tenant.prisma),
+    canManageUsers ? listUsers(tenant.prisma) : Promise.resolve(null),
+    getCompanyProfile(tenant.prisma),
   ]);
   const tenantQuota = canManageUsers && users
     ? {

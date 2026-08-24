@@ -1,14 +1,16 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 
+type SettingsDb = Pick<typeof prisma, "systemSetting">;
+
 /**
  * Operator-editable configuration. Cached per request via React `cache` is not
  * used here on purpose: settings are read inside transactions where a stale
  * value could change business behaviour mid-flight.
  */
-export async function getSetting(key: string, fallback: string): Promise<string> {
+export async function getSetting(key: string, fallback: string, db: SettingsDb = prisma): Promise<string> {
   try {
-    const row = await prisma.systemSetting.findUnique({ where: { key }, select: { value: true } });
+    const row = await db.systemSetting.findUnique({ where: { key }, select: { value: true } });
     return row?.value ?? fallback;
   } catch {
     // Settings table unreachable → fail safe on the conservative default.
@@ -16,15 +18,15 @@ export async function getSetting(key: string, fallback: string): Promise<string>
   }
 }
 
-export async function getSettings(): Promise<Record<string, string>> {
-  const rows = await prisma.systemSetting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
+export async function getSettings(db: SettingsDb = prisma): Promise<Record<string, string>> {
+  const rows = await db.systemSetting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-export async function getSettingsGrouped(): Promise<
+export async function getSettingsGrouped(db: SettingsDb = prisma): Promise<
   Array<{ group: string; items: Array<{ key: string; label: string; value: string }> }>
 > {
-  const rows = await prisma.systemSetting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
+  const rows = await db.systemSetting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
   const map = new Map<string, Array<{ key: string; label: string; value: string }>>();
   for (const r of rows) {
     const bucket = map.get(r.group) ?? [];
@@ -47,8 +49,8 @@ const FALLBACK_CATEGORIES = [
   "التكييف",
 ];
 
-export async function getPartCategories(): Promise<string[]> {
-  const raw = await getSetting("PART_CATEGORIES", "");
+export async function getPartCategories(db: SettingsDb = prisma): Promise<string[]> {
+  const raw = await getSetting("PART_CATEGORIES", "", db);
   if (!raw) return FALLBACK_CATEGORIES;
   try {
     const parsed = JSON.parse(raw);
@@ -78,8 +80,8 @@ export interface CompanyProfile {
  * the phone or tax number, see "saved successfully", and have nothing change.
  * They are now rendered on the invoice/receipt header and footer.
  */
-export async function getCompanyProfile(): Promise<CompanyProfile> {
-  const rows = await prisma.systemSetting.findMany({
+export async function getCompanyProfile(db: SettingsDb = prisma): Promise<CompanyProfile> {
+  const rows = await db.systemSetting.findMany({
     where: {
       key: { in: ["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"] },
     },

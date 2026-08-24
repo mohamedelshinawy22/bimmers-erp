@@ -36,4 +36,7 @@
 - [x] Run authenticated production user-permission saves to confirm legacy scopes are pruned in the live tenant database.
 - [x] Trace and validate the ERP active-user count sent or exposed for Master Hub synchronization.
 - [x] Implement and test authoritative tenant active-user count synchronization without exposing tenant credentials.
-- [ ] Run ERP validation, deployment, and live count verification with the Master Hub.
+- [x] Run ERP validation, deployment, and live count verification with the Master Hub.
+- [x] Trace the fresh-tenant system-settings save failure and tenant-scoped mutation path.
+- [x] Initialize missing system settings safely on first save and protect audit/serialization results with regression coverage.
+- [ ] Validate, deploy, and confirm a successful Bavaria AN settings save in production.
