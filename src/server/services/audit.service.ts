@@ -114,8 +114,8 @@ export interface ManagedUser {
   invoiceCount: number;
 }
 
-export async function listUsers(): Promise<ManagedUser[]> {
-  const users = await prisma.user.findMany({
+export async function listUsers(db: Pick<typeof prisma, "user"> = prisma): Promise<ManagedUser[]> {
+  const users = await db.user.findMany({
     orderBy: [{ isActive: "desc" }, { username: "asc" }],
     select: {
       id: true, username: true, fullName: true, role: true, isActive: true, allowedWarehouseIds: true, allowedTreasuryIds: true, transferToTreasuryId: true, lastLoginAt: true, createdAt: true,

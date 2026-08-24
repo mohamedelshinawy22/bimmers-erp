@@ -7,6 +7,7 @@ import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getInvoiceDetail, listInvoices, type InvoiceDetail } from "@/server/services/invoices.service";
 import { getStockLedger } from "@/server/services/parts.service";
 import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
@@ -72,9 +73,12 @@ export async function getStockLedgerAction(partId: string) {
 export async function getAccountDetailedLedgerAction(accountId: string, filters?: { from?: string; to?: string; movementTypes?: string[]; query?: string; mode?: "SUMMARY" | "DETAILED" }) {
   try {
     await requirePermission("account.viewStatement");
-    const ledger = await getAccountDetailedLedger(accountId, filters);
-    if (!ledger) return { success: false as const, error: "الحساب غير موجود." };
-    return ok(ledger);
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+      const ledger = await getAccountDetailedLedger(accountId, filters);
+      if (!ledger) return { success: false as const, error: "الحساب غير موجود." };
+      return ok(ledger);
+    });
   } catch (error) {
     return toActionError(error, "getAccountDetailedLedgerAction");
   }
@@ -83,7 +87,9 @@ export async function getAccountDetailedLedgerAction(accountId: string, filters?
 export async function getAccountPdcInstallmentsAction(accountId: string) {
   try {
     await requirePermission("account.viewStatement");
-    const account = await prisma.account.findUnique({
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+    const account = await tenant.prisma.account.findUnique({
       where: { id: accountId },
       select: {
         id: true,
@@ -92,7 +98,8 @@ export async function getAccountPdcInstallmentsAction(accountId: string) {
       },
     });
     if (!account) return { success: false as const, error: "الحساب غير موجود." };
-    return ok({ checks: account.checks.map((check) => ({ ...check, amount: Number(check.amount), issueDate: check.issueDate?.toISOString() ?? null, dueDate: check.dueDate.toISOString() })), installmentPlans: account.installmentPlans.map((plan) => ({ ...plan, totalAmount: Number(plan.totalAmount), startDate: plan.startDate.toISOString(), installments: plan.installments.map((installment) => ({ ...installment, amount: Number(installment.amount), paidAmount: Number(installment.paidAmount), dueDate: installment.dueDate.toISOString() })) })) });
+    return ok({ checks: account.checks.map((check) => ({ ...check, amount: Number(check.amount), issueDate: check.issueDate?.toISOString() ?? null, dueDate: check.dueDate?.toISOString() ?? null })), installmentPlans: account.installmentPlans.map((plan) => ({ ...plan, totalAmount: Number(plan.totalAmount), startDate: plan.startDate?.toISOString() ?? null, installments: plan.installments.map((installment) => ({ ...installment, amount: Number(installment.amount), paidAmount: Number(installment.paidAmount), dueDate: installment.dueDate?.toISOString() ?? null })) })) });
+    });
   } catch (error) {
     return toActionError(error, "getAccountPdcInstallmentsAction");
   }
@@ -101,9 +108,12 @@ export async function getAccountPdcInstallmentsAction(accountId: string) {
 export async function getAccountStatementAction(accountId: string) {
   try {
     await requirePermission("account.viewStatement");
-    const statement = await getAccountStatement(accountId);
-    if (!statement) return { success: false as const, error: "الحساب غير موجود." };
-    return ok(statement);
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+      const statement = await getAccountStatement(accountId);
+      if (!statement) return { success: false as const, error: "الحساب غير موجود." };
+      return ok(statement);
+    });
   } catch (error) {
     return toActionError(error, "getAccountStatementAction");
   }
@@ -112,9 +122,11 @@ export async function getAccountStatementAction(accountId: string) {
 export async function searchReturnSourceInvoicesAction(type: "SALE" | "PURCHASE", query = "") {
   try {
     await requirePermission("invoice.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const term = query.trim();
     const variations = term ? normalizeSearchTerm(term).variations : [];
-    const invoices = await prisma.invoice.findMany({
+    const invoices = await tenant.prisma.invoice.findMany({
       where: {
         type,
         isVoided: false,
@@ -146,6 +158,7 @@ export async function searchReturnSourceInvoicesAction(type: "SALE" | "PURCHASE"
       remainingAmount: Number(invoice.remainingAmount),
       createdAt: invoice.createdAt.toISOString(),
     })));
+    });
   } catch (error) {
     return toActionError(error, "searchReturnSourceInvoicesAction");
   }
@@ -154,7 +167,9 @@ export async function searchReturnSourceInvoicesAction(type: "SALE" | "PURCHASE"
 export async function getReturnSourceInvoiceAction(invoiceId: string) {
   try {
     await requirePermission("invoice.read");
-    const invoice = await prisma.invoice.findUnique({
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+    const invoice = await tenant.prisma.invoice.findUnique({
       where: { id: invoiceId },
       select: {
         id: true,
@@ -199,7 +214,9 @@ export async function getReturnSourceInvoiceAction(invoiceId: string) {
       discountAmount: Number(invoice.discountAmount),
       taxAmount: Number(invoice.taxAmount),
       createdAt: invoice.createdAt.toISOString(),
-      account: { ...invoice.account, currentBalance: Number(invoice.account.currentBalance) },
+      account: invoice.account
+        ? { ...invoice.account, currentBalance: Number(invoice.account.currentBalance) }
+        : { id: "", name: "حساب غير متاح", phone: null, accountNumber: "-", currentBalance: 0 },
       items: invoice.items.map((item) => ({
         id: item.id,
         partId: item.partId,
@@ -212,6 +229,7 @@ export async function getReturnSourceInvoiceAction(invoiceId: string) {
         previouslyReturnedQuantity: item.partId ? returnedByPart.get(item.partId) ?? 0 : item.quantity,
         availableQuantity: item.partId ? Math.max(0, item.quantity - (returnedByPart.get(item.partId) ?? 0)) : 0,
       })),
+    });
     });
   } catch (error) {
     return toActionError(error, "getReturnSourceInvoiceAction");

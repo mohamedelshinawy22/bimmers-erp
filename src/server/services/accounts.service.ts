@@ -427,8 +427,8 @@ export async function getAccountStatement(accountId: string, limit = 60) {
       type: t.type,
       amount: num(t.amount),
       description: t.description,
-      treasuryName: t.treasury.name,
-      createdAt: t.createdAt.toISOString(),
+      treasuryName: t.treasury?.name ?? "خزينة غير متاحة",
+      createdAt: t.createdAt?.toISOString() ?? new Date(0).toISOString(),
     })),
   };
 }

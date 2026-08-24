@@ -8,7 +8,8 @@ import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission, requireUser } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
 import { money, num } from "@/lib/utils";
-import { prisma, type TxClient } from "@/lib/prisma";
+import { type TxClient } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { assertTreasuryAccess, getUserAccess, hasApplicationPermission } from "@/lib/user-permissions";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
@@ -71,27 +72,32 @@ function revalidateVoucherConsumers() {
 export async function getVoucherDetailsAction(raw: unknown): Promise<ActionResult<{ voucher: { id: string; transactionNumber: string; type: "RECEIPT" | "PAYMENT"; amount: number; description: string; paymentMethod: string | null; createdAt: string; status: string; voidedAt: string | null; voidedByUser: string | null; voidReason: string | null; account: { id: string; name: string; accountNumber: string } | null; treasury: { id: string; name: string; currentBalance: number }; invoiceNumber: string | null; createdByName: string | null }; treasuries: Array<{ id: string; name: string; currentBalance: number }>; canManage: boolean; canRestore: boolean; timeline: Array<{ id: string; action: string; event: string | null; performedBy: string; timestamp: string }> }>> {
   try {
     const user = await requirePermission("treasury.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const identifier = extractVoucherIdentifier(voucherLookupSchema.parse(raw));
     const access = await getUserAccess(user.id);
-    const voucher = await prisma.treasuryTransaction.findFirst({ where: { OR: [{ id: identifier }, { transactionNumber: identifier }] }, include: { account: { select: { id: true, name: true, accountNumber: true } }, treasury: { select: { id: true, name: true, currentBalance: true } }, invoice: { select: { invoiceNumber: true } } } });
+    const voucher = await tenant.prisma.treasuryTransaction.findFirst({ where: { OR: [{ id: identifier }, { transactionNumber: identifier }] }, include: { account: { select: { id: true, name: true, accountNumber: true } }, treasury: { select: { id: true, name: true, currentBalance: true } }, invoice: { select: { invoiceNumber: true } } } });
     if (!voucher || voucher.type === "TRANSFER") throw new BusinessRuleError("سند القبض أو الصرف غير موجود.");
     assertTreasuryAccess(access, voucher.treasuryId);
     const [createdBy, treasuries, auditTrail] = await Promise.all([
-      prisma.user.findUnique({ where: { id: voucher.createdByUser }, select: { fullName: true } }),
-      prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
-      prisma.systemAuditTrail.findMany({ where: { tableName: "TreasuryTransaction", recordId: voucher.id }, orderBy: { timestamp: "desc" }, take: 25, select: { id: true, action: true, newData: true, performedBy: true, timestamp: true } }),
+      tenant.prisma.user.findUnique({ where: { id: voucher.createdByUser }, select: { fullName: true } }),
+      tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }),
+      tenant.prisma.systemAuditTrail.findMany({ where: { tableName: "TreasuryTransaction", recordId: voucher.id }, orderBy: { timestamp: "desc" }, take: 25, select: { id: true, action: true, newData: true, performedBy: true, timestamp: true } }),
     ]);
     return ok({ voucher: { id: voucher.id, transactionNumber: voucher.transactionNumber, type: voucher.type as "RECEIPT" | "PAYMENT", amount: num(voucher.amount), description: voucher.description, paymentMethod: voucher.category, createdAt: voucher.createdAt.toISOString(), status: voucher.status, voidedAt: voucher.voidedAt?.toISOString() ?? null, voidedByUser: voucher.voidedByUser, voidReason: voucher.voidReason, account: voucher.account, treasury: { id: voucher.treasury.id, name: voucher.treasury.name, currentBalance: num(voucher.treasury.currentBalance) }, invoiceNumber: voucher.invoice?.invoiceNumber ?? null, createdByName: createdBy?.fullName ?? null }, treasuries: treasuries.filter((treasury) => access.role === "SUPER_ADMIN" || access.allowedTreasuryIds.length === 0 || access.allowedTreasuryIds.includes(treasury.id)).map((treasury) => ({ id: treasury.id, name: treasury.name, currentBalance: num(treasury.currentBalance) })), canManage: hasApplicationPermission(access, "treasury.manage"), canRestore: user.role === "SUPER_ADMIN", timeline: auditTrail.map((entry) => ({ id: entry.id, action: entry.action, event: entry.newData && typeof entry.newData === "object" && !Array.isArray(entry.newData) && "event" in entry.newData ? String((entry.newData as Record<string, unknown>).event ?? "") || null : null, performedBy: entry.performedBy, timestamp: entry.timestamp.toISOString() })) });
+    });
   } catch (error) { return toActionError(error, "getVoucherDetailsAction"); }
 }
 
 export async function updateVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {
   try {
     const user = await requirePermission("treasury.manage");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = updateVoucherSchema.parse(raw);
     const access = await getUserAccess(user.id);
     assertTreasuryAccess(access, input.treasuryId);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const voucher = await lockVoucher(tx, input.voucherId);
       assertTreasuryAccess(access, voucher.treasuryId);
       if (voucher.status !== "ACTIVE") throw new BusinessRuleError("لا يمكن تعديل سند ملغى.");
@@ -122,15 +128,18 @@ export async function updateVoucherAction(raw: unknown): Promise<ActionResult<{ 
     }, TX_OPTIONS));
     revalidateVoucherConsumers();
     return ok(result);
+    });
   } catch (error) { return toActionError(error, "updateVoucherAction"); }
 }
 
 export async function restoreCancelledVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {
   try {
     const user = await requireUser();
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية استعادة السندات الملغاة متاحة لمدير النظام فقط.");
     const input = restoreVoucherSchema.parse(raw);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const voucher = await lockVoucher(tx, input.voucherId);
       if (voucher.status !== "VOIDED") throw new BusinessRuleError("هذا السند نشط بالفعل ولا يحتاج إلى استعادة.");
       if (voucher.type === "TRANSFER") throw new BusinessRuleError("لا يمكن استعادة تحويل خزينة من شاشة السندات.");
@@ -151,15 +160,18 @@ export async function restoreCancelledVoucherAction(raw: unknown): Promise<Actio
     }, TX_OPTIONS));
     revalidateVoucherConsumers();
     return ok(result);
+    });
   } catch (error) { return toActionError(error, "restoreCancelledVoucherAction"); }
 }
 
 export async function voidVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {
   try {
     const user = await requirePermission("treasury.manage");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = voidVoucherSchema.parse(raw);
     const access = await getUserAccess(user.id);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const voucher = await lockVoucher(tx, input.voucherId);
       assertTreasuryAccess(access, voucher.treasuryId);
       if (voucher.status !== "ACTIVE") throw new BusinessRuleError("هذا السند ملغى بالفعل.");
@@ -181,5 +193,6 @@ export async function voidVoucherAction(raw: unknown): Promise<ActionResult<{ id
     }, TX_OPTIONS));
     revalidateVoucherConsumers();
     return ok(result);
+    });
   } catch (error) { return toActionError(error, "voidVoucherAction"); }
 }

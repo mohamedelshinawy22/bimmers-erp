@@ -12,3 +12,7 @@
 - [x] Extend Thermal Barcode Studio with tenant-catalog instant search by chassis, OEM/part number, and name, plus safe print preview defaults.
 - [x] Add and run targeted SSR, spreadsheet export, and barcode payload regression coverage.
 - [x] Run production validation, deploy the renewed ERP release, and verify live health boundaries.
+- [ ] Trace the `/users` production digest and inventory all interactive server actions and API endpoints that can lose tenant context.
+- [ ] Bind account statement generation and voucher detail, mutation, cancellation, and treasury-update actions to explicit tenant context with safe relation mapping.
+- [ ] Harden `/users` serialization and permissions data against missing relations and sensitive-field leakage.
+- [ ] Add regression coverage for interactive action error results, then typecheck, build, deploy, and verify production boundaries.

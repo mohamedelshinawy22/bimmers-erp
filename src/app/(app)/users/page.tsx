@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import { requirePermission, requireUser } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { listUsers } from "@/server/services/audit.service";
@@ -10,9 +9,9 @@ export default async function UsersPage() {
   const currentUser = tenant.user;
   return tenant.run(async () => {
   const [users, treasuries, bins] = await Promise.all([
-    listUsers(),
-    prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true } }),
-    prisma.warehouseBin.findMany({ distinct: ["warehouseName"], orderBy: { warehouseName: "asc" }, select: { warehouseName: true } }),
+    listUsers(tenant.prisma),
+    tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true } }),
+    tenant.prisma.warehouseBin.findMany({ distinct: ["warehouseName"], orderBy: { warehouseName: "asc" }, select: { warehouseName: true } }),
   ]);
   return <UsersManagementClient users={users} currentUserId={currentUser.id} treasuries={treasuries} warehouses={bins.map((bin) => bin.warehouseName)} />;
   });

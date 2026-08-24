@@ -9,6 +9,7 @@ import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission, requireUser } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { formatDateTime } from "@/lib/utils";
 import { getVoucherRegister, normalizeVoucherFilters } from "@/server/services/vouchers.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
@@ -30,6 +31,8 @@ function revalidateVoucherRegister() {
 export async function exportVouchersAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string; count: number }>> {
   try {
     await requirePermission("treasury.read");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     const input = filtersSchema.parse(raw);
     const data = await getVoucherRegister({ ...normalizeVoucherFilters(input), limit: 5_000 });
     const records = data.rows.map((row) => ({
@@ -57,15 +60,18 @@ export async function exportVouchersAction(raw: unknown): Promise<ActionResult<{
     XLSX.utils.book_append_sheet(workbook, sheet, "سجل السندات");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
     return ok({ fileName: `bimmer_vouchers_${new Date().toISOString().slice(0, 10)}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: records.length });
+    });
   } catch (error) { return toActionError(error, "exportVouchersAction"); }
 }
 
 export async function hardDeleteCancelledVoucherAction(raw: unknown): Promise<ActionResult<{ id: string; transactionNumber: string }>> {
   try {
     const user = await requireUser();
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
     if (user.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية الحذف النهائي للسندات متاحة لمدير النظام فقط.");
     const input = hardDeleteSchema.parse(raw);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "TreasuryTransaction" WHERE "id" = ${input.voucherId} FOR UPDATE`);
       const voucher = await tx.treasuryTransaction.findUnique({ where: { id: input.voucherId } });
       if (!voucher) throw new BusinessRuleError("السند غير موجود.");
@@ -82,5 +88,6 @@ export async function hardDeleteCancelledVoucherAction(raw: unknown): Promise<Ac
     }, TX_OPTIONS));
     revalidateVoucherRegister();
     return ok(result);
+    });
   } catch (error) { return toActionError(error, "hardDeleteCancelledVoucherAction"); }
 }
