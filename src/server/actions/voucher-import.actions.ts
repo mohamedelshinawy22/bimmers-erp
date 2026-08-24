@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
-import { ok, toActionError, type ActionResult } from "@/lib/action-result";
+import { fail, ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
 import { money } from "@/lib/utils";
 import { nextAccountNumber, nextTransactionNumber } from "@/server/services/numbering.service";
@@ -75,7 +75,7 @@ type TransferPair = z.infer<typeof transferPairSchema>;
 
 const importSchema = z.object({
   type: z.enum(voucherImportTypes),
-  rows: z.array(z.unknown()).min(1).max(10_000),
+  rows: z.array(z.unknown()).max(10_000).optional().default([]),
   reconciledTransfers: z.array(transferPairSchema).max(5_000).optional().default([]),
   autoCreateAccounts: z.boolean().optional().default(false),
   skipInvalidRows: z.boolean().optional().default(true),
@@ -202,7 +202,13 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
 
 export async function executeVoucherImportAction(raw: unknown): Promise<ActionResult<{ jobId: string; created: number; skipped: number; transfers: number; invalid: Array<{ row: number; reason: string }> }>> {
   try {
-    const input = importSchema.parse(raw);
+    const parsedInput = importSchema.safeParse(raw);
+    if (!parsedInput.success) {
+      const details = parsedInput.error.issues.map((issue) => `${issue.path.join(".") || "الطلب"}: ${issue.message}`).join(" | ");
+      console.error("[executeVoucherImportAction] validation failure:", details);
+      return fail(`فشل التحقق من بيانات الاستيراد: ${details || "بنية الطلب غير صالحة"}`);
+    }
+    const input = parsedInput.data;
     const user = await requirePermission("treasury.transact");
     const tenant = await getTenantDbFromSession();
     const db = tenant.prisma;

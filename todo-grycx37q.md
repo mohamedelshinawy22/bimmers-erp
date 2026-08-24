@@ -73,3 +73,6 @@
 - [ ] Trace the actual client voucher-batch payload against the server validation contract.
 - [ ] Sanitize voucher chunks to plain primitives and return explicit server validation diagnostics.
 - [ ] Validate, deploy, and confirm voucher execution advances beyond validation in production.
+- [ ] Trace the actual action input contract responsible for the persistent voucher import rejection.
+- [ ] Return explicit Zod validation diagnostics and align the client request shape with that action contract.
+- [ ] Validate, deploy, and collect authenticated evidence of the resolved validation boundary.
