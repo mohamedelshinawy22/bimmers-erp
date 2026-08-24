@@ -47,3 +47,7 @@
 - [ ] Add resumable client/server invoice import chunks with bulk account preparation and visible progress.
 - [ ] Harden the accounts page loader and receipts-import preview for null-safe tenant-scoped data and serialized responses.
 - [ ] Validate, deploy, and confirm the 319-row invoice preview/import, accounts page, and voucher matching flows in production.
+- [ ] Trace the monolithic invoice execution boundary and define a safe 20-document batch contract.
+- [ ] Implement tenant-scoped invoice batch execution with bulk missing-account preparation and idempotent result reporting.
+- [ ] Add client-side sequential chunk dispatch, live progress feedback, and regression coverage.
+- [ ] Validate, deploy, and confirm the 319-row invoice import completes with visible progress in production.

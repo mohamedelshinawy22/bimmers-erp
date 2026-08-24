@@ -19,6 +19,7 @@ const importMeta: Record<InvoiceImportType, { title: string; template: string; t
 
 type ImportMode = "SUMMARY" | "DETAILED";
 type PreviewFilter = "ALL" | "VALID" | "INVALID";
+const IMPORT_CHUNK_SIZE = 20;
 type InvoiceImportPreview = {
   total: number;
   valid: number;
@@ -92,6 +93,7 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<InvoiceImportPreview | undefined>(undefined);
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const invalidCount = preview?.invalid.length ?? 0;
   const validCount = preview?.valid ?? 0;
@@ -152,16 +154,25 @@ export function InvoiceImportModal({ type, onClose, onDone }: { type: InvoiceImp
 
   const executeImport = () => startTransition(async () => {
     setError(null);
-    const result = await executeInvoiceImportAction({ type, mode: importMode, rows, skipInvalidRows, autoCreateAccounts });
-    if (!result.success) { setError(result.error); return; }
-    setMessage(`تم إنشاء ${result.data.created} مستند وتخطي ${result.data.skipped} مستند. رقم عملية الاستيراد: ${result.data.jobId}`);
-    onDone();
+    const executableRows = preview?.rows.filter((row) => row.isValid).map((row) => rows.find((source) => Number(source.sourceRowNumber) === row.row)).filter((row): row is Record<string, unknown> => Boolean(row)) ?? rows;
+    let created = 0; let skipped = 0; let processed = 0;
+    setImportProgress({ processed, total: executableRows.length });
+    for (let start = 0; start < executableRows.length; start += IMPORT_CHUNK_SIZE) {
+      const chunk = executableRows.slice(start, start + IMPORT_CHUNK_SIZE);
+      const result = await executeInvoiceImportAction({ type, mode: importMode, rows: chunk, skipInvalidRows, autoCreateAccounts });
+      if (!result.success) { setError(result.error); setImportProgress(null); return; }
+      created += result.data.created; skipped += result.data.skipped; processed += chunk.length;
+      setImportProgress({ processed, total: executableRows.length });
+    }
+    setMessage(`تم إنشاء ${created} مستند وتخطي ${skipped} مستند بنجاح.`);
+    setImportProgress(null); onDone();
   });
 
   return <Modal open onClose={onClose} title={importMeta[type].title} description="يقبل هذا المعالج نوع المستند المحدد فقط. كل فاتورة تُرحّل عبر المحرك المالي الذري نفسه المستخدم في النظام." size="xl" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إغلاق</Button>{step === 2 ? <Button onClick={runPreview} loading={pending} disabled={!rows.length}><CheckCircle2 size={15}/> فحص المطابقة</Button> : null}{step === 3 ? <Button onClick={executeImport} loading={pending} disabled={!canExecute}><UploadCloud size={15}/> تنفيذ الاستيراد الآمن</Button> : null}</>}>
     <div className="space-y-4" dir="rtl">
       {error ? <Alert variant="error">{error}</Alert> : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
+      {importProgress ? <div className="rounded-xl border border-bmw-blue/40 bg-bmw-blue/10 p-3 text-sm text-bmw-blue"><div className="mb-2 flex justify-between"><span>جارٍ ترحيل الفواتير: {importProgress.processed} من أصل {importProgress.total}</span><b>{Math.round((importProgress.processed / Math.max(1, importProgress.total)) * 100)}%</b></div><div className="h-2 overflow-hidden rounded-full bg-bmw-carbon"><div className="h-full bg-bmw-blue transition-all" style={{ width: `${Math.round((importProgress.processed / Math.max(1, importProgress.total)) * 100)}%` }} /></div></div> : null}
       <div className="grid grid-cols-3 gap-2 text-xs"><div className={`rounded-lg border p-2 ${step >= 1 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>1. النموذج والرفع</div><div className={`rounded-lg border p-2 ${step >= 2 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>2. مطابقة البيانات</div><div className={`rounded-lg border p-2 ${step >= 3 ? "border-bmw-blue bg-bmw-blue/10 text-bmw-blue" : "border-bmw-cardBorder text-bmw-muted"}`}>3. التنفيذ</div></div>
       {step === 1 ? <section className="space-y-3"><Alert variant="info">اختر طريقة الاستيراد أولاً. الاستيراد التفصيلي يطابق الأصناف ويرحّل حركات المخزون، بينما الاستيراد الإجمالي ينشئ قيوداً مالية للفواتير دون بنود أصناف أو أي حركة مخزنية.</Alert><div className="grid gap-3 md:grid-cols-2"><button type="button" onClick={() => { setImportMode("DETAILED"); setRows([]); setPreview(undefined); }} className={`rounded-2xl border p-4 text-right transition ${importMode === "DETAILED" ? "border-bmw-blue bg-bmw-blue/15 ring-1 ring-bmw-blue" : "border-bmw-cardBorder bg-bmw-carbon hover:border-bmw-blue/60"}`}><b className="block text-base text-bmw-blue">استيراد تفصيلي — موصى به</b><span className="mt-1 block text-xs text-bmw-muted">فواتير ببنود أصناف؛ يتحقق من OEM ويحدّث رصيد المخزون عبر محرك الترحيل الذري.</span></button><button type="button" onClick={() => { setImportMode("SUMMARY"); setRows([]); setPreview(undefined); }} className={`rounded-2xl border p-4 text-right transition ${importMode === "SUMMARY" ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500" : "border-bmw-cardBorder bg-bmw-carbon hover:border-emerald-500/60"}`}><b className="block text-base text-emerald-400">استيراد إجمالي — مالي فقط</b><span className="mt-1 block text-xs text-bmw-muted">فاتورة واحدة لكل صف؛ يحدّث الحساب والخزينة فقط، من دون InvoiceItem أو حركات مخزون.</span></button></div><p className={`rounded-lg border border-bmw-cardBorder bg-bmw-carbon p-2 text-sm font-bold ${importMeta[type].tone}`}>{importMeta[type].title} — {importMode === "DETAILED" ? "تفصيلي بالأصناف" : "إجمالي مالي"}</p><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => downloadTemplate("SUMMARY")} loading={pending}><Download size={15}/> تنزيل نموذج ملخص مالي</Button><Button variant="outline" onClick={() => downloadTemplate("DETAILED")} loading={pending}><Download size={15}/> تنزيل نموذج تفصيلي بالأصناف</Button><Button onClick={() => inputRef.current?.click()}><FileSpreadsheet size={15}/> اختيار ملف Excel ({importMode === "DETAILED" ? "تفصيلي" : "إجمالي"})</Button><input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) loadFile(file); event.currentTarget.value = ""; }} /></div></section> : null}
       {step === 2 ? <section className="space-y-3"><Alert variant="info">تمت قراءة <b>{rows.length}</b> صفاً من الملف <b>{fileName}</b>. {importMode === "DETAILED" ? "الأصناف المطابقة فقط تؤثر في المخزون؛ الأصناف غير المسجلة تُحفظ كبنود نصية مقبولة مع ترحيل الفاتورة ومالياتها كاملة." : "سيجري التحقق من الحسابات والخزائن قبل إنشاء القيود المالية فقط."}</Alert>{extractionStats ? <div className="grid gap-2 sm:grid-cols-2"><Alert variant="success">تم استخراج <b>{extractionStats.invoices}</b> فاتورة بنجاح.</Alert><Alert variant="info">{importMode === "DETAILED" ? <>تتضمن <b>{extractionStats.items}</b> صنفاً مرتبطاً بفواتيره الرئيسية.</> : <>تقرير مالي إجمالي دون بنود أصناف.</>}</Alert></div> : null}<div className="max-h-64 overflow-auto rounded-xl border border-bmw-cardBorder"><table className="w-full text-xs"><thead><tr className="bg-bmw-carbon text-bmw-muted"><th className="p-2">الصف</th><th className="p-2">المستند</th><th className="p-2">الحساب</th>{importMode === "DETAILED" ? <><th className="p-2">كود الصنف/OEM</th><th className="p-2">اسم القطعة</th><th className="p-2">الكمية</th><th className="p-2">السعر</th></> : <th className="p-2">الإجمالي</th>}</tr></thead><tbody>{rows.slice(0, 15).map((row) => <tr key={String(row.sourceRowNumber)} className="border-t border-bmw-cardBorder"><td className="p-2">{String(row.sourceRowNumber)}</td><td className="p-2 font-mono" dir="ltr">{String(row.documentNumber)}</td><td className="p-2">{String(row.accountName)}</td>{importMode === "DETAILED" ? <><td className="p-2 font-mono" dir="ltr">{String(row.oemNumber)}</td><td className="p-2">{String(row.partName)}</td><td className="p-2 font-mono">{String(row.quantity)}</td><td className="p-2 font-mono">{String(row.unitPrice)}</td></> : <td className="p-2 font-mono">{String(row.grandTotal)}</td>}</tr>)}</tbody></table></div></section> : null}
