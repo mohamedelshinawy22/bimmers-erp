@@ -93,9 +93,18 @@ function isMasterInvoiceRow(row: WorksheetCell[], documentColumn: number) {
   return sequence > 0 && stringValue(cellAt(row, documentColumn)) !== "";
 }
 
-function toDateString(value: unknown) {
+export function normalizeInvoiceImportDate(value: unknown) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  return stringValue(value) || null;
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000).toISOString().slice(0, 10);
+  const raw = stringValue(value);
+  const iso = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2]!.padStart(2, "0")}-${iso[3]!.padStart(2, "0")}`;
+  const localized = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  return localized ? `${localized[3]}-${localized[2]!.padStart(2, "0")}-${localized[1]!.padStart(2, "0")}` : raw || null;
+}
+
+function toDateString(value: unknown) {
+  return normalizeInvoiceImportDate(value);
 }
 
 function toTimeString(value: unknown) {

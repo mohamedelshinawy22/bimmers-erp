@@ -2,16 +2,17 @@
 
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
-import { Prisma } from "@prisma/client";
+import { AccountType, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission, can } from "@/lib/auth";
 import { getUserAccess, hasPermission, canUseTreasury } from "@/lib/user-permissions";
-import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
 import { BusinessRuleError } from "@/lib/errors";
 import { formatOemNumber } from "@/lib/utils";
+import { serializeData } from "@/lib/serialize";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { createInvoiceReturn, createPurchaseInvoice, createSaleInvoice } from "@/server/services/invoice.service";
 import { nextAccountNumber, nextInvoiceNumber, nextTransactionNumber } from "@/server/services/numbering.service";
 import { lockAccountForUpdate, lockPartsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
@@ -20,6 +21,8 @@ import { resolveOrCreateImportTreasuries } from "@/server/services/treasury-chan
 
 const invoiceImportTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
 type InvoiceImportType = (typeof invoiceImportTypes)[number];
+type TenantPrisma = import("@prisma/client").PrismaClient;
+const IMPORT_BATCH_SIZE = 25;
 const documentTypes = invoiceImportTypes;
 const typeLabel: Record<InvoiceImportType, string> = { SALE: "فواتير البيع", PURCHASE: "فواتير الشراء", SALE_RETURN: "مرتجعات البيع", PURCHASE_RETURN: "مرتجعات الشراء" };
 const permissionForType = (type: InvoiceImportType) => type === "SALE" || type === "SALE_RETURN" ? "invoice.sale" : "invoice.purchase";
@@ -29,6 +32,16 @@ const numberValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const moneyValue = (value: unknown) => Math.abs(numberValue(value));
+const quantityValue = (value: unknown) => Math.max(1, Math.trunc(numberValue(value)) || 1);
+const importedDateValue = (value: unknown) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000).toISOString().slice(0, 10);
+  const raw = String(value ?? "").trim();
+  const iso = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2]!.padStart(2, "0")}-${iso[3]!.padStart(2, "0")}`;
+  const localized = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  return localized ? `${localized[3]}-${localized[2]!.padStart(2, "0")}-${localized[1]!.padStart(2, "0")}` : raw;
+};
 const normalizeKey = (value: string) => value.replace(/[\s\-_/.]/g, "").toLocaleLowerCase("ar-EG");
 const normalizeType = (value: unknown) => {
   const token = String(value ?? "SALE").trim().toUpperCase();
@@ -51,6 +64,7 @@ const rawLineSchema = z.object({
   documentNumber: z.string().trim().min(1, "رقم الفاتورة في ملف الاستيراد مطلوب.").max(120),
   type: z.preprocess(normalizeType, z.enum(documentTypes, { error: "نوع المستند غير صالح." })),
   accountName: z.string().trim().max(200).optional().or(z.literal("")).default(""),
+  date: z.preprocess(importedDateValue, z.string().trim().max(32).optional().or(z.literal("")).default("")),
   accountPhone: z.string().trim().max(40).optional().or(z.literal("")),
   originalInvoiceNumber: z.string().trim().max(120).optional().or(z.literal("")),
   treasuryName: z.string().trim().max(160).optional().or(z.literal("")),
@@ -65,7 +79,7 @@ const rawLineSchema = z.object({
   paymentMethod: z.preprocess(normalizePayment, z.enum(["CASH", "VISA", "SPLIT", "ON_ACCOUNT"])),
   oemNumber: z.string().trim().max(120).optional().or(z.literal("")),
   partName: z.string().trim().max(240).optional().or(z.literal("")),
-  quantity: z.preprocess(numberValue, z.number().int().min(0).max(100_000)).default(0),
+  quantity: z.preprocess(quantityValue, z.number().int().min(1).max(100_000)).default(1),
   unitPrice: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   grandTotal: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
   lineDiscount: z.preprocess(moneyValue, z.number().finite().min(0).max(99_999_999)).default(0),
@@ -122,10 +136,10 @@ function inputRows(raw: unknown[]) {
   return raw.map((row, index) => ({ sourceRowNumber: index + 2, ...row as Record<string, unknown> }));
 }
 
-async function createMissingAccountForImport(line: ValidLine, type: InvoiceImportType, userId: string) {
+async function createMissingAccountForImport(db: TenantPrisma, line: ValidLine, type: InvoiceImportType, userId: string) {
   const accountType = type === "PURCHASE" || type === "PURCHASE_RETURN" ? "SUPPLIER" as const : "CUSTOMER" as const;
   const prefix = accountType === "SUPPLIER" ? "SUP" : "ACC";
-  return withTxRetry(() => prisma.$transaction(async (tx) => {
+  return withTxRetry(() => db.$transaction(async (tx) => {
     const existing = await tx.account.findFirst({ where: { OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } });
     if (existing) return existing;
     const account = await tx.account.create({ data: { accountNumber: await nextAccountNumber(tx, prefix), name: line.accountName, type: accountType, phone: line.accountPhone || null, currentBalance: 0, isActive: true, status: "ACTIVE" }, select: { id: true, name: true, type: true } });
@@ -144,8 +158,8 @@ function isWalkInCashAccount(value: string | undefined) {
   return !normalized || ["نقدي", "كاش", "عميل نقدي", "عميل نقدى"].includes(normalized);
 }
 
-async function getOrCreateWalkInCashAccount(userId: string) {
-  return withTxRetry(() => prisma.$transaction(async (tx) => {
+async function getOrCreateWalkInCashAccount(db: TenantPrisma, userId: string) {
+  return withTxRetry(() => db.$transaction(async (tx) => {
     const existing = await tx.account.findFirst({ where: { type: "CUSTOMER", OR: [{ accountNumber: "ACC-0001" }, { name: { in: ["عميل نقدي افتراضي", "عميل نقدي"] } }] }, select: { id: true, name: true, type: true } });
     if (existing) return existing;
     const account = await tx.account.create({ data: { accountNumber: await nextAccountNumber(tx, "ACC"), name: "عميل نقدي افتراضي", type: "CUSTOMER", currentBalance: 0, isActive: true, status: "ACTIVE", category: "WALK_IN_CASH" }, select: { id: true, name: true, type: true } });
@@ -168,7 +182,7 @@ function importedPaymentChannels(line: ValidLine) {
   return paidAmount.gt(0) ? [{ amount: paidAmount, label: line.treasuryName?.trim() || "درج النقدية" }] : [];
 }
 
-async function postDetailedImportedInvoice(args: { type: InvoiceImportType; lines: Array<{ line: ValidLine; part: { id: string; oemNumber: string; nameAr: string } | null }>; accountId: string; userId: string; jobId: string }) {
+async function postDetailedImportedInvoice(db: TenantPrisma, args: { type: InvoiceImportType; lines: Array<{ line: ValidLine; part: { id: string; oemNumber: string; nameAr: string } | null }>; accountId: string; userId: string; jobId: string }) {
   const first = args.lines[0]?.line;
   if (!first) throw new BusinessRuleError("الفاتورة لا تحتوي على بنود قابلة للترحيل.");
   const grandTotal = financialAmount(first);
@@ -183,7 +197,7 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
   const balanceAfter = (before: Prisma.Decimal) => args.type === "SALE" || args.type === "PURCHASE_RETURN" ? before.sub(remainingAmount) : before.add(remainingAmount);
   const linkedPartIds = [...new Set(args.lines.flatMap(({ part }) => part ? [part.id] : []))];
 
-  return withTxRetry(() => prisma.$transaction(async (tx) => {
+  return withTxRetry(() => db.$transaction(async (tx) => {
     const account = await lockAccountForUpdate(tx, args.accountId);
     const parts = await lockPartsForUpdate(tx, linkedPartIds);
     const treasuryByChannel = await resolveOrCreateImportTreasuries(tx, channels.map((channel) => channel.label), args.userId);
@@ -230,7 +244,7 @@ async function postDetailedImportedInvoice(args: { type: InvoiceImportType; line
   }, TX_OPTIONS));
 }
 
-async function postSummaryFinancialInvoice(args: { type: InvoiceImportType; line: ValidLine; accountId: string; userId: string; jobId: string }) {
+async function postSummaryFinancialInvoice(db: TenantPrisma, args: { type: InvoiceImportType; line: ValidLine; accountId: string; userId: string; jobId: string }) {
   const grandTotal = financialAmount(args.line);
   if (grandTotal.lte(0)) throw new BusinessRuleError("الإجمالي النهائي مطلوب في الاستيراد المالي ولا يجوز أن يساوي صفراً.");
   const channels = importedPaymentChannels(args.line);
@@ -240,7 +254,7 @@ async function postSummaryFinancialInvoice(args: { type: InvoiceImportType; line
   const remainingAmount = statedCredit.gt(0) ? statedCredit.toDecimalPlaces(2) : grandTotal.sub(paidAmount).toDecimalPlaces(2);
   const outbound = args.type === "PURCHASE" || args.type === "SALE_RETURN";
   const baseType = args.type === "SALE_RETURN" ? "SALE" : args.type === "PURCHASE_RETURN" ? "PURCHASE" : null;
-  return withTxRetry(() => prisma.$transaction(async (tx) => {
+  return withTxRetry(() => db.$transaction(async (tx) => {
     const account = await lockAccountForUpdate(tx, args.accountId);
     const treasuryByChannel = await resolveOrCreateImportTreasuries(tx, channels.map((channel) => channel.label), args.userId);
     const treasuryIds = [...new Set(channels.map((channel) => treasuryByChannel.get(channel.label)?.id).filter((id): id is string => Boolean(id)))];
@@ -287,20 +301,52 @@ function modeValidationIssue(line: ValidLine, mode: "SUMMARY" | "DETAILED") {
   return undefined;
 }
 
-async function matchLine(line: ValidLine, type: InvoiceImportType, mode: "SUMMARY" | "DETAILED") {
-  const oem = normalizeKey(line.oemNumber ?? "");
-  const cashFallback = isWalkInCashAccount(line.accountName);
-  const accountTypes = type === "PURCHASE" || type === "PURCHASE_RETURN" ? ["SUPPLIER"] as const : ["CUSTOMER", "WORKSHOP_BMW"] as const;
+type ImportMatch = {
+  account: { id: string; name: string; type: string } | null;
+  accountCandidates: Array<{ id: string; name: string; type: string }>;
+  cashFallback: boolean;
+  part: { id: string; oemNumber: string; nameAr: string } | null;
+  partCandidates: Array<{ id: string; oemNumber: string; nameAr: string }>;
+  treasury: { id: string; name: string } | null;
+  treasuryCandidates: Array<{ id: string; name: string }>;
+};
+
+async function matchLines(db: TenantPrisma, lines: ValidLine[], type: InvoiceImportType, mode: "SUMMARY" | "DETAILED"): Promise<ImportMatch[]> {
+  const accountTypes: AccountType[] = type === "PURCHASE" || type === "PURCHASE_RETURN" ? [AccountType.SUPPLIER] : [AccountType.CUSTOMER, AccountType.WORKSHOP_BMW];
+  const accountTypeSet = new Set<string>(accountTypes);
+  const accountNames = [...new Set(lines.map((line) => (line.accountName ?? "").trim()).filter(Boolean))];
+  const accountPhones = [...new Set(lines.map((line) => (line.accountPhone ?? "").trim()).filter(Boolean))];
+  const treasuryNames = [...new Set(lines.map((line) => (line.treasuryName ?? "").trim()).filter(Boolean))];
   const [accounts, parts, treasuries] = await Promise.all([
-    cashFallback
-      ? prisma.account.findMany({ where: { isActive: true, type: "CUSTOMER", OR: [{ accountNumber: "ACC-0001" }, { name: { in: ["عميل نقدي افتراضي", "عميل نقدي"] } }] }, select: { id: true, name: true, type: true } })
-      : prisma.account.findMany({ where: { isActive: true, type: { in: [...accountTypes] }, OR: [{ name: { equals: line.accountName } }, ...(line.accountPhone ? [{ phone: line.accountPhone }] : [])] }, select: { id: true, name: true, type: true } }),
-    mode === "DETAILED" && (oem || line.partName?.trim())
-      ? prisma.$queryRaw<Array<{ id: string; oemNumber: string; nameAr: string }>>(Prisma.sql`SELECT id, "oemNumber", "nameAr" FROM "PartItem" WHERE (${oem ? Prisma.sql`lower(regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g')) = ${oem}` : Prisma.sql`FALSE`}) OR (${line.partName?.trim() ? Prisma.sql`"nameAr" = ${line.partName.trim()}` : Prisma.sql`FALSE`}) LIMIT 5`)
+    db.account.findMany({
+      where: { isActive: true, OR: [
+        { type: { in: [...accountTypes] }, name: { in: accountNames } },
+        ...(accountPhones.length ? [{ type: { in: [...accountTypes] }, phone: { in: accountPhones } }] : []),
+        { type: AccountType.CUSTOMER, accountNumber: "ACC-0001" },
+        { type: AccountType.CUSTOMER, name: { in: ["عميل نقدي افتراضي", "عميل نقدي"] } },
+      ] },
+      select: { id: true, name: true, type: true, phone: true },
+    }),
+    mode === "DETAILED"
+      ? db.partItem.findMany({ where: { isActive: true, isDeleted: false }, take: 5_000, select: { id: true, oemNumber: true, nameAr: true, barcode: true, partNumberFormatted: true } })
       : Promise.resolve([]),
-    line.treasuryName ? prisma.treasury.findMany({ where: { isActive: true, name: { equals: line.treasuryName } }, select: { id: true, name: true } }) : Promise.resolve([]),
+    treasuryNames.length ? db.treasury.findMany({ where: { isActive: true, name: { in: treasuryNames } }, select: { id: true, name: true } }) : Promise.resolve([]),
   ]);
-  return { account: accounts.length === 1 ? accounts[0] : null, accountCandidates: accounts, cashFallback, part: parts.length === 1 ? parts[0] : null, partCandidates: parts, treasury: treasuries.length === 1 ? treasuries[0] : null, treasuryCandidates: treasuries };
+  return lines.map((line) => {
+    const cashFallback = isWalkInCashAccount(line.accountName);
+    const accountCandidates = cashFallback
+      ? accounts.filter((account) => account.type === "CUSTOMER" && (account.name === "عميل نقدي افتراضي" || account.name === "عميل نقدي"))
+      : accounts.filter((account) => accountTypeSet.has(account.type) && (normalizeKey(account.name) === normalizeKey(line.accountName ?? "") || Boolean(line.accountPhone) && account.phone === line.accountPhone));
+    const normalizedCode = normalizeKey(line.oemNumber ?? "");
+    const normalizedName = normalizeKey(line.partName ?? "");
+    const partCandidates = parts.filter((part) => (
+      Boolean(normalizedCode) && [part.barcode, part.partNumberFormatted, part.oemNumber].some((value) => normalizeKey(value ?? "") === normalizedCode)
+    ) || (
+      Boolean(normalizedName) && normalizeKey(part.nameAr) === normalizedName
+    )).map(({ id, oemNumber, nameAr }) => ({ id, oemNumber, nameAr }));
+    const treasuryCandidates = line.treasuryName ? treasuries.filter((treasury) => treasury.name === line.treasuryName) : [];
+    return { account: accountCandidates.length === 1 ? accountCandidates[0] ?? null : null, accountCandidates, cashFallback, part: partCandidates.length === 1 ? partCandidates[0] ?? null : null, partCandidates, treasury: treasuryCandidates.length === 1 ? treasuryCandidates[0] ?? null : null, treasuryCandidates };
+  });
 }
 
 export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise<ActionResult<{ fileName: string; mimeType: string; base64: string }>> {
@@ -312,11 +358,18 @@ export async function downloadInvoiceImportTemplateAction(raw: unknown): Promise
   } catch (error) { return toActionError(error, "downloadInvoiceImportTemplateAction"); }
 }
 
-export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; valid: number; invalid: Array<{ row: number; reason: string }>; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" }> }>> {
+export async function previewInvoiceImportAction(raw: unknown): Promise<ActionResult<{ total: number; totalInvoices: number; valid: number; invalid: Array<{ row: number; reason: string }>; summary: { matchedCount: number; unmatchedCount: number; newCustomersCount: number }; rows: Array<{ row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" }> }>> {
   try {
     const input = importSchema.parse(raw);
     await requirePermission(permissionForType(input.type));
+    const tenant = await getTenantDbFromSession();
     const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), raw: row, result: rawLineSchema.safeParse(row) }));
+    const matchable = parsed.reduce<Array<{ row: number; line: ValidLine }>>((items, entry) => {
+      if (entry.result.success && entry.result.data.type === input.type) items.push({ row: entry.row, line: entry.result.data });
+      return items;
+    }, []);
+    const matched = await tenant.run(() => matchLines(tenant.prisma, matchable.map((entry) => entry.line), input.type, input.mode));
+    const matchByRow = new Map(matchable.map((entry, index) => [entry.row, matched[index]! ]));
     type PreviewRow = { row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" };
     const preview: PreviewRow[] = [];
     const rawString = (row: Record<string, unknown>, key: string) => String(row[key] ?? "").trim();
@@ -340,16 +393,24 @@ export async function previewInvoiceImportAction(raw: unknown): Promise<ActionRe
         preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: false, partMatched: false, treasuryMatched: false, paymentChannels: [], accountStatus: "NOT_FOUND", partStatus: "NOT_APPLICABLE", isValid: false, reason, ...resolutionFor(reason) });
         continue;
       }
-      const match = await matchLine(line, input.type, input.mode);
+      const match = matchByRow.get(entry.row);
+      if (!match) {
+        const reason = "تعذر تجهيز مطابقة الصف بصورة آمنة.";
+        preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName, oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: false, partMatched: false, treasuryMatched: false, paymentChannels: [], accountStatus: "NOT_FOUND", partStatus: "UNLINKED_TEXT_ITEM", isValid: false, reason, ...resolutionFor(reason) });
+        continue;
+      }
       const modeIssue = modeValidationIssue(line, input.mode);
       const accountMissing = !match.account && !match.cashFallback && !input.autoCreateAccounts;
       const channelTotal = importedPaymentChannels(line).reduce((total, channel) => total.add(channel.amount), new Prisma.Decimal(0));
       const paymentIssue = channelTotal.gt(financialAmount(line)) ? "إجمالي قنوات السداد لا يجوز أن يتجاوز إجمالي الفاتورة." : undefined;
       const reason = modeIssue ?? paymentIssue ?? (accountMissing ? `الحساب (${line.accountName}) غير مسجل في المنظومة وتم إيقاف الإنشاء التلقائي.` : undefined);
-      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback || input.autoCreateAccounts, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: true, paymentChannels: importedPaymentChannels(line).map((channel) => ({ name: channel.label, amount: Number(channel.amount) })), isValid: !reason, reason, ...(reason ? resolutionFor(reason) : {}), accountStatus: match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : input.autoCreateAccounts ? "AUTO_CREATE" : "NOT_FOUND", partStatus: input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM" });
+      preview.push({ row: entry.row, documentNumber: line.documentNumber, type: line.type, accountName: line.accountName || "عميل نقدي افتراضي", oemNumber: formatOemNumber(line.oemNumber), partName: line.partName || "", grandTotal: Number(financialAmount(line)), accountMatched: Boolean(match.account) || match.cashFallback || input.autoCreateAccounts, partMatched: input.mode === "SUMMARY" || Boolean(match.part), treasuryMatched: !line.treasuryName || Boolean(match.treasury), paymentChannels: importedPaymentChannels(line).map((channel) => ({ name: channel.label, amount: Number(channel.amount) })), isValid: !reason, reason, ...(reason ? resolutionFor(reason) : {}), accountStatus: match.cashFallback ? "CASH_FALLBACK" : match.account ? "MATCHED" : input.autoCreateAccounts ? "AUTO_CREATE" : "NOT_FOUND", partStatus: input.mode === "SUMMARY" ? "NOT_APPLICABLE" : match.part ? "MATCHED_CATALOG" : "UNLINKED_TEXT_ITEM" });
     }
     const invalid = preview.filter((row) => !row.isValid).map((row) => ({ row: row.row, reason: row.reason ?? "صف غير صالح." }));
-    return ok({ total: input.rows.length, valid: preview.filter((row) => row.isValid).length, invalid, rows: preview });
+    const valid = preview.filter((row) => row.isValid).length;
+    const unmatchedCount = preview.filter((row) => row.partStatus === "UNLINKED_TEXT_ITEM" || row.accountStatus === "NOT_FOUND").length;
+    const newCustomersCount = preview.filter((row) => row.accountStatus === "AUTO_CREATE").length;
+    return ok(serializeData({ total: input.rows.length, totalInvoices: input.rows.length, valid, invalid, summary: { matchedCount: valid - unmatchedCount, unmatchedCount, newCustomersCount }, rows: preview }));
   } catch (error) { return toActionError(error, "previewInvoiceImportAction"); }
 }
 
@@ -357,6 +418,8 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
   try {
     const input = importSchema.parse(raw);
     const user = await requirePermission(permissionForType(input.type));
+    const tenant = await getTenantDbFromSession();
+    const db = tenant.prisma;
     const parsed = inputRows(input.rows).map((row) => ({ row: Number(row.sourceRowNumber), result: rawLineSchema.safeParse(row) }));
     const invalid = parsed.filter((entry) => !entry.result.success).map((entry) => ({ row: entry.row, reason: (entry.result as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
     const typeInvalid = parsed.filter((entry) => entry.result.success && entry.result.data.type !== input.type).map((entry) => ({ row: entry.row, reason: `نوع الصف لا يطابق معالج ${typeLabel[input.type]}.` }));
@@ -367,30 +430,37 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
     if (invalid.length && !input.skipInvalidRows) throw new BusinessRuleError(`يوجد ${invalid.length} صف غير صالح. صحح البيانات أو فعّل التخطي.`);
     if (!lines.length) throw new BusinessRuleError("لا توجد صفوف صالحة لاستيراد الفواتير.");
     const checksum = createHash("sha256").update(JSON.stringify({ type: input.type, mode: input.mode, lines })).digest("hex");
-    const previous = await prisma.importJob.findFirst({ where: { type: "INVOICES", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } });
+    const previous = await tenant.run(() => db.importJob.findFirst({ where: { type: "INVOICES", checksum, status: "COMPLETED" }, orderBy: { createdAt: "desc" } }));
     if (previous) return ok({ jobId: previous.id, total: input.rows.length, created: 0, skipped: lines.length, invalid });
-    const job = await prisma.importJob.create({ data: { type: "INVOICES", status: "PROCESSING", checksum, mapping: { type: input.type, mode: input.mode, headers: headersForTemplate(input.mode), skipInvalidRows: input.skipInvalidRows, autoCreateAccounts: input.autoCreateAccounts }, createdById: user.id } });
+    const job = await tenant.run(() => db.importJob.create({ data: { type: "INVOICES", status: "PROCESSING", checksum, mapping: { type: input.type, mode: input.mode, headers: headersForTemplate(input.mode), skipInvalidRows: input.skipInvalidRows, autoCreateAccounts: input.autoCreateAccounts }, createdById: user.id } }));
     let created = 0;
     let skipped = 0;
     try {
       const grouped = new Map<string, typeof lines>();
       for (const line of lines) grouped.set(`${line.type}:${line.documentNumber}`, [...(grouped.get(`${line.type}:${line.documentNumber}`) ?? []), line]);
-      const access = await getUserAccess(user.id);
-      for (const group of grouped.values()) {
+      const access = await tenant.run(() => getUserAccess(user.id));
+      const documentGroups = [...grouped.values()];
+      for (let batchStart = 0; batchStart < documentGroups.length; batchStart += IMPORT_BATCH_SIZE) {
+        const batch = documentGroups.slice(batchStart, batchStart + IMPORT_BATCH_SIZE);
+        for (const group of batch) {
         const first = group.at(0);
         if (!first) { skipped += 1; continue; }
-        const paired = await Promise.all(group.map(async (line) => {
-          const match = await matchLine(line, input.type, input.mode);
+        const groupMatches = await tenant.run(() => matchLines(db, group, input.type, input.mode));
+        const paired = [] as Array<{ line: ValidLine; match: ImportMatch }>;
+        for (const [index, line] of group.entries()) {
+          const match = groupMatches[index]!;
           if (!match.account && match.cashFallback) {
-            const account = await getOrCreateWalkInCashAccount(user.id);
-            return { line, match: { ...match, account } };
+            const account = await tenant.run(() => getOrCreateWalkInCashAccount(db, user.id));
+            paired.push({ line, match: { ...match, account } });
+            continue;
           }
           if (!match.account && input.autoCreateAccounts) {
-            const account = await createMissingAccountForImport(line, input.type, user.id);
-            return { line, match: { ...match, account } };
+            const account = await tenant.run(() => createMissingAccountForImport(db, line, input.type, user.id));
+            paired.push({ line, match: { ...match, account } });
+            continue;
           }
-          return { line, match };
-        }));
+          paired.push({ line, match });
+        }
         if (input.mode === "SUMMARY" && group.length !== 1) {
           const reason = "الاستيراد المالي الإجمالي يتطلب صفاً واحداً فقط لكل رقم فاتورة.";
           invalid.push(...group.map((line) => ({ row: line.sourceRowNumber, reason })));
@@ -401,7 +471,7 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         const issue = paired.find(({ match }) => !match.account);
         if (issue) {
           const reason = "تعذر مطابقة الحساب بشكل فريد.";
-          invalid.push({ row: issue.line.sourceRowNumber, reason });
+          invalid.push({ row: issue.line.sourceRowNumber ?? 0, reason });
           if (!input.skipInvalidRows) throw new BusinessRuleError(`الصف ${issue.line.sourceRowNumber}: ${reason}`);
           skipped += group.length;
           continue;
@@ -411,12 +481,12 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         const account = firstMatch.account;
         const treasuryId = firstMatch.treasury?.id;
         if (input.mode === "SUMMARY") {
-          await postSummaryFinancialInvoice({ type: first.type, line: first, accountId: account.id, userId: user.id, jobId: job.id });
+          await tenant.run(() => postSummaryFinancialInvoice(db, { type: first.type, line: first, accountId: account.id, userId: user.id, jobId: job.id }));
           created += 1;
           continue;
         }
         if (input.mode === "DETAILED") {
-          await postDetailedImportedInvoice({ type: first.type, lines: paired.map(({ line, match }) => ({ line, part: match.part ?? null })), accountId: account.id, userId: user.id, jobId: job.id });
+          await tenant.run(() => postDetailedImportedInvoice(db, { type: first.type, lines: paired.map(({ line, match }) => ({ line, part: match.part ?? null })), accountId: account.id, userId: user.id, jobId: job.id }));
           created += 1;
           continue;
         }
@@ -429,7 +499,7 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
           await createPurchaseInvoice({ accountId: account.id, treasuryId, vehicleId: undefined, paymentMethod: first.paymentMethod === "SPLIT" ? "CASH" : first.paymentMethod, discountAmount: 0, taxAmount: 0, paidAmount, payFull: false, notes, items }, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
         } else {
           const originalNumber = first.originalInvoiceNumber;
-          const original = originalNumber ? await prisma.invoice.findFirst({ where: { invoiceNumber: originalNumber, type: first.type === "SALE_RETURN" ? "SALE" : "PURCHASE", isVoided: false }, select: { id: true, items: { select: { id: true, partId: true } } } }) : null;
+          const original = originalNumber ? await tenant.run(() => db.invoice.findFirst({ where: { invoiceNumber: originalNumber, type: first.type === "SALE_RETURN" ? "SALE" : "PURCHASE", isVoided: false }, select: { id: true, items: { select: { id: true, partId: true } } } })) : null;
           if (!original) { skipped += 1; continue; }
           const returnItems = items.map((item) => ({ invoiceItemId: original.items.find((originalItem) => originalItem.partId === item.partId)?.id, quantity: item.quantity })).filter((item): item is { invoiceItemId: string; quantity: number } => Boolean(item.invoiceItemId));
           if (returnItems.length !== items.length) { skipped += 1; continue; }
@@ -437,13 +507,14 @@ export async function executeInvoiceImportAction(raw: unknown): Promise<ActionRe
         }
         created += 1;
       }
+      }
       const summary = { total: input.rows.length, valid: lines.length, invalid: invalid.length, created, skipped, documents: grouped.size };
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
-      await writeAudit(prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
+      await tenant.run(() => db.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } }));
+      await tenant.run(() => writeAudit(db, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id }));
       ["/", "/invoices", "/sales/returns", "/purchases/returns", "/inventory", "/pos", "/treasury", "/accounts"].forEach((path) => revalidatePath(path));
       return ok({ jobId: job.id, total: input.rows.length, created, skipped, invalid });
     } catch (error) {
-      await prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, created, skipped, invalid: invalid.length } } });
+      await tenant.run(() => db.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, created, skipped, invalid: invalid.length } } }));
       throw error;
     }
   } catch (error) { return toActionError(error, "executeInvoiceImportAction"); }

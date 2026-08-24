@@ -39,4 +39,7 @@
 - [x] Run ERP validation, deployment, and live count verification with the Master Hub.
 - [x] Trace the fresh-tenant system-settings save failure and tenant-scoped mutation path.
 - [x] Initialize missing system settings safely on first save and protect audit/serialization results with regression coverage.
-- [ ] Validate, deploy, and confirm a successful Bavaria AN settings save in production.
+- [x] Validate, deploy, and confirm a successful Bavaria AN settings save in production.
+- [x] Trace the sales-invoice Excel matching crash and map normalization, tenant lookup, and batch execution paths.
+- [x] Add resilient date/number parsing, tenant-scoped customer/product matching, safe serialization, and import regression coverage.
+- [ ] Validate, deploy, and confirm the authenticated invoice matching preview works for the reported spreadsheet.
