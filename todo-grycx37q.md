@@ -34,3 +34,6 @@
 - [x] Inspect user scope validation and modal prefill behavior for stale treasury and warehouse references.
 - [x] Prune inactive or deleted scope IDs on save while preserving root-admin unrestricted scope.
 - [x] Run authenticated production user-permission saves to confirm legacy scopes are pruned in the live tenant database.
+- [x] Trace and validate the ERP active-user count sent or exposed for Master Hub synchronization.
+- [x] Implement and test authoritative tenant active-user count synchronization without exposing tenant credentials.
+- [ ] Run ERP validation, deployment, and live count verification with the Master Hub.

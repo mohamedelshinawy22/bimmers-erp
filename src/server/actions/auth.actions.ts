@@ -71,6 +71,7 @@ export async function loginAction(raw: LoginInput): Promise<ActionResult<{ redir
         },
       }),
     ]).catch((auditError) => console.error("[loginAction] successful-login audit:", auditError));
+    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true } })).catch((usageError) => console.error("[loginAction] active-user usage report:", usageError));
 
     return ok({ redirectTo: "/" });
   } catch (error) {
@@ -90,6 +91,7 @@ export async function tenantDeviceHeartbeatAction(raw: unknown): Promise<ActionR
     const device = tenantDeviceIdentitySchema.parse(raw);
     const tenant = await establishTenantContext(user.username, user.tenantId);
     await authorizeTenantDevice(tenant.route, device, "heartbeat");
+    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true } })).catch((usageError) => console.error("[tenantDeviceHeartbeatAction] active-user usage report:", usageError));
     return ok({ authorized: true });
   } catch (error) {
     return toActionError(error, "tenantDeviceHeartbeatAction");
@@ -160,7 +162,7 @@ export async function createUserAction(
     }, TX_OPTIONS));
     createdId = created.id;
     await activateTenantUsername(tenant.route, username);
-    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
+    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true } }));
 
     revalidatePath("/settings");
     return ok({ id: created.id, username: created.username });

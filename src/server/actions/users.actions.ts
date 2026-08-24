@@ -98,7 +98,7 @@ export async function createManagedUserAction(raw: CreateManagedUserInput): Prom
     }, TX_OPTIONS));
     createdId = result.id;
     await activateTenantUsername(tenant.context.route, username);
-    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }));
+    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true } }));
     revalidateUserManagement();
     return ok({ id: result.id, username: result.username });
   } catch (error) {

@@ -29,4 +29,11 @@ describe("interactive tenant action boundaries", () => {
     expect(mapper).toContain('select: {\n      id: true, username: true, fullName: true');
     expect(mapper).not.toContain("passwordHash: true");
   });
+
+  it("reports the all-active tenant user count on login and heartbeat", () => {
+    const actions = source("src/server/actions/auth.actions.ts");
+    expect(actions).toContain('reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true } }))');
+    expect(actions).toContain("[tenantDeviceHeartbeatAction] active-user usage report:");
+    expect(actions).not.toContain('reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }))');
+  });
 });
