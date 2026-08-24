@@ -4,11 +4,11 @@ import bcrypt from "bcryptjs";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { fail, ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 const RESET_CONFIRMATION_PHRASE = "مسح شامل وتصفير النظام";
 const resetSchema = z.object({
@@ -38,18 +38,20 @@ export async function purgeAllSystemDataAction(raw: { confirmationPhrase: string
   try {
     const actor = await requirePermission("system.maintenance");
     if (actor.role !== "SUPER_ADMIN") throw new BusinessRuleError("صلاحية إعادة ضبط المصنع متاحة لمدير النظام فقط.");
+    const tenant = await getTenantDbFromSession();
+    const db = tenant.prisma;
     const input = resetSchema.parse(raw);
-    const administrator = await prisma.user.findUnique({ where: { id: actor.id }, select: { id: true, passwordHash: true, isActive: true } });
+    const administrator = await tenant.run(() => db.user.findUnique({ where: { id: actor.id }, select: { id: true, passwordHash: true, isActive: true } }));
     if (!administrator || !administrator.isActive) throw new BusinessRuleError("تعذر التحقق من حساب مدير النظام الحالي.");
 
     const passwordMatches = await bcrypt.compare(input.adminPassword, administrator.passwordHash);
     if (!passwordMatches) {
       const ipAddress = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-      await prisma.systemAuditTrail.create({ data: { tableName: "System", recordId: "FACTORY_RESET", action: "SYSTEM_FACTORY_RESET_DENIED", newData: { reason: "BAD_PASSWORD" }, performedBy: actor.id, ipAddress } });
+      await tenant.run(() => db.systemAuditTrail.create({ data: { tableName: "System", recordId: "FACTORY_RESET", action: "SYSTEM_FACTORY_RESET_DENIED", newData: { reason: "BAD_PASSWORD" }, performedBy: actor.id, ipAddress } }));
       return fail("كلمة مرور مدير النظام غير صحيحة. تم إلغاء عملية المسح.");
     }
 
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const result = await tenant.run(() => withTxRetry(() => db.$transaction(async (tx) => {
       const [invoices, vouchers, parts, accounts, treasuries] = await Promise.all([
         tx.invoice.count(), tx.treasuryTransaction.count(), tx.partItem.count(), tx.account.count(), tx.treasury.count(),
       ]);
@@ -101,7 +103,7 @@ export async function purgeAllSystemDataAction(raw: { confirmationPhrase: string
       await tx.user.updateMany({ data: { allowedTreasuryIds: [mainTreasury.id, cashDrawer.id] } });
       await tx.systemAuditTrail.create({ data: { tableName: "System", recordId: "FACTORY_RESET", action: "SYSTEM_FACTORY_RESET", newData: { event: "SYSTEM_FACTORY_RESET", executedBy: actor.fullName, invoicesPurged: invoices, vouchersPurged: vouchers, partsPurged: parts, accountsPurged: accounts, treasuriesPurged: treasuries, baseline: { warehouse: "المخزن الرئيسي", treasuries: [mainTreasury.name, cashDrawer.name], cashCustomer: "ACC-0001" } }, performedBy: actor.id } });
       return { invoices, vouchers, parts, accounts, treasuries };
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
 
     for (const path of ["/", "/accounts", "/inventory", "/invoices", "/pos", "/treasury", "/vouchers", "/reports/daily-movement", "/settings"]) revalidatePath(path);
     revalidatePath("/", "layout");

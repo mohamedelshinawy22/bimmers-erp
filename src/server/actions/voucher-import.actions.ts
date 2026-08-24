@@ -16,6 +16,8 @@ import { lockAccountForUpdate, lockTreasuriesForUpdate } from "@/server/services
 import { resolveOrCreateImportTreasuries } from "@/server/services/treasury-channel-resolver.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { voucherMovementKind } from "@/lib/voucher-excel-parser";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
+import { serializeData } from "@/lib/serialize";
 
 const voucherImportTypes = ["RECEIPT", "PAYMENT"] as const;
 type VoucherImportType = (typeof voucherImportTypes)[number];
@@ -108,10 +110,10 @@ async function postImportedTransfer(tx: Prisma.TransactionClient, transfer: { fr
   return record;
 }
 
-async function findAccount(line: ValidVoucherLine, kind: VoucherKind) {
+async function findAccount(db: import("@prisma/client").PrismaClient, line: ValidVoucherLine, kind: VoucherKind) {
   const target = accountTarget(line);
   if (!target || kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") return { account: null, candidates: [], target };
-  const candidates = await prisma.account.findMany({ where: { isActive: true, name: { equals: target, mode: "insensitive" } }, select: { id: true, name: true, type: true } });
+  const candidates = await db.account.findMany({ where: { isActive: true, name: { equals: target, mode: "insensitive" } }, select: { id: true, name: true, type: true } });
   return { account: candidates.length === 1 ? candidates[0] : null, candidates, target };
 }
 
@@ -165,6 +167,7 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
   try {
     const input = importSchema.parse(raw);
     await requirePermission("treasury.transact");
+    const tenant = await getTenantDbFromSession();
     const rows = [] as Array<{ row: number; reference: string; kind: VoucherKind; amount: number; accountName: string; itemCategory: string; channels: Array<{ name: string; amount: number }>; isValid: boolean; reason?: string; accountStatus: "MATCHED" | "AUTO_CREATE" | "EXPENSE_ACCOUNT" | "NONE" }>;
     const pairedSourceRows = new Set(input.reconciledTransfers.flatMap((pair) => [`PAYMENT:${pair.paymentRowNumber}`, `RECEIPT:${pair.receiptRowNumber}`]));
     for (const rawRow of input.rows) {
@@ -177,14 +180,14 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
         continue;
       }
       const issue = issueFor(line, input.type, input.autoCreateAccounts);
-      const accountMatch = await findAccount(line, kind);
+      const accountMatch = await tenant.run(() => findAccount(tenant.prisma, line, kind));
       const accountRequired = Boolean(accountMatch.target) && kind !== "TRANSFER_IN" && kind !== "TRANSFER_OUT";
       const categoryAutoCreate = !line.accountName.trim() && Boolean(line.itemCategory.trim());
       const accountIssue = accountRequired && !accountMatch.account && !input.autoCreateAccounts && !categoryAutoCreate ? `الحساب «${accountMatch.target}» غير مسجل وتم إيقاف الإنشاء التلقائي.` : undefined;
       const channelRows = channelsFor(line).map((channel) => ({ name: channel.name, amount: Number(channel.amount) }));
       rows.push({ row: line.sourceRowNumber, reference: line.transactionReference, kind, amount: line.amount, accountName: line.accountName, itemCategory: line.itemCategory, channels: channelRows, isValid: !(issue ?? accountIssue), reason: issue ?? accountIssue, accountStatus: accountMatch.account ? "MATCHED" : line.itemCategory && !line.accountName ? "EXPENSE_ACCOUNT" : input.autoCreateAccounts ? "AUTO_CREATE" : "NONE" });
     }
-    return ok({ total: rows.length, valid: rows.filter((row) => row.isValid).length, invalid: rows.filter((row) => !row.isValid).map((row) => ({ row: row.row, reason: row.reason ?? "صف غير صالح" })), rows });
+    return ok(serializeData({ total: rows.length, valid: rows.filter((row) => row.isValid).length, invalid: rows.filter((row) => !row.isValid).map((row) => ({ row: row.row, reason: row.reason ?? "صف غير صالح" })), rows }));
   } catch (error) { return toActionError(error, "previewVoucherImportAction"); }
 }
 

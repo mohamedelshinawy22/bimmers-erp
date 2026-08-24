@@ -51,3 +51,6 @@
 - [ ] Implement tenant-scoped invoice batch execution with bulk missing-account preparation and idempotent result reporting.
 - [ ] Add client-side sequential chunk dispatch, live progress feedback, and regression coverage.
 - [ ] Validate, deploy, and confirm the 319-row invoice import completes with visible progress in production.
+- [ ] Trace tenant-scoped factory-reset authentication, dependency ordering, and post-reset session safety.
+- [ ] Harden voucher-transfer preview parsing, bulk tenant resolution, pairing, and serialized error results.
+- [ ] Add regression coverage, validate, deploy, and obtain authenticated confirmation for reset and transfer-preview flows.
