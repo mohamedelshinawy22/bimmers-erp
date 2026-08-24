@@ -58,3 +58,6 @@
 - [ ] Add tenant-scoped account/treasury pre-resolution and serializable receipt batch execution results.
 - [ ] Add client-side receipt chunk dispatch with live progress and detailed failed-batch reporting.
 - [ ] Validate, deploy, and confirm the 315-voucher/16-transfer posting flow in production.
+- [ ] Trace fresh-tenant treasury/account initialization gaps in receipt posting batches.
+- [ ] Add tenant-scoped fallback treasury and committed missing-account preparation with actionable batch errors.
+- [ ] Validate, deploy, and confirm receipt posting succeeds in the fresh tenant.

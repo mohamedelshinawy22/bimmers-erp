@@ -195,6 +195,10 @@ export async function executeVoucherImportAction(raw: unknown): Promise<ActionRe
   try {
     const input = importSchema.parse(raw);
     const user = await requirePermission("treasury.transact");
+    const defaultTreasury = await prisma.treasury.findFirst({ where: { isActive: true }, select: { id: true, name: true } });
+    if (!defaultTreasury) {
+      await prisma.treasury.create({ data: { name: "الخزينة الرئيسية", type: "CASH_DRAWER", currentBalance: 0, isActive: true, isDefault: true, notes: "خزينة أساسية أُنشئت تلقائياً قبل ترحيل السندات" } });
+    }
     const parsed = input.rows.map((rawRow) => ({ rawRow, parsed: voucherLineSchema.safeParse(rawRow) }));
     const invalid = parsed.filter((entry) => !entry.parsed.success).map((entry) => ({ row: Number((entry.rawRow as { sourceRowNumber?: number })?.sourceRowNumber ?? 0), reason: (entry.parsed as { success: false; error: z.ZodError }).error.issues.map((issue) => issue.message).join(" • ") }));
     const lines = parsed.filter((entry): entry is { rawRow: unknown; parsed: { success: true; data: ValidVoucherLine } } => entry.parsed.success).map((entry) => entry.parsed.data);
