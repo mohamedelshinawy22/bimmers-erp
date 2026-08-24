@@ -58,7 +58,7 @@ export function CombinedVoucherImportModal({ treasuries, onClose, onDone }: { tr
   const missingManualPair = unmatched.some(({ type, row }) => !counterpartyFor(type, row).trim());
   const runPreview = () => startTransition(async () => { setError(null); if (!payload.rows.length) { setError("ارفع ملف قبض أو صرف واحداً على الأقل."); return; } if (missingManualPair) { setError("اختر الخزينة المقابلة لكل تحويل غير مطابق قبل الفحص."); return; } const result = await previewVoucherImportAction(payload); if (!result.success) { setError(result.error); return; } setPreview(result.data); });
   const execute = () => startTransition(async () => {
-    setError(null); const validRowIds = new Set(preview?.rows.filter((row) => row.isValid).map((row) => row.row) ?? []); const validRows = preview ? payload.rows.filter((row) => validRowIds.has(Number(row.sourceRowNumber))) : payload.rows;
+    setError(null); const validRowIds = new Set(preview?.rows.filter((row) => row.isValid).map((row) => row.row) ?? []); const pairedRows = new Set(payload.reconciledTransfers.flatMap((pair) => [`PAYMENT:${pair.paymentRowNumber}`, `RECEIPT:${pair.receiptRowNumber}`])); const validRows = (preview ? payload.rows.filter((row) => validRowIds.has(Number(row.sourceRowNumber))) : payload.rows).filter((row) => !pairedRows.has(`${row.defaultType}:${row.sourceRowNumber}`));
     let created = 0; let transfers = 0; let processed = 0; setProgress({ processed, total: validRows.length });
     for (let start = 0; start < validRows.length; start += VOUCHER_CHUNK_SIZE) {
       const rows = validRows.slice(start, start + VOUCHER_CHUNK_SIZE);

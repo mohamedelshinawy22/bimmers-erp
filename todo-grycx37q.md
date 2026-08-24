@@ -61,3 +61,6 @@
 - [ ] Trace fresh-tenant treasury/account initialization gaps in receipt posting batches.
 - [ ] Add tenant-scoped fallback treasury and committed missing-account preparation with actionable batch errors.
 - [ ] Validate, deploy, and confirm receipt posting succeeds in the fresh tenant.
+- [ ] Trace reconciled transfer rows entering the standard voucher execution stream.
+- [ ] Separate standard voucher and transfer posting with tenant-scoped detailed batch result handling.
+- [ ] Validate, deploy, and confirm unified receipt execution advances past the first batch.
