@@ -158,9 +158,10 @@ export async function createPartAction(
 export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResult<{ id: string }>> {
   try {
     const user = await requirePermission("part.write");
-    const input = updatePartSchema.parse(raw);
+    const tenant = await getTenantDbFromSession();
+    const input = updatePartSchema.parse({ ...raw, binLocationId: normalizeOptionalPartReference(raw.binLocationId) });
 
-    await prisma.$transaction(async (tx) => {
+    await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
       const before = await tx.partItem.findUnique({
         where: { id: input.id },
         include: { compatibleChassis: true, compatibleEngines: true },
@@ -239,7 +240,7 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
         newData: updated,
         performedBy: user.id,
       });
-    }, TX_OPTIONS);
+    }, PRODUCT_CREATE_TX_OPTIONS));
 
     revalidatePath("/inventory");
     revalidatePath("/pos");

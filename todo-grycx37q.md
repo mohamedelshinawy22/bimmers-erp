@@ -83,3 +83,4 @@
 - [x] Trace and fix the `/catalog` SSR crash with large imported datasets and sparse product relations.
 - [x] Fix tenant-scoped manual product creation with resilient brand, category, price, and optional bin handling.
 - [ ] Add regression coverage, deploy, and obtain authenticated confirmation for large Catalog loading and custom product creation.
+- [ ] Diagnose and resolve recurring production `/catalog` SSR digest `1688063370` for the 899-product tenant.

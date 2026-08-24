@@ -50,5 +50,7 @@ describe("Catalog resilience boundaries", () => {
     expect(actions).toContain("tenant.prisma.category.upsert");
     expect(actions).toContain("binLocationId: input.binLocationId ?? null");
     expect(actions).toContain("tenant.prisma.$transaction");
+    expect(actions).toContain("export async function updatePartAction");
+    expect(actions).toContain("await tenant.run(() => tenant.prisma.$transaction(async (tx) => {");
   });
 });
