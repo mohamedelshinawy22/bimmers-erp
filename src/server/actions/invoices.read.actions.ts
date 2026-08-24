@@ -8,6 +8,7 @@ import { getInvoiceDetail, listInvoices, type InvoiceDetail } from "@/server/ser
 import { getStockLedger } from "@/server/services/parts.service";
 import { prisma } from "@/lib/prisma";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
+import { serializeData } from "@/lib/serialize";
 import { getAccountDetailedLedger, getAccountStatement } from "@/server/services/accounts.service";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
@@ -77,7 +78,7 @@ export async function getAccountDetailedLedgerAction(accountId: string, filters?
     return tenant.run(async () => {
       const ledger = await getAccountDetailedLedger(accountId, filters);
       if (!ledger) return { success: false as const, error: "الحساب غير موجود." };
-      return ok(ledger);
+      return ok(serializeData(ledger));
     });
   } catch (error) {
     return toActionError(error, "getAccountDetailedLedgerAction");
@@ -98,7 +99,7 @@ export async function getAccountPdcInstallmentsAction(accountId: string) {
       },
     });
     if (!account) return { success: false as const, error: "الحساب غير موجود." };
-    return ok({ checks: account.checks.map((check) => ({ ...check, amount: Number(check.amount), issueDate: check.issueDate?.toISOString() ?? null, dueDate: check.dueDate?.toISOString() ?? null })), installmentPlans: account.installmentPlans.map((plan) => ({ ...plan, totalAmount: Number(plan.totalAmount), startDate: plan.startDate?.toISOString() ?? null, installments: plan.installments.map((installment) => ({ ...installment, amount: Number(installment.amount), paidAmount: Number(installment.paidAmount), dueDate: installment.dueDate?.toISOString() ?? null })) })) });
+    return ok(serializeData({ checks: account.checks.map((check) => ({ ...check, amount: Number(check.amount), issueDate: check.issueDate?.toISOString() ?? null, dueDate: check.dueDate?.toISOString() ?? null })), installmentPlans: account.installmentPlans.map((plan) => ({ ...plan, totalAmount: Number(plan.totalAmount), startDate: plan.startDate?.toISOString() ?? null, installments: plan.installments.map((installment) => ({ ...installment, amount: Number(installment.amount), paidAmount: Number(installment.paidAmount), dueDate: installment.dueDate?.toISOString() ?? null })) })) }));
     });
   } catch (error) {
     return toActionError(error, "getAccountPdcInstallmentsAction");
@@ -112,7 +113,7 @@ export async function getAccountStatementAction(accountId: string) {
     return tenant.run(async () => {
       const statement = await getAccountStatement(accountId);
       if (!statement) return { success: false as const, error: "الحساب غير موجود." };
-      return ok(statement);
+      return ok(serializeData(statement));
     });
   } catch (error) {
     return toActionError(error, "getAccountStatementAction");

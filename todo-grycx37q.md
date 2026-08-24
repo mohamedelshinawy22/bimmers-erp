@@ -16,3 +16,7 @@
 - [x] Bind account statement generation and voucher detail, mutation, cancellation, and treasury-update actions to explicit tenant context with safe relation mapping.
 - [x] Harden `/users` serialization and permissions data against missing relations and sensitive-field leakage.
 - [x] Add regression coverage for interactive action error results, then typecheck, build, deploy, and verify production boundaries.
+- [ ] Inspect voucher and account-statement action payloads for Prisma serialization hazards and locate the invoice date-format defect.
+- [ ] Add a reusable safe serializer and apply it to voucher and account-statement modal action results with null-safe relation mapping.
+- [ ] Correct leading-plus date rendering and verify spreadsheet and print action payload safety.
+- [ ] Add serializer/date regression tests, typecheck, build, deploy, and verify production boundaries.

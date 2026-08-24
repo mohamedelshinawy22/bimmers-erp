@@ -53,16 +53,18 @@ export function formatInt(v: number | null | undefined): string {
 /** ── Dates ────────────────────────────────────────────────────────────── */
 export function formatDate(d: Date | string): string {
   const date = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("ar-EG", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     numberingSystem: "latn",
-  }).format(date);
+  }).format(date).replace(/^\+/, "");
 }
 
 export function formatDateTime(d: Date | string): string {
   const date = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("ar-EG", {
     year: "numeric",
     month: "2-digit",
@@ -70,7 +72,7 @@ export function formatDateTime(d: Date | string): string {
     hour: "2-digit",
     minute: "2-digit",
     numberingSystem: "latn",
-  }).format(date);
+  }).format(date).replace(/^\+/, "");
 }
 
 export function startOfToday(): Date {
