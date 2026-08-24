@@ -1,6 +1,5 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { money, num, sanitizeOemForSearch } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
@@ -47,6 +46,7 @@ const partInclude = {
 } satisfies Prisma.PartItemInclude;
 
 type PartWithRelations = Prisma.PartItemGetPayload<{ include: typeof partInclude }>;
+type PartsDb = PrismaClient;
 
 type DuplicateMetadata = {
   oemCounts: Map<string, number>;
@@ -54,20 +54,21 @@ type DuplicateMetadata = {
   brandsByOem: Map<string, string[]>;
 };
 
-async function getDuplicateMetadata(parts: Array<{ oemNumber: string; nameAr: string }>): Promise<DuplicateMetadata> {
+async function getDuplicateMetadata(db: PartsDb, parts: Array<{ oemNumber: string; nameAr: string }>): Promise<DuplicateMetadata> {
   const oems = [...new Set(parts.map((part) => part.oemNumber))];
   const names = [...new Set(parts.map((part) => part.nameAr))];
   if (!oems.length) return { oemCounts: new Map(), nameCounts: new Map(), brandsByOem: new Map() };
   const active = { isActive: true, isDeleted: false };
   const [oemGroups, nameGroups, variants] = await Promise.all([
-    prisma.partItem.groupBy({ by: ["oemNumber"], where: { ...active, oemNumber: { in: oems } }, _count: { _all: true } }),
-    prisma.partItem.groupBy({ by: ["nameAr"], where: { ...active, nameAr: { in: names } }, _count: { _all: true } }),
-    prisma.partItem.findMany({ where: { ...active, oemNumber: { in: oems } }, select: { oemNumber: true, brand: { select: { name: true } } }, orderBy: { brand: { name: "asc" } } }),
+    db.partItem.groupBy({ by: ["oemNumber"], where: { ...active, oemNumber: { in: oems } }, _count: { _all: true } }),
+    db.partItem.groupBy({ by: ["nameAr"], where: { ...active, nameAr: { in: names } }, _count: { _all: true } }),
+    db.partItem.findMany({ where: { ...active, oemNumber: { in: oems } }, select: { oemNumber: true, brand: { select: { name: true } } }, orderBy: { brand: { name: "asc" } } }),
   ]);
   const brandsByOem = new Map<string, string[]>();
   for (const variant of variants) {
     const brands = brandsByOem.get(variant.oemNumber) ?? [];
-    if (!brands.includes(variant.brand.name)) brands.push(variant.brand.name);
+    const brandName = variant.brand?.name?.trim() || "بدون علامة تجارية";
+    if (!brands.includes(brandName)) brands.push(brandName);
     brandsByOem.set(variant.oemNumber, brands);
   }
   return {
@@ -78,6 +79,7 @@ async function getDuplicateMetadata(parts: Array<{ oemNumber: string; nameAr: st
 }
 
 function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts: new Map(), nameCounts: new Map(), brandsByOem: new Map() }): PartRow {
+  const brandName = p.brand?.name?.trim() || "بدون علامة تجارية";
   return {
     id: p.id,
     oemNumber: p.oemNumber,
@@ -85,8 +87,8 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
     nameAr: p.nameAr,
     nameEn: p.nameEn,
     brandId: p.brandId,
-    brandName: p.brand.name,
-    isOem: p.brand.isOem,
+    brandName,
+    isOem: Boolean(p.brand?.isOem),
     brandPartNumber: p.brandPartNumber,
     barcode: p.barcode,
     category: p.category,
@@ -101,13 +103,13 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
     stockReserved: p.stockReserved,
     minReorderLevel: p.minReorderLevel,
     isActive: p.isActive,
-    chassisIds: p.compatibleChassis.map((c) => c.chassisId),
-    engineIds: p.compatibleEngines.map((e) => e.engineId),
-    chassisCodes: p.compatibleChassis.map((c) => c.chassis.code),
-    engineCodes: p.compatibleEngines.map((e) => e.engine.code),
+    chassisIds: (p.compatibleChassis ?? []).map((c) => c.chassisId).filter(Boolean),
+    engineIds: (p.compatibleEngines ?? []).map((e) => e.engineId).filter(Boolean),
+    chassisCodes: (p.compatibleChassis ?? []).map((c) => c.chassis?.code?.trim()).filter((code): code is string => Boolean(code)),
+    engineCodes: (p.compatibleEngines ?? []).map((e) => e.engine?.code?.trim()).filter((code): code is string => Boolean(code)),
     duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0,
     duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0,
-    duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name],
+    duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [brandName],
   };
 }
 
@@ -117,6 +119,7 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
  * PartItem.oemNumber / PartItem.nameAr — sub-millisecond even at 100k+ rows.
  */
 export async function searchParts(
+  db: PartsDb,
   raw: Partial<SearchPartsInput>,
 ): Promise<{ rows: PartRow[]; total: number; page: number; pageSize: number }> {
   const input = searchPartsSchema.parse(raw);
@@ -129,7 +132,7 @@ export async function searchParts(
     // PostgreSQL comparison key removes visual separators in stored legacy OEMs too,
     // so 17 11-8 484 638, 17118484638, and 17/118/484638 resolve identically.
     const separatorInsensitiveIds = oemKey.length >= 2
-      ? await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT 10000`)
+      ? await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT 10000`)
       : [];
     and.push({
       OR: [
@@ -154,22 +157,22 @@ export async function searchParts(
     // Column-to-column comparison; Prisma's query builder cannot express it, so
     // it is pushed down as a raw filter. Printing deliberately expands this
     // prefilter to the same guarded upper bound as the final unpaginated query.
-    and.push({ id: { in: await lowStockPartIds(input.isForPrint ? 10_000 : input.pageSize * input.page + input.pageSize) } });
+    and.push({ id: { in: await lowStockPartIds(db, input.isForPrint ? 10_000 : input.pageSize * input.page + input.pageSize) } });
   }
   if (and.length) where.AND = and;
 
   const [rows, total] = await Promise.all([
-    prisma.partItem.findMany({
+    db.partItem.findMany({
       where,
       include: partInclude,
       orderBy: [{ isActive: "desc" }, { nameAr: "asc" }],
       skip: input.isForPrint ? undefined : (input.page - 1) * input.pageSize,
       take: input.isForPrint ? 10_000 : input.pageSize,
     }),
-    prisma.partItem.count({ where }),
+    db.partItem.count({ where }),
   ]);
 
-  const duplicates = await getDuplicateMetadata(rows);
+  const duplicates = await getDuplicateMetadata(db, rows);
   return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.isForPrint ? rows.length : input.pageSize };
 }
 
@@ -207,15 +210,15 @@ function toPosRow(p: { id: string; oemNumber: string; nameAr: string; nameEn: st
   return { id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel, duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0, duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0, duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name] };
 }
 
-export async function quickSearchParts(query: string, limit = 12): Promise<PosPartRow[]> {
+export async function quickSearchParts(db: PartsDb, query: string, limit = 12): Promise<PosPartRow[]> {
   const { normalized, numericNormalized, variations } = normalizeSearchTerm(query);
   const oemKey = sanitizeOemForSearch(query);
   if (normalized.length < 2) return [];
   const separatorInsensitiveIds = oemKey.length >= 2
-    ? await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT ${Math.max(limit * 8, 96)}`)
+    ? await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT ${Math.max(limit * 8, 96)}`)
     : [];
 
-  const rows = await prisma.partItem.findMany({
+  const rows = await db.partItem.findMany({
     where: {
       isActive: true,
       isDeleted: false,
@@ -254,32 +257,32 @@ export async function quickSearchParts(query: string, limit = 12): Promise<PosPa
     take: limit,
   });
 
-  const duplicates = await getDuplicateMetadata(rows);
+  const duplicates = await getDuplicateMetadata(db, rows);
   return rows.map((row) => toPosRow(row, duplicates));
 }
 
-export async function getPosPartsByIds(ids: string[]): Promise<PosPartRow[]> {
+export async function getPosPartsByIds(db: PartsDb, ids: string[]): Promise<PosPartRow[]> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
-  const rows = await prisma.partItem.findMany({
+  const rows = await db.partItem.findMany({
     where: { id: { in: unique }, isDeleted: false },
     select: { id: true, oemNumber: true, nameAr: true, nameEn: true, brandPartNumber: true, category: true, sidePosition: true, sellPriceRetail: true, sellPriceWholesale: true, sellPriceMin: true, stockQuantity: true, stockReserved: true, minReorderLevel: true, brand: { select: { name: true, isOem: true } }, binLocation: { select: { fullCode: true } } },
   });
-  const [duplicates] = await Promise.all([getDuplicateMetadata(rows)]);
+  const [duplicates] = await Promise.all([getDuplicateMetadata(db, rows)]);
   const order = new Map(unique.map((id, index) => [id, index]));
   return rows.map((row) => toPosRow(row, duplicates)).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
-export async function getPartById(id: string): Promise<PartRow | null> {
-  const part = await prisma.partItem.findUnique({ where: { id }, include: partInclude });
+export async function getPartById(db: PartsDb, id: string): Promise<PartRow | null> {
+  const part = await db.partItem.findUnique({ where: { id }, include: partInclude });
   if (!part) return null;
-  const duplicates = await getDuplicateMetadata([part]);
+  const duplicates = await getDuplicateMetadata(db, [part]);
   return toRow(part, duplicates);
 }
 
 /** Ids of parts at or below their reorder level, worst deficit first. */
-async function lowStockPartIds(limit: number): Promise<string[]> {
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>(
+async function lowStockPartIds(db: PartsDb, limit: number): Promise<string[]> {
+  const rows = await db.$queryRaw<Array<{ id: string }>>(
     Prisma.sql`
       SELECT "id" FROM "PartItem"
       WHERE "isActive" = true AND "isDeleted" = false AND "stockQuantity" <= "minReorderLevel"
@@ -290,8 +293,8 @@ async function lowStockPartIds(limit: number): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-export async function getLowStockParts(limit = 50): Promise<PartRow[]> {
-  const ids = await prisma.$queryRaw<Array<{ id: string }>>(
+export async function getLowStockParts(db: PartsDb, limit = 50): Promise<PartRow[]> {
+  const ids = await db.$queryRaw<Array<{ id: string }>>(
     Prisma.sql`
       SELECT "id" FROM "PartItem"
       WHERE "stockQuantity" <= "minReorderLevel" AND "isActive" = true
@@ -300,34 +303,34 @@ export async function getLowStockParts(limit = 50): Promise<PartRow[]> {
     `,
   );
   if (ids.length === 0) return [];
-  const rows = await prisma.partItem.findMany({
+  const rows = await db.partItem.findMany({
     where: { id: { in: ids.map((i) => i.id) } },
     include: partInclude,
   });
   const order = new Map(ids.map((r, i) => [r.id, i]));
-  const duplicates = await getDuplicateMetadata(rows);
+  const duplicates = await getDuplicateMetadata(db, rows);
   return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map((row) => toRow(row, duplicates));
 }
 
-export async function getPartFormOptions() {
+export async function getPartFormOptions(db: PartsDb) {
   const [brands, chassis, engines, bins] = await Promise.all([
-    prisma.brand.findMany({ orderBy: [{ isOem: "desc" }, { name: "asc" }], select: { id: true, name: true, isOem: true } }),
-    prisma.bmwChassis.findMany({
+    db.brand.findMany({ orderBy: [{ isOem: "desc" }, { name: "asc" }], select: { id: true, name: true, isOem: true } }),
+    db.bmwChassis.findMany({
       orderBy: [{ series: "asc" }, { code: "asc" }],
       select: { id: true, code: true, series: true },
     }),
-    prisma.bmwEngine.findMany({
+    db.bmwEngine.findMany({
       orderBy: { code: "asc" },
       select: { id: true, code: true, displacement: true, fuelType: true },
     }),
-    prisma.warehouseBin.findMany({ orderBy: { fullCode: "asc" }, select: { id: true, fullCode: true } }),
+    db.warehouseBin.findMany({ orderBy: { fullCode: "asc" }, select: { id: true, fullCode: true } }),
   ]);
   return { brands, chassis, engines, bins };
 }
 
 /** Stock ledger for one part — the audit view that proves the balance. */
-export async function getStockLedger(partId: string, limit = 100) {
-  const moves = await prisma.stockMovement.findMany({
+export async function getStockLedger(db: PartsDb, partId: string, limit = 100) {
+  const moves = await db.stockMovement.findMany({
     where: { partId },
     // seq, not createdAt: concurrent commits share a timestamp.
     orderBy: { seq: "desc" },

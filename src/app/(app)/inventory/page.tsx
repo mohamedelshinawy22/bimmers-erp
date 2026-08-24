@@ -38,7 +38,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
   const canPurchase = can(user.role, "invoice.purchase");
 
   const [result, options, categories, purchaseOptions, taxRateRaw, company] = await Promise.all([
-    searchParts({
+    searchParts(tenant.prisma, {
       query,
       chassisCode: chassisCode || undefined,
       engineCode: searchParams.engine || undefined,
@@ -47,11 +47,11 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       page,
       pageSize: 25,
     }).catch(() => ({ rows: [], total: 0, page, pageSize: 25 })),
-    getPartFormOptions().catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
-    getPartCategories().catch(() => []),
-    (canPurchase ? getPurchaseFormOptions() : Promise.resolve({ suppliers: [], treasuries: [] })).catch(() => ({ suppliers: [], treasuries: [] })),
-    getSetting("TAX_RATE_PERCENT", "0"),
-    getCompanyProfile(),
+    getPartFormOptions(tenant.prisma).catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
+    getPartCategories(tenant.prisma).catch(() => []),
+    (canPurchase ? getPurchaseFormOptions(tenant.prisma) : Promise.resolve({ suppliers: [], treasuries: [] })).catch(() => ({ suppliers: [], treasuries: [] })),
+    getSetting("TAX_RATE_PERCENT", "0", tenant.prisma),
+    getCompanyProfile(tenant.prisma),
   ]);
 
   const canViewCost = can(user.role, "part.viewCost") && hasPermission(access, "canViewCostPrice");

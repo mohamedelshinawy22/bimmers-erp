@@ -21,6 +21,18 @@ describe("interactive tenant action boundaries", () => {
     expect(actions).toContain("toActionError(error, \"getVoucherDetailsAction\")");
   });
 
+  it("normalizes accountless manual vouchers and posts them in the active tenant database", () => {
+    const actions = source("src/server/actions/treasury.actions.ts");
+    const modal = source("src/app/(app)/vouchers/vouchers-client.tsx");
+    expect(actions).toContain("function normalizeOptionalVoucherAccountId");
+    expect(actions).toContain('"بدون حساب"');
+    expect(actions).toContain("const tenant = await getTenantDbFromSession()");
+    expect(actions).toContain("tenant.run(() => withTxRetry");
+    expect(actions).toContain("tenant.prisma.$transaction");
+    expect(actions).toContain("accountId = invoice?.accountId ?? input.accountId ?? null");
+    expect(modal).toContain('<option value="">بدون حساب</option>');
+  });
+
   it("maps users with an explicit tenant client and avoids sensitive password fields", () => {
     const page = source("src/app/(app)/users/page.tsx");
     const mapper = source("src/server/services/audit.service.ts");

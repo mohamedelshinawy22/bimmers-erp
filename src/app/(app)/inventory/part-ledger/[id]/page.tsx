@@ -15,7 +15,7 @@ export default async function PartLedgerPage({ params }: { params: { id: string 
   let rows: Awaited<ReturnType<typeof getStockLedger>>;
   let company: Awaited<ReturnType<typeof getCompanyProfile>>;
   try {
-    [part, rows, company] = await tenant.run(async () => Promise.all([getPartById(params.id), getStockLedger(params.id, 1000), getCompanyProfile()]));
+    [part, rows, company] = await tenant.run(async () => Promise.all([getPartById(tenant.prisma, params.id), getStockLedger(tenant.prisma, params.id, 1000), getCompanyProfile(tenant.prisma)]));
   } catch (error) {
     console.error("Unable to load tenant-scoped part ledger", { tenantId: user.tenantId, partId: params.id, error });
     return <main className="space-y-4" dir="rtl"><div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">تعذر تحميل دفتر حركة الصنف مؤقتاً. أعد المحاولة بعد لحظات.</div></main>;

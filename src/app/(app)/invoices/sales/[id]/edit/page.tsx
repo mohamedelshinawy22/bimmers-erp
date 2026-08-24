@@ -19,12 +19,12 @@ export default async function SalesInvoiceEditPage({ params }: { params: { id: s
   try {
     initial = await tenant.run(async () => {
       const [invoice, accounts, treasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter] = await Promise.all([
-        getInvoiceDetail(params.id), getPosAccounts(), tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: [{ type: "asc" }, { name: "asc" }], select: { id: true, name: true, type: true } }), getSetting("TAX_RATE_PERCENT", "0"), getSetting("COMPANY_NAME", "BimmerERP"), getSetting("ENFORCE_CREDIT_LIMIT", "true"), getSetting("ALLOW_NEGATIVE_STOCK", "false"), getSetting("INVOICE_FOOTER", ""),
+        getInvoiceDetail(params.id), getPosAccounts(), tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: [{ type: "asc" }, { name: "asc" }], select: { id: true, name: true, type: true } }), getSetting("TAX_RATE_PERCENT", "0", tenant.prisma), getSetting("COMPANY_NAME", "BimmerERP", tenant.prisma), getSetting("ENFORCE_CREDIT_LIMIT", "true", tenant.prisma), getSetting("ALLOW_NEGATIVE_STOCK", "false", tenant.prisma), getSetting("INVOICE_FOOTER", "", tenant.prisma),
       ]);
       if (!invoice || invoice.type !== "SALE" || invoice.isVoided) return null;
       const catalogItems = invoice.items.filter((item): item is typeof item & { partId: string } => Boolean(item.partId));
       if (catalogItems.length !== invoice.items.length) return null;
-      const parts = await getPosPartsByIds(catalogItems.map((item) => item.partId));
+      const parts = await getPosPartsByIds(tenant.prisma, catalogItems.map((item) => item.partId));
       const byId = new Map(parts.map((part) => [part.id, part]));
       const lines = catalogItems.map((item) => {
         const part = byId.get(item.partId);

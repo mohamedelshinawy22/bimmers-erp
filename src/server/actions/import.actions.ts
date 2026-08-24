@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { writeAudit } from "@/lib/audit";
@@ -23,21 +22,25 @@ const nonNegativeSpreadsheetQuantity = z.preprocess(
   (value) => parseSpreadsheetNumber(value),
   z.number().finite().int().min(0).max(10_000_000),
 );
+const spreadsheetText = (max: number) => z.preprocess(
+  (value) => value === null || value === undefined ? "" : String(value).trim(),
+  z.string().max(max),
+);
 
 const importRowSchema = z.object({
   sourceRowNumber: z.coerce.number().int().positive().optional(),
-  nameAr: z.string().trim().min(1, "اسم الصنف مطلوب.").max(240),
+  nameAr: spreadsheetText(240).pipe(z.string().min(1, "اسم الصنف مطلوب.")),
   // Shared and paired part numbers such as 51117111741/742 are valid catalog identifiers.
-  oemNumber: z.string().trim().min(1, "كود OEM مطلوب.").max(120).regex(/^[A-Za-z0-9\s\-/]+$/, "كود OEM يسمح بالحروف والأرقام والمسافات والشرطة والشرطة المائلة فقط."),
-  barcode: z.string().trim().max(100).optional().or(z.literal("")),
-  brand: z.string().trim().max(120).optional().or(z.literal("")),
-  category: z.string().trim().max(160).optional().or(z.literal("")),
-  chassis: z.string().trim().max(400).optional().or(z.literal("")),
-  engine: z.string().trim().max(400).optional().or(z.literal("")),
+  oemNumber: spreadsheetText(120).pipe(z.string().min(1, "كود OEM مطلوب.").regex(/^[A-Za-z0-9\s\-/]+$/, "كود OEM يسمح بالحروف والأرقام والمسافات والشرطة والشرطة المائلة فقط.")),
+  barcode: spreadsheetText(100).optional(),
+  brand: spreadsheetText(120).optional(),
+  category: spreadsheetText(160).optional(),
+  chassis: spreadsheetText(400).optional(),
+  engine: spreadsheetText(400).optional(),
   cost: nonNegativeSpreadsheetNumber,
   price: nonNegativeSpreadsheetNumber,
   quantity: nonNegativeSpreadsheetQuantity,
-  bin: z.string().trim().max(120).optional().or(z.literal("")),
+  bin: spreadsheetText(120).optional(),
 });
 const importSchema = z.object({
   mapping: z.record(z.string(), z.string()),
@@ -110,9 +113,11 @@ export async function executeInventoryImportAction(raw: ImportInput) {
 
             const category = await tx.category.upsert({ where: { normalizedName: key(row.category) }, update: {}, create: { name: row.category, normalizedName: key(row.category) }, select: { id: true } });
             const chassisIds: string[] = [];
-            for (const code of codes(row.chassis)) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);
+            for (const code of new Set(codes(row.chassis))) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);
             const engineIds: string[] = [];
-            for (const code of codes(row.engine)) engineIds.push((await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id);
+            for (const code of new Set(codes(row.engine))) engineIds.push((await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id);
+            const binCode = row.bin?.trim() || null;
+            const bin = binCode ? await tx.warehouseBin.findUnique({ where: { fullCode: binCode }, select: { id: true } }) : null;
 
             const buyPrice = money(row.cost);
             // Explicit duplicate barcodes are cleared to null. This preserves the item and
@@ -122,7 +127,7 @@ export async function executeInventoryImportAction(raw: ImportInput) {
             if (barcode) occupiedBarcodes.add(barcode);
             const createData = {
               oemNumber: row.oemNumber, partNumberFormatted: formatOemNumber(row.oemNumber), nameAr: row.nameAr, barcode,
-              brandId: brand.id, category: row.category, categoryId: category.id, buyPriceLast: buyPrice, buyPriceAvg: row.quantity > 0 ? buyPrice : money(0),
+              brandId: brand.id, category: row.category, categoryId: category.id, binLocationId: bin?.id ?? null, buyPriceLast: buyPrice, buyPriceAvg: row.quantity > 0 ? buyPrice : money(0),
               sellPriceRetail: money(row.price), sellPriceWholesale: money(row.price), sellPriceMin: money(row.price), stockQuantity: row.quantity,
               compatibleChassis: { createMany: { data: chassisIds.map((chassisId) => ({ chassisId })) } },
               compatibleEngines: { createMany: { data: engineIds.map((engineId) => ({ engineId })) } },

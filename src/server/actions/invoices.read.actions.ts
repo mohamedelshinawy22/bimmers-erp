@@ -63,7 +63,8 @@ export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionR
 export async function getStockLedgerAction(partId: string) {
   try {
     const user = await requirePermission("stock.viewLedger");
-    const rows = await getStockLedger(partId, 100);
+    const tenant = await getTenantDbFromSession();
+    const rows = await tenant.run(() => getStockLedger(tenant.prisma, partId, 100));
     const access = await getUserAccess(user.id);
     return ok(hasPermission(access, "canViewCostPrice") ? rows : rows.map((row) => ({ ...row, unitCost: 0, invoiceUnitCost: 0, invoiceTotalCost: 0 })));
   } catch (error) {

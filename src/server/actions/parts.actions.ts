@@ -25,6 +25,7 @@ import { recordStockMovement } from "@/server/services/inventory.service";
 import { adjustStock } from "@/server/services/stock.service";
 import { searchParts } from "@/server/services/parts.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 
 export async function createPartAction(
@@ -322,7 +323,8 @@ export async function getPartsForPrintAction(raw: unknown) {
   try {
     await requirePermission("part.read");
     const filters = searchPartsSchema.parse(raw ?? {});
-    const result = await searchParts({ ...filters, page: 1, pageSize: 100, isForPrint: true });
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => searchParts(tenant.prisma, { ...filters, page: 1, pageSize: 100, isForPrint: true }));
     return ok({ rows: result.rows, total: result.total, capped: result.total > result.rows.length });
   } catch (error) {
     return toActionError(error, "getPartsForPrintAction");
@@ -390,4 +392,3 @@ export async function createBinAction(raw: CreateBinInput): Promise<ActionResult
     return toActionError(error, "createBinAction");
   }
 }
-

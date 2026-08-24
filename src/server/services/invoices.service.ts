@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
+type PurchaseOptionsDb = Pick<typeof prisma, "account" | "treasury">;
+
 export interface InvoiceListRow {
   id: string;
   invoiceNumber: string;
@@ -226,14 +228,14 @@ export async function getInvoiceDetail(invoiceId: string) {
 export type InvoiceDetail = NonNullable<Awaited<ReturnType<typeof getInvoiceDetail>>>;
 
 /** Suppliers for the goods-receipt screen. */
-export async function getPurchaseFormOptions() {
+export async function getPurchaseFormOptions(db: PurchaseOptionsDb) {
   const [suppliers, treasuries] = await Promise.all([
-    prisma.account.findMany({
+    db.account.findMany({
       where: { isActive: true, type: "SUPPLIER" },
       orderBy: { name: "asc" },
       select: { id: true, name: true, accountNumber: true, phone: true, currentBalance: true },
     }),
-    prisma.treasury.findMany({
+    db.treasury.findMany({
       where: { isActive: true },
       orderBy: [{ type: "asc" }, { name: "asc" }],
       select: { id: true, name: true, currentBalance: true },

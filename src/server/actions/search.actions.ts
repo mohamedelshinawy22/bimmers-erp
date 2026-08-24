@@ -3,6 +3,7 @@
 import { requirePermission } from "@/lib/auth";
 import { toActionError, ok, type ActionResult } from "@/lib/action-result";
 import { quickSearchParts, type PosPartRow } from "@/server/services/parts.service";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getAccountVehicles, searchPosAccounts, searchSupplierAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
 
 /**
@@ -33,7 +34,8 @@ export async function searchSuppliersAction(query: string): Promise<ActionResult
 export async function searchPartsForPosAction(query: string): Promise<ActionResult<PosPartRow[]>> {
   try {
     await requirePermission("part.read");
-    const rows = await quickSearchParts(query, 12);
+    const tenant = await getTenantDbFromSession();
+    const rows = await tenant.run(() => quickSearchParts(tenant.prisma, query, 12));
     return ok(rows);
   } catch (error) {
     return toActionError(error, "searchPartsForPosAction");

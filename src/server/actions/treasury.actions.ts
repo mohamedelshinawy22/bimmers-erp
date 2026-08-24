@@ -1,6 +1,5 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
@@ -24,6 +23,7 @@ import { nextShiftNumber, nextTransactionNumber } from "@/server/services/number
 import { lockAccountForUpdate, lockAccountsForUpdate, lockTreasuriesForUpdate } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { createTreasurySchema, treasuryReportSchema, treasurySchema, type CreateTreasuryInput, type TreasuryInput, type TreasuryReportInput } from "@/lib/validations/treasury";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 
 
@@ -31,6 +31,14 @@ import { createTreasurySchema, treasuryReportSchema, treasurySchema, type Create
 
 const deleteManualTreasuryTransactionsSchema = z.object({ transactionIds: z.array(z.string().uuid()).min(1).max(100) });
 const reconcileTreasuryBalanceSchema = z.object({ treasuryId: z.string().uuid(), targetBalance: z.coerce.number().finite().min(0).max(999_999_999.99), reason: z.string().trim().min(5, "سبب تسوية الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.").max(500) });
+
+/** Manual voucher forms may submit an empty select value or the Arabic accountless label. Neither may reach Prisma as an empty foreign key. */
+function normalizeOptionalVoucherAccountId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  if (!normalized || ["بدون حساب", "without account", "null", "undefined"].includes(normalized.toLowerCase())) return undefined;
+  return normalized;
+}
 
 /** Reverses and permanently removes manual vouchers only; invoice/transfer entries remain immutable in their source workflows. */
 export async function deleteManualTreasuryTransactionsAction(raw: { transactionIds: string[] }): Promise<ActionResult<{ deleted: number }>> {
@@ -96,14 +104,15 @@ export async function reconcileTreasuryBalanceAction(raw: { treasuryId: string; 
  */
 export async function createTreasuryTransactionAction(
   raw: TreasuryTransactionInput,
-): Promise<ActionResult<{ transactionNumber: string; treasuryBalance: number }>> {
+): Promise<ActionResult<{ transactionNumber: string; treasuryBalance: number; accountId: string | null; treasuryName: string }>> {
   try {
     const user = await requirePermission("treasury.transact");
-    const input = treasuryTransactionSchema.parse(raw);
+    const tenant = await getTenantDbFromSession();
+    const input = treasuryTransactionSchema.parse({ ...raw, accountId: normalizeOptionalVoucherAccountId(raw.accountId) });
     const amount = money(input.amount);
 
-    const result = await withTxRetry(() =>
-      prisma.$transaction(async (tx) => {
+    const result = await tenant.run(() => withTxRetry(() =>
+      tenant.prisma.$transaction(async (tx) => {
         const invoice = input.invoiceId ? await tx.invoice.findUnique({ where: { id: input.invoiceId } }) : null;
         if (input.invoiceId && !invoice) throw new BusinessRuleError("الفاتورة المرتبطة غير موجودة.");
         if (invoice?.isVoided) throw new BusinessRuleError("لا يمكن ربط سند بفاتورة ملغاة.");
@@ -150,9 +159,9 @@ export async function createTreasuryTransactionAction(
           },
         });
         await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: { ...transaction, event: "VOUCHER_CREATED", invoiceSettlement: Boolean(invoice), expenseBalanceNeutral: account?.type === "EXPENSE" }, performedBy: user.id });
-        return { transactionNumber: transaction.transactionNumber, treasuryBalance: Number(updatedTreasury.currentBalance) };
+        return { transactionNumber: transaction.transactionNumber, treasuryBalance: Number(updatedTreasury.currentBalance), accountId, treasuryName: treasury.name };
       }, TX_OPTIONS),
-    );
+    ));
     await invalidateCache("dashboard");
     for (const path of ["/", "/treasury", "/accounts", "/invoices", "/vouchers"]) revalidatePath(path);
     return ok(result);
