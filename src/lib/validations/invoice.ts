@@ -148,7 +148,7 @@ export const treasuryTransactionSchema = z.object({
   category: z.enum(["CASH", "BANK", "WALLET", "CHEQUE", "INSTAPAY", "OTHER"]).optional(),
   /** Optional business timestamp for an authorised, manually entered voucher. */
   createdAt: z.string().datetime().optional(),
-  description: z.string().trim().min(3, "يجب كتابة بيان الحركة").max(500),
+  description: optionalText(500),
 });
 
 export type TreasuryTransactionInput = z.infer<typeof treasuryTransactionSchema>;

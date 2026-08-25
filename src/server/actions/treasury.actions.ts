@@ -125,7 +125,7 @@ export async function createTreasuryTransactionAction(
 
         // Account first, treasury second — see GLOBAL LOCK ORDER above.
         if (accountId) await lockAccountForUpdate(tx, accountId);
-        const account = accountId ? await tx.account.findUnique({ where: { id: accountId }, select: { id: true, type: true } }) : null;
+        const account = accountId ? await tx.account.findUnique({ where: { id: accountId }, select: { id: true, name: true, type: true } }) : null;
         if (accountId && !account) throw new BusinessRuleError("الحساب المحدد غير موجود.");
         const treasuries = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
         const treasury = treasuries.get(input.treasuryId)!;
@@ -151,10 +151,11 @@ export async function createTreasuryTransactionAction(
           await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount: { increment: amount }, remainingAmount, paymentStatus: remainingAmount.eq(0) ? "PAID" : "PARTIAL", treasuryId: invoice.treasuryId ?? input.treasuryId } });
         }
 
+        const description = input.description?.trim() || `${input.type === "RECEIPT" ? "سند قبض" : "سند صرف"} - ${account?.name ?? "نقدي عام"}`;
         const transaction = await tx.treasuryTransaction.create({
           data: {
             transactionNumber: await nextTransactionNumber(tx), treasuryId: input.treasuryId, accountId, invoiceId: invoice?.id,
-            type: input.type, category: input.category ?? "CASH", amount, description: input.description, createdByUser: user.id,
+            type: input.type, category: input.category ?? "CASH", amount, description, createdByUser: user.id,
             ...(input.createdAt ? { createdAt: new Date(input.createdAt) } : {}),
           },
         });

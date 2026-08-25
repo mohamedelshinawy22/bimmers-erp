@@ -23,4 +23,14 @@ describe("voucher account combobox contract", () => {
     expect(modal).toContain("accountId: accountId || undefined");
     expect(treasuryAction).toContain("normalizeOptionalVoucherAccountId");
   });
+
+  it("accepts blank voucher notes and derives a meaningful description inside the tenant transaction", () => {
+    const schema = readFileSync(resolve(process.cwd(), "src/lib/validations/invoice.ts"), "utf8");
+    const modal = readFileSync(resolve(process.cwd(), "src/app/(app)/vouchers/vouchers-client.tsx"), "utf8");
+    const treasuryAction = readFileSync(resolve(process.cwd(), "src/server/actions/treasury.actions.ts"), "utf8");
+    expect(schema).toContain("description: optionalText(500)");
+    expect(modal).toContain("البيان والملاحظات (اختياري)");
+    expect(modal).not.toContain("description.trim().length < 3");
+    expect(treasuryAction).toContain('input.description?.trim() || `${input.type === "RECEIPT" ? "سند قبض" : "سند صرف"} - ${account?.name ?? "نقدي عام"}`');
+  });
 });

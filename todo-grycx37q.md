@@ -139,3 +139,7 @@
 - [x] Build a reusable tenant-account combobox with balance/type details, Arabic-aware live search, and general-cash selection.
 - [x] Integrate quick account creation into receipt and payment voucher forms without losing entered voucher data.
 - [ ] Add combobox regression coverage, validate, deploy, and obtain authenticated voucher-form acceptance.
+- [x] Audit the manual voucher description validation and tenant-scoped persistence contract.
+- [x] Make voucher notes optional, derive a fallback description, and preserve accountless cash posting.
+- [x] Update voucher-form copy and add regression coverage for blank descriptions.
+- [ ] Validate, deploy, and obtain authenticated confirmation for blank-description voucher posting.
