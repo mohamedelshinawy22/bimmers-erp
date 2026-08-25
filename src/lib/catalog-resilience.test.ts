@@ -34,8 +34,9 @@ describe("Catalog resilience boundaries", () => {
     expect(action).toContain("binLocationId: bin?.id ?? null");
     expect(action).toContain("for (const code of new Set(codes(row.chassis)))");
     expect(action).toContain("for (const code of new Set(codes(row.engine)))");
-    expect(action).toContain("rows: z.array(z.unknown()).min(1).max(20)");
-    expect(modal).toContain("const INVENTORY_IMPORT_CHUNK_SIZE = 20");
+    expect(action).toContain("rows: z.array(z.unknown()).min(1).max(10)");
+    expect(action).toContain("revalidation failed after a committed chunk");
+    expect(modal).toContain("const INVENTORY_IMPORT_CHUNK_SIZE = 10");
     expect(modal).toContain("for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE)");
     expect(modal).toContain("جارٍ ترحيل الأصناف");
   });

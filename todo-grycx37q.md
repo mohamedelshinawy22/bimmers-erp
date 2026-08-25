@@ -103,3 +103,6 @@
 - [x] Diagnose the bimmers-test `/catalog` digest `2407913676` after the reported 899-product Excel import.
 - [x] Harden tenant-scoped Catalog pagination, primitive serialization, and sparse-relation client rendering with regression coverage.
 - [ ] Validate, deploy, and obtain authenticated bimmers-test Catalog acceptance for the large imported dataset.
+- [x] Diagnose the reported first-20-row Catalog import Server Action exception and capture the production error path.
+- [x] Return fully serializable catalog-chunk success and failure results without allowing revalidation or transaction errors to escape to React.
+- [ ] Validate, deploy, and obtain authenticated confirmation that the 899-row Catalog import progresses from 0% to 100%.

@@ -12,7 +12,7 @@ import { normalizeImportHeader, resolveImportColumns } from "@/lib/import-export
 const FIELDS = [["nameAr", "اسم الصنف *"], ["oemNumber", "كود القطعة / OEM *"], ["barcode", "الباركود"], ["brand", "الماركة (اختياري)"], ["category", "التصنيف (اختياري)"], ["chassis", "الشاسيه"], ["engine", "المحرك"], ["cost", "سعر الشراء *"], ["price", "سعر البيع *"], ["quantity", "الكمية الافتتاحية *"], ["bin", "موقع الرف"]] as const;
 type MappedRow = { nameAr: string; oemNumber: string; barcode: string; brand: string; category: string; chassis: string; engine: string; cost: string; price: string; quantity: string; bin: string };
 type SpreadsheetRow = Record<string, unknown> & { __sourceRowNumber?: number };
-const INVENTORY_IMPORT_CHUNK_SIZE = 20;
+const INVENTORY_IMPORT_CHUNK_SIZE = 10;
 
 function cellText(value: unknown) { return String(value ?? "").trim(); }
 function downloadBase64(base64: string, fileName: string, mimeType: string) { const raw = atob(base64); const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0)); const url = URL.createObjectURL(new Blob([bytes], { type: mimeType })); const link = document.createElement("a"); link.href = url; link.download = fileName; link.click(); URL.revokeObjectURL(url); }

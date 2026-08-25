@@ -50,7 +50,7 @@ const importSchema = z.object({
   skipInvalidRows: z.boolean().default(false),
   // The client dispatches large workbooks sequentially. Keeping each request
   // small prevents slow master-data upserts from exceeding the 5s TX budget.
-  rows: z.array(z.unknown()).min(1).max(20),
+  rows: z.array(z.unknown()).min(1).max(10),
 });
 type ImportInput = z.input<typeof importSchema>;
 
@@ -190,8 +190,14 @@ export async function executeInventoryImportAction(raw: ImportInput) {
       const summary = { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions, chunkSize: 100 };
       await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
       await writeAudit(tenant.prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
-      revalidatePath("/inventory");
-      revalidatePath("/pos");
+      // A cache invalidation must never invalidate an already committed import
+      // chunk or escape as a Server Action render exception.
+      try {
+        revalidatePath("/inventory");
+        revalidatePath("/pos");
+      } catch (revalidationError) {
+        console.error("[executeInventoryImportAction] revalidation failed after a committed chunk", revalidationError);
+      }
       return ok({ jobId: job.id, duplicate: false, ...summary });
     } catch (error) {
       await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "FAILED", summary: { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions } } });
