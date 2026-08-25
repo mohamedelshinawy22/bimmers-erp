@@ -45,6 +45,26 @@ const safeNonNegativeNumber = (value: unknown) => {
   const parsed = Number(String(value ?? "0").replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[^0-9.-]+/g, ""));
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 };
+const safeSignedNumber = (value: unknown) => {
+  const parsed = Number(String(value ?? "0").replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[^0-9.-]+/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+function normalizeAccountCreate(raw: CreateAccountInput | Record<string, unknown>) {
+  const candidate = raw as Record<string, unknown>;
+  const typeKey = String(candidate.type ?? "CUSTOMER").trim().toLocaleUpperCase("ar-EG");
+  const priceTierKey = String(candidate.defaultPriceTier ?? candidate.priceTier ?? "RETAIL").trim().toLocaleUpperCase("ar-EG");
+  const statusKey = String(candidate.status ?? "ACTIVE").trim().toLocaleUpperCase("ar-EG");
+  return {
+    ...candidate,
+    name: String(candidate.name ?? "").trim(),
+    type: ACCOUNT_TYPE_ALIASES[typeKey] ?? typeKey,
+    defaultPriceTier: PRICE_TIER_ALIASES[priceTierKey] ?? priceTierKey,
+    phone: blankOptionalText(candidate.phone), email: blankOptionalText(candidate.email), address: blankOptionalText(candidate.address), taxNumber: blankOptionalText(candidate.taxNumber), category: blankOptionalText(candidate.category),
+    creditLimit: safeNonNegativeNumber(candidate.creditLimit),
+    openingBalance: safeSignedNumber(candidate.openingBalance),
+    status: statusKey === "نشط" ? "ACTIVE" : statusKey === "غير نشط" ? "INACTIVE" : statusKey,
+  };
+}
 function normalizeAccountUpdate(raw: UpdateAccountInput | Record<string, unknown>) {
   const candidate = raw as Record<string, unknown>;
   const typeKey = String(candidate.type ?? "CUSTOMER").trim().toLocaleUpperCase("ar-EG");
@@ -66,13 +86,14 @@ function normalizeAccountUpdate(raw: UpdateAccountInput | Record<string, unknown
 }
 
 export async function createAccountAction(
-  raw: CreateAccountInput,
+  raw: CreateAccountInput | Record<string, unknown>,
 ): Promise<ActionResult<{ id: string; accountNumber: string; name: string; type: CreateAccountInput["type"]; phone: string | null; creditLimit: number; currentBalance: number; defaultPriceTier: string; status: string }>> {
   try {
     const user = await requirePermission("account.write");
-    const input = createAccountSchema.parse(raw);
+    const input = createAccountSchema.parse(normalizeAccountCreate(raw));
+    const tenant = await getTenantDbFromSession();
 
-    const account = await prisma.$transaction(
+    const account = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(
       async (tx) => {
         const created = await tx.account.create({
           data: {
@@ -101,10 +122,14 @@ export async function createAccountAction(
         return created;
       },
       TX_OPTIONS,
-    );
+    )));
 
-    revalidatePath("/accounts");
-    revalidatePath("/pos");
+    try {
+      revalidatePath("/accounts");
+      revalidatePath("/pos");
+    } catch (revalidationError) {
+      console.error("[createAccountAction] cache invalidation failed after commit", revalidationError);
+    }
     return ok({
       id: account.id,
       accountNumber: account.accountNumber,

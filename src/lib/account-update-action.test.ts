@@ -38,4 +38,15 @@ describe("account update resilience", () => {
     expect(actions).toContain("balanceAmount: safeNonNegativeNumber(candidate.balanceAmount)");
     expect(actions).toContain("balanceNature: BALANCE_NATURE_ALIASES[balanceNatureKey]");
   });
+
+  it("normalizes create-account inputs and allocates its number through the active tenant client", () => {
+    const actions = source("src/server/actions/accounts.actions.ts");
+    expect(actions).toContain("function normalizeAccountCreate");
+    expect(actions).toContain("openingBalance: safeSignedNumber(candidate.openingBalance)");
+    expect(actions).toContain("const input = createAccountSchema.parse(normalizeAccountCreate(raw))");
+    expect(actions).toContain("const tenant = await getTenantDbFromSession()");
+    expect(actions).toContain("tenant.run(() => withTxRetry(() => tenant.prisma.$transaction");
+    expect(actions).toContain("accountNumber: await nextAccountNumber(tx, ACCOUNT_PREFIX[input.type])");
+    expect(actions).toContain("cache invalidation failed after commit");
+  });
 });

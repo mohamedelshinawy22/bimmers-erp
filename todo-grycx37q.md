@@ -128,3 +128,6 @@
 - [x] Diagnose account modal input focus loss for create and edit forms, including nested component definitions and dynamic keys.
 - [x] Stabilize controlled account form inputs so state changes do not remount or blur active fields.
 - [ ] Add focus-stability regression coverage, deploy, and obtain authenticated continuous-typing acceptance.
+- [x] Diagnose the CreateAccountModal submission failure across validation, tenant routing, and account-number allocation.
+- [x] Normalize compatible create-account values and generate tenant-safe account numbers with clear action-result errors.
+- [ ] Add create-account resilience regressions, deploy, and obtain authenticated Arabic-input acceptance.
