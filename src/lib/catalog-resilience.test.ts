@@ -20,18 +20,24 @@ describe("Catalog resilience boundaries", () => {
     expect(page).toContain("Unable to load tenant-scoped Catalog");
     expect(page).toContain("const tenant = await getTenantDbFromSession()");
     expect(page).toContain("return <CatalogRecovery />");
+    expect(source("src/app/(app)/inventory/error.tsx")).toContain("export default function InventoryError");
     expect(page).toContain("rows={serializeData(rows)}");
     expect(page).toContain("company={serializeData(company)}");
   });
 
   it("coerces sparse spreadsheet cells, links the normalized category, and only assigns an existing bin", () => {
     const action = source("src/server/actions/import.actions.ts");
+    const modal = source("src/components/inventory/excel-import-modal.tsx");
     expect(action).toContain("const spreadsheetText");
     expect(action).toContain("categoryId: category.id");
     expect(action).toContain("const bin = binCode ? await tx.warehouseBin.findUnique");
     expect(action).toContain("binLocationId: bin?.id ?? null");
     expect(action).toContain("for (const code of new Set(codes(row.chassis)))");
     expect(action).toContain("for (const code of new Set(codes(row.engine)))");
+    expect(action).toContain("rows: z.array(z.unknown()).min(1).max(20)");
+    expect(modal).toContain("const INVENTORY_IMPORT_CHUNK_SIZE = 20");
+    expect(modal).toContain("for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE)");
+    expect(modal).toContain("جارٍ ترحيل الأصناف");
   });
 
   it("keeps BMW fitment selection discoverable with filtered master-code results and generation presets", () => {

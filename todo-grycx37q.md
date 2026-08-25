@@ -100,3 +100,6 @@
 - [x] Establish shared bilingual spreadsheet parsing and bounded tenant-only import transaction primitives with regression coverage.
 - [x] Integrate compatible shared date, number, sparse-text, and header normalization into catalog, invoice, and voucher imports.
 - [x] Standardize tenant-branded templates and exports across catalog, account, invoice, and voucher workflows, then validate production build behavior.
+- [x] Diagnose the bimmers-test `/catalog` digest `2407913676` after the reported 899-product Excel import.
+- [x] Harden tenant-scoped Catalog pagination, primitive serialization, and sparse-relation client rendering with regression coverage.
+- [ ] Validate, deploy, and obtain authenticated bimmers-test Catalog acceptance for the large imported dataset.

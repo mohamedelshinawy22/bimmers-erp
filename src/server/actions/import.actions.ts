@@ -48,7 +48,9 @@ const importRowSchema = z.object({
 const importSchema = z.object({
   mapping: z.record(z.string(), z.string()),
   skipInvalidRows: z.boolean().default(false),
-  rows: z.array(z.unknown()).min(1).max(10_000),
+  // The client dispatches large workbooks sequentially. Keeping each request
+  // small prevents slow master-data upserts from exceeding the 5s TX budget.
+  rows: z.array(z.unknown()).min(1).max(20),
 });
 type ImportInput = z.input<typeof importSchema>;
 
