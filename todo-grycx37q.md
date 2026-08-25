@@ -114,3 +114,7 @@
 - [x] Isolate catalog import collisions per row, return processed/skipped metrics, and keep valid rows progressing.
 - [x] Add one safe client retry per failed JSON chunk and a final imported/skipped summary.
 - [ ] Validate, deploy, and obtain authenticated 899-row completion evidence from bimmers-test and elshafei.
+- [x] Diagnose the ACC-0003 account edit failure across the modal payload, tenant action, and actual Account schema.
+- [x] Normalize account update enum/null/decimal inputs through the strict tenant-scoped action with safe serialized results.
+- [x] Ensure the account edit modal presents action errors and refreshes only after a successful update.
+- [ ] Add regression coverage, validate, deploy, and obtain authenticated account-edit acceptance.

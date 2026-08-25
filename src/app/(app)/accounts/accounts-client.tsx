@@ -668,27 +668,31 @@ function EditAccountModal({ account, canAdjustBalance, onClose }: { account: Acc
   const submit = () => {
     setError(null);
     startTransition(async () => {
-      const res = await updateAccountAction({
-        id: account.id,
-        name: form.name,
-        type: form.type,
-        phone: form.phone,
-        email: form.email,
-        address: form.address,
-        taxNumber: form.taxNumber,
-        creditLimit: newLimit,
-        defaultPriceTier: form.defaultPriceTier,
-        category: "",
-        status: form.isActive ? "ACTIVE" : "INACTIVE",
-        isActive: form.isActive,
-        ...(canAdjustBalance ? { balanceAmount: Math.max(0, Number(balanceAmount) || 0), balanceNature, adjustmentReason: adjustmentReason.trim() || DEFAULT_BALANCE_ADJUSTMENT_REASON } : {}),
-      });
-      if (!res.success) {
-        setError(res.error);
-        return;
+      try {
+        const res = await updateAccountAction({
+          id: account.id,
+          name: form.name.trim(),
+          type: form.type,
+          phone: form.phone.trim() || null,
+          email: form.email.trim() || null,
+          address: form.address.trim() || null,
+          taxNumber: form.taxNumber.trim() || null,
+          creditLimit: newLimit,
+          defaultPriceTier: form.defaultPriceTier,
+          category: null,
+          status: form.isActive ? "ACTIVE" : "INACTIVE",
+          isActive: form.isActive,
+          ...(canAdjustBalance ? { balanceAmount: Math.max(0, Number(balanceAmount) || 0), balanceNature, adjustmentReason: adjustmentReason.trim() || DEFAULT_BALANCE_ADJUSTMENT_REASON } : {}),
+        });
+        if (!res.success) {
+          setError(res.error);
+          return;
+        }
+        onClose();
+        router.refresh();
+      } catch {
+        setError("تعذر حفظ تعديلات الحساب. أعد المحاولة.");
       }
-      onClose();
-      router.refresh();
     });
   };
 

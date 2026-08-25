@@ -21,6 +21,7 @@ import {
 } from "@/lib/validations/accounts";
 import { nextAccountNumber } from "@/server/services/numbering.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 const ACCOUNT_PREFIX: Record<CreateAccountInput["type"], string> = {
   CUSTOMER: "ACC",
@@ -32,6 +33,20 @@ const ACCOUNT_PREFIX: Record<CreateAccountInput["type"], string> = {
   PARTNER: "PRT",
   OTHER: "OTH",
 };
+
+const ACCOUNT_TYPE_ALIASES: Record<string, string> = { "عميل": "CUSTOMER", CUSTOMER: "CUSTOMER", "مورد": "SUPPLIER", SUPPLIER: "SUPPLIER", "ورشة": "WORKSHOP_BMW", "ورشة bmw": "WORKSHOP_BMW", WORKSHOP: "WORKSHOP_BMW", WORKSHOP_BMW: "WORKSHOP_BMW", "مصروف": "EXPENSE", EXPENSE: "EXPENSE", OTHER: "OTHER", EMPLOYEE: "EMPLOYEE", ADVANCE: "ADVANCE", PARTNER: "PARTNER" };
+const PRICE_TIER_ALIASES: Record<string, string> = { "قطاعي": "RETAIL", RETAIL: "RETAIL", "جملة": "WHOLESALE", WHOLESALE: "WHOLESALE" };
+const nullableText = (value: unknown) => typeof value === "string" ? value.trim() || null : value ?? null;
+const safeNonNegativeNumber = (value: unknown) => {
+  const parsed = Number(String(value ?? "0").replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[^0-9.-]+/g, ""));
+  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+};
+function normalizeAccountUpdate(raw: UpdateAccountInput | Record<string, unknown>) {
+  const candidate = raw as Record<string, unknown>;
+  const typeKey = String(candidate.type ?? "CUSTOMER").trim().toLocaleUpperCase("ar-EG");
+  const priceTierKey = String(candidate.defaultPriceTier ?? candidate.priceTier ?? "RETAIL").trim().toLocaleUpperCase("ar-EG");
+  return { ...candidate, name: String(candidate.name ?? "").trim(), type: ACCOUNT_TYPE_ALIASES[typeKey] ?? typeKey, defaultPriceTier: PRICE_TIER_ALIASES[priceTierKey] ?? priceTierKey, phone: nullableText(candidate.phone), email: nullableText(candidate.email), address: nullableText(candidate.address), taxNumber: nullableText(candidate.taxNumber), category: nullableText(candidate.category), creditLimit: safeNonNegativeNumber(candidate.creditLimit) };
+}
 
 export async function createAccountAction(
   raw: CreateAccountInput,
@@ -89,11 +104,12 @@ export async function createAccountAction(
   }
 }
 
-export async function updateAccountAction(raw: UpdateAccountInput): Promise<ActionResult<{ id: string; balanceChanged: boolean }>> {
+export async function updateAccountAction(raw: UpdateAccountInput | Record<string, unknown>): Promise<ActionResult<{ id: string; balanceChanged: boolean }>> {
   try {
     const user = await requirePermission("account.write");
-    const input = updateAccountSchema.parse(raw);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const input = updateAccountSchema.parse(normalizeAccountUpdate(raw));
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const before = await tx.account.findUnique({ where: { id: input.id } });
       if (!before) throw new BusinessRuleError("الحساب غير موجود.");
 
@@ -142,7 +158,7 @@ export async function updateAccountAction(raw: UpdateAccountInput): Promise<Acti
       }
       await writeAudit(tx, { tableName: "Account", recordId: input.id, action: "UPDATE", oldData: before, newData: { ...updated, event: balanceChanged ? "ACCOUNT_UPDATED_WITH_BALANCE_RECONCILIATION" : "ACCOUNT_UPDATED", balanceAdjustment: balanceChanged ? { previousBalance: before.currentBalance, targetBalance, delta, nature: input.balanceNature, reason: adjustmentReason } : undefined }, performedBy: user.id });
       return { id: updated.id, balanceChanged };
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
 
     for (const path of ["/accounts", "/pos", "/invoices", "/treasury", "/vouchers", "/reports/daily-movement"]) revalidatePath(path);
     return ok(result);
