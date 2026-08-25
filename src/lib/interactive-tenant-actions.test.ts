@@ -30,7 +30,9 @@ describe("interactive tenant action boundaries", () => {
     expect(actions).toContain("tenant.run(() => withTxRetry");
     expect(actions).toContain("tenant.prisma.$transaction");
     expect(actions).toContain("accountId = invoice?.accountId ?? input.accountId ?? null");
-    expect(modal).toContain('<option value="">بدون حساب</option>');
+    expect(modal).toContain("<AccountCombobox");
+    const selector = source("src/components/common/account-combobox.tsx");
+    expect(selector).toContain("بدون حساب (نقدي عام)");
   });
 
   it("maps users with an explicit tenant client and avoids sensitive password fields", () => {

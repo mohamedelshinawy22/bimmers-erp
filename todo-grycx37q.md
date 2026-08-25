@@ -135,3 +135,7 @@
 - [x] Harden invoice matching previews for sparse products/accounts and preserve bounded execution batches.
 - [x] Harden account Excel aliases/upserts and Accounts SSR serialization for imported sparse account data.
 - [ ] Add cross-import regression coverage, validate, deploy, and obtain authenticated workflow acceptance.
+- [x] Audit the manual voucher account-selection data contract and preserve accountless cash posting.
+- [x] Build a reusable tenant-account combobox with balance/type details, Arabic-aware live search, and general-cash selection.
+- [x] Integrate quick account creation into receipt and payment voucher forms without losing entered voucher data.
+- [ ] Add combobox regression coverage, validate, deploy, and obtain authenticated voucher-form acceptance.

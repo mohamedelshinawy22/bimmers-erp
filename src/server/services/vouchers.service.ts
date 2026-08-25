@@ -95,7 +95,7 @@ export async function getVoucherFilterTreasuries(db: VoucherDb) {
 }
 
 export async function getVoucherAccounts(db: VoucherDb) {
-  return db.account.findMany({ where: { isActive: true }, orderBy: [{ name: "asc" }], take: 1_000, select: { id: true, name: true, accountNumber: true, type: true, phone: true } });
+  return db.account.findMany({ where: { isActive: true }, orderBy: [{ name: "asc" }], take: 5_000, select: { id: true, name: true, accountNumber: true, type: true, phone: true, currentBalance: true } }).then((rows) => rows.map((row) => ({ ...row, currentBalance: num(row.currentBalance) })));
 }
 
 export async function getOpenInvoicesForVouchers(db: VoucherDb) {
