@@ -151,3 +151,7 @@
 - [x] Replace unsafe user hard deletion with protected tenant-scoped deactivation and session revocation where appropriate.
 - [x] Add Arabic removal confirmation and success/error feedback in users and permissions settings.
 - [ ] Add user-removal regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit actual tenant User relations and define the safe non-financial permanent-deletion boundary.
+- [x] Implement tenant-scoped permanent deletion for eligible sub-users with financial, self, and primary-admin safeguards.
+- [x] Add distinct suspend/reactivate and permanent-delete controls with explicit Arabic confirmations and feedback.
+- [ ] Add lifecycle integrity regressions, validate, deploy, and obtain authenticated dual-action acceptance.

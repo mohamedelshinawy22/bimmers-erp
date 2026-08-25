@@ -64,4 +64,19 @@ describe("interactive tenant action boundaries", () => {
     expect(client).toContain("إذا كانت لديه سجلات أو فواتير مرتبطة، سيُعطّل الحساب فقط");
     expect(client).toContain('<Alert variant="success">{notice}</Alert>');
   });
+
+  it("permits permanent deletion only for tenant-local sub-users without financial or operational records", () => {
+    const actions = source("src/server/actions/auth.actions.ts");
+    const client = source("src/app/(app)/users/users-management-client.tsx");
+    expect(actions).toContain("deleteManagedUserPermanentlyAction");
+    expect(actions).toContain("const tenant = await getTenantDbFromSession()");
+    expect(actions).toContain("invoices: true, stockMoves: true, shifts: true, heldSales: true, transfers: true, importJobs: true");
+    expect(actions).toContain("tx.treasuryTransaction.count({ where: { createdByUser: target.id } })");
+    expect(actions).toContain("لا يمكن حذف هذا المستخدم نهائياً لوجود");
+    expect(actions).toContain("لا يمكن حذف الحساب الرئيسي للمنشأة نهائياً.");
+    expect(actions).toContain("releaseTenantUsername(tenant.context.route, deleted.username)");
+    expect(client).toContain("تأكيد الحذف النهائي للمستخدم");
+    expect(client).toContain("deleteManagedUserPermanentlyAction(user.id)");
+    expect(client).toContain('<Trash2 size={14} />');
+  });
 });

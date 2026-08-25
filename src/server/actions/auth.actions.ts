@@ -236,3 +236,59 @@ export async function toggleUserActiveAction(
     return toActionError(error, "toggleUserActiveAction");
   }
 }
+
+/**
+ * Permanently removes only a tenant-local, non-primary user with no financial
+ * or operational records. UserPermission is configured to cascade; every
+ * other concrete User relation is counted and blocks deletion to preserve the
+ * accounting trail and avoid foreign-key failures.
+ */
+export async function deleteManagedUserPermanentlyAction(
+  userId: string,
+): Promise<ActionResult<{ id: string; username: string; message: string }>> {
+  try {
+    const actor = await requirePermission("user.manage");
+    if (actor.id === userId) return fail("لا يمكنك حذف حسابك المسجل به حالياً.");
+    const tenant = await getTenantDbFromSession();
+    const deleted = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      const target = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          username: true,
+          fullName: true,
+          role: true,
+          _count: { select: { invoices: true, stockMoves: true, shifts: true, heldSales: true, transfers: true, importJobs: true } },
+        },
+      });
+      if (!target) throw new BusinessRuleError("المستخدم غير موجود أو تم حذفه مسبقاً.");
+      if (target.role === "SUPER_ADMIN") throw new BusinessRuleError("لا يمكن حذف الحساب الرئيسي للمنشأة نهائياً.");
+
+      const voucherCount = await tx.treasuryTransaction.count({ where: { createdByUser: target.id } });
+      const linkedRecords = target._count.invoices + target._count.stockMoves + target._count.shifts + target._count.heldSales + target._count.transfers + target._count.importJobs + voucherCount;
+      if (linkedRecords > 0) {
+        throw new BusinessRuleError(`لا يمكن حذف هذا المستخدم نهائياً لوجود (${linkedRecords}) سجل مالي أو تشغيلي مرتبط به. يرجى إيقاف الحساب بدلاً من الحذف لحماية القيود المحاسبية.`);
+      }
+
+      await tx.user.delete({ where: { id: target.id } });
+      await tx.systemAuditTrail.create({
+        data: {
+          tableName: "User",
+          recordId: target.id,
+          action: "DELETE",
+          oldData: toJsonSafe({ username: target.username, fullName: target.fullName, role: target.role, linkedRecords: 0 }),
+          performedBy: actor.id,
+        },
+      });
+      return target;
+    }, TX_OPTIONS)));
+
+    await releaseTenantUsername(tenant.context.route, deleted.username).catch((releaseError) => console.error("[deleteManagedUserPermanentlyAction] tenant username release:", releaseError));
+    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true } })).catch((usageError) => console.error("[deleteManagedUserPermanentlyAction] active-user usage report:", usageError));
+    revalidatePath("/settings");
+    revalidatePath("/users");
+    return ok({ id: deleted.id, username: deleted.username, message: `تم حذف المستخدم ${deleted.fullName} نهائياً من قاعدة بيانات هذا المستأجر.` });
+  } catch (error) {
+    return toActionError(error, "deleteManagedUserPermanentlyAction");
+  }
+}
