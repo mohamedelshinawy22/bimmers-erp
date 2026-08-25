@@ -162,3 +162,6 @@
 - [x] Harden tenant-scoped create-user execution, quota reporting, and duplicate-safe Arabic error handling.
 - [x] Align settings and users creation modal submission and feedback contracts.
 - [ ] Add creation regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Trace the P2010 raw query in tenant user creation and identify the safe quota-enforcement replacement.
+- [x] Remove the failing raw SQL dependency from tenant user creation while preserving quota protection.
+- [ ] Add P2010 regression coverage, validate, deploy, and obtain authenticated user-creation acceptance.

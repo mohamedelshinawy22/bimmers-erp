@@ -100,4 +100,15 @@ describe("interactive tenant action boundaries", () => {
     expect(createSection).not.toContain("const tenant = getTenantContext()");
     expect(createSection).not.toContain("await prisma.user.delete({ where: { id: createdId } })");
   });
+
+  it("enforces user quotas through a typed database gate rather than P2010-prone raw SQL", () => {
+    const legacyCreate = source("src/server/actions/auth.actions.ts");
+    const managedCreate = source("src/server/actions/users.actions.ts");
+    for (const actions of [legacyCreate, managedCreate]) {
+      expect(actions).toContain('scope: "USER_QUOTA_GATE"');
+      expect(actions).toContain("tx.documentCounter.upsert");
+      expect(actions).toContain("lastValue: { increment: 1 }");
+      expect(actions).not.toContain("pg_advisory_xact_lock");
+    }
+  });
 });

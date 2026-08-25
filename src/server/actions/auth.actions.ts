@@ -138,7 +138,11 @@ export async function createUserAction(
 
     const created = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       if (input.role !== "SUPER_ADMIN") {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.context.route.tenantId}`}))`;
+        await tx.documentCounter.upsert({
+          where: { scope: "USER_QUOTA_GATE" },
+          create: { scope: "USER_QUOTA_GATE", lastValue: 1 },
+          update: { lastValue: { increment: 1 } },
+        });
         const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
         if (activeSubUsers >= tenant.context.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.context.route.maxSubUsers}).`);
       }
