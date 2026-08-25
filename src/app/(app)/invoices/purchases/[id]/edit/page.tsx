@@ -16,7 +16,7 @@ export default async function PurchaseInvoiceEditPage({ params }: { params: { id
   let initial: { invoice: NonNullable<Awaited<ReturnType<typeof getInvoiceDetail>>>; options: Awaited<ReturnType<typeof getPurchaseFormOptions>>; taxRateRaw: string; lines: Array<{ part: Awaited<ReturnType<typeof getPosPartsByIds>>[number]; quantity: number; unitPrice: number; lineDiscount: number }> } | null;
   try {
     initial = await tenant.run(async () => {
-      const [invoice, options, taxRateRaw] = await Promise.all([getInvoiceDetail(params.id), getPurchaseFormOptions(tenant.prisma), getSetting("TAX_RATE_PERCENT", "0", tenant.prisma)]);
+      const [invoice, options, taxRateRaw] = await Promise.all([getInvoiceDetail(tenant.prisma, params.id), getPurchaseFormOptions(tenant.prisma), getSetting("TAX_RATE_PERCENT", "0", tenant.prisma)]);
       if (!invoice || invoice.type !== "PURCHASE" || invoice.isVoided) return null;
       const catalogItems = invoice.items.filter((item): item is typeof item & { partId: string } => Boolean(item.partId));
       if (catalogItems.length !== invoice.items.length) return null;

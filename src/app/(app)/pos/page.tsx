@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { Receipt } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { can, requireUser } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { canUseTreasury, getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
@@ -20,17 +19,17 @@ export default async function PosPage() {
 
   const [accounts, allTreasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter] =
     await Promise.all([
-      getPosAccounts(),
-      prisma.treasury.findMany({
+      getPosAccounts(tenant.prisma),
+      tenant.prisma.treasury.findMany({
         where: { isActive: true },
         orderBy: [{ type: "asc" }, { name: "asc" }],
         select: { id: true, name: true, type: true },
       }),
-      getSetting("TAX_RATE_PERCENT", "0"),
-      getSetting("COMPANY_NAME", "BimmerERP"),
-      getSetting("ENFORCE_CREDIT_LIMIT", "true"),
-      getSetting("ALLOW_NEGATIVE_STOCK", "false"),
-      getSetting("INVOICE_FOOTER", ""),
+      getSetting("TAX_RATE_PERCENT", "0", tenant.prisma),
+      getSetting("COMPANY_NAME", "BimmerERP", tenant.prisma),
+      getSetting("ENFORCE_CREDIT_LIMIT", "true", tenant.prisma),
+      getSetting("ALLOW_NEGATIVE_STOCK", "false", tenant.prisma),
+      getSetting("INVOICE_FOOTER", "", tenant.prisma),
     ]);
 
   const treasuries = allTreasuries.filter((treasury) => canUseTreasury(access, treasury.id));

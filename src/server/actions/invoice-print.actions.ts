@@ -6,11 +6,13 @@ import type { InvoicePrintData } from "@/lib/invoice-print-types";
 import { getInvoiceDetail } from "@/server/services/invoices.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
 import { getAccountDetailedLedger } from "@/server/services/accounts.service";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 export async function getInvoicePrintDataAction(invoiceId: string): Promise<ActionResult<InvoicePrintData>> {
   try {
     await requirePermission("invoice.read");
-    const [invoice, company] = await Promise.all([getInvoiceDetail(invoiceId), getCompanyProfile()]);
+    const tenant = await getTenantDbFromSession();
+    const [invoice, company] = await tenant.run(() => Promise.all([getInvoiceDetail(tenant.prisma, invoiceId), getCompanyProfile(tenant.prisma)]));
     if (!invoice) return { success: false, error: "الفاتورة غير موجودة." };
     const isReturn = invoice.type === "SALE_RETURN" || invoice.type === "PURCHASE_RETURN";
     const needsLedgerFallback = isReturn || (invoice.type === "PURCHASE" && (invoice.accountBalanceBefore === null || invoice.accountBalanceAfter === null));

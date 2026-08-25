@@ -34,7 +34,7 @@ export async function exportVouchersAction(raw: unknown): Promise<ActionResult<{
     const tenant = await getTenantDbFromSession();
     return tenant.run(async () => {
     const input = filtersSchema.parse(raw);
-    const data = await getVoucherRegister({ ...normalizeVoucherFilters(input), limit: 5_000 });
+    const data = await getVoucherRegister(tenant.prisma, { ...normalizeVoucherFilters(input), limit: 5_000 });
     const records = data.rows.map((row) => ({
       "رقم السند": row.transactionNumber,
       "التاريخ والوقت": formatDateTime(row.createdAt),

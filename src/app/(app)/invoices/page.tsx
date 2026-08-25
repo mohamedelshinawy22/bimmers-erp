@@ -4,7 +4,6 @@ import { can, requireUser } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { listInvoices } from "@/server/services/invoices.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
-import { prisma } from "@/lib/prisma";
 import { InvoicesClient } from "./invoices-client";
 
 export const metadata = { title: "الفواتير" };
@@ -39,9 +38,9 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
   const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
 
   const [result, company, treasuries] = await Promise.all([
-    listInvoices({ query: searchParams.q, type, status, includeVoided, voidedOnly, from, to, page, pageSize: 25 }),
-    getCompanyProfile(),
-    prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    listInvoices(tenant.prisma, { query: searchParams.q, type, status, includeVoided, voidedOnly, from, to, page, pageSize: 25 }),
+    getCompanyProfile(tenant.prisma),
+    tenant.prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (

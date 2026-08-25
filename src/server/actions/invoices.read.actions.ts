@@ -31,9 +31,10 @@ const invoicePrintFiltersSchema = z.object({
 export async function getInvoicesForPrintAction(raw: unknown) {
   try {
     await requirePermission("invoice.read");
+    const tenant = await getTenantDbFromSession();
     const filters = invoicePrintFiltersSchema.parse(raw ?? {});
     const { status, ...rest } = filters;
-    const result = await listInvoices({ ...rest, status: status === "VOIDED" ? "ALL" : status, voidedOnly: status === "VOIDED", page: 1, pageSize: 100, isForPrint: true });
+    const result = await tenant.run(() => listInvoices(tenant.prisma, { ...rest, status: status === "VOIDED" ? "ALL" : status, voidedOnly: status === "VOIDED", page: 1, pageSize: 100, isForPrint: true }));
     return ok({ rows: result.rows, total: result.total, capped: result.total > result.rows.length });
   } catch (error) {
     return toActionError(error, "getInvoicesForPrintAction");
@@ -43,7 +44,8 @@ export async function getInvoicesForPrintAction(raw: unknown) {
 export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionResult<InvoiceDetail>> {
   try {
     const user = await requirePermission("invoice.read");
-    const detail = await getInvoiceDetail(invoiceId);
+    const tenant = await getTenantDbFromSession();
+    const detail = await tenant.run(() => getInvoiceDetail(tenant.prisma, invoiceId));
     if (!detail) return { success: false, error: "الفاتورة غير موجودة." };
 
     // Cost and margin are only returned to sessions explicitly allowed to view cost.

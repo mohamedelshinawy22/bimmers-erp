@@ -92,3 +92,7 @@
 - [ ] Diagnose and restore visibility of the reported Bavaria imported products when the authenticated Catalog renders an empty result set.
 - [x] Confirm that the authenticated Bavaria Catalog query returned `rows: []` and `total: 0`; production visibility diagnostics found no PartItem rows in the tenant database.
 - [ ] Obtain the authorized Bavaria product source (original Excel or an approved source-tenant migration) before restoring inventory records.
+- [x] Reconcile the requested automated tenant provisioning design with the actual ERP schema and current idempotent bootstrap.
+- [x] Extend first-access tenant bootstrap with all schema-compatible structural master data while preserving zero operational records.
+- [x] Audit and harden fresh-tenant zero states for Catalog, POS, receipts, invoices, and dashboard.
+- [ ] Add lifecycle regression coverage, validate, deploy, and obtain fresh-tenant acceptance verification.

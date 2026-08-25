@@ -14,7 +14,7 @@ export default async function PurchaseReturnsPage() {
   return tenant.run(async () => {
   if (!can(user.role, "invoice.read") || !can(user.role, "invoice.purchase")) redirect("/");
   const [result, treasuries] = await Promise.all([
-    listInvoices({ type: "PURCHASE_RETURN", includeVoided: true, pageSize: 100 }).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 100 })),
+    listInvoices(tenant.prisma, { type: "PURCHASE_RETURN", includeVoided: true, pageSize: 100 }).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 100 })),
     tenant.prisma.treasury.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }).catch(() => []),
   ]);
   return <ReturnRegisterClient type="PURCHASE_RETURN" rows={result.rows} treasuries={treasuries} canVoid={can(user.role, "invoice.void")} canPurge={can(user.role, "invoice.purge")} />;

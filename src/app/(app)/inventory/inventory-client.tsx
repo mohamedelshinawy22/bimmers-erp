@@ -262,10 +262,15 @@ export function InventoryClient({
             {rows.length === 0 ? (
               <EmptyState
                 colSpan={permissions.canViewCost ? 12 : 11}
-                title="لا توجد أصناف مطابقة"
-                description="عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج."
+                title={filters.query || filters.chassis || filters.category || filters.lowStock ? "لا توجد أصناف مطابقة" : "لا توجد أصناف في الكتالوج بعد"}
+                description={filters.query || filters.chassis || filters.category || filters.lowStock ? "عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج." : "ابدأ بإدخال صنف جديد أو استيراد قائمة البضاعة من ملف إكسيل."}
                 icon={<Boxes size={32} />}
-              />
+              >
+                {!filters.query && !filters.chassis && !filters.category && !filters.lowStock && permissions.canWrite ? <>
+                  <Button size="sm" onClick={() => setAddOpen(true)}><PackagePlus size={14} /> إدخال صنف جديد</Button>
+                  <Button size="sm" variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={14} /> استيراد بضاعة من إكسيل</Button>
+                </> : null}
+              </EmptyState>
             ) : (
               rows.map((part) => {
                 const canOpenLedger = permissions.canViewLedger;

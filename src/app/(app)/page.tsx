@@ -24,7 +24,7 @@ import {
   getTopSellingParts,
 } from "@/server/services/dashboard.service";
 import { getCompanyProfile } from "@/server/services/settings.service";
-import { withAuthenticatedTenant } from "@/lib/auth";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 export const metadata = { title: "لوحة القيادة" };
 // Cockpit numbers must reflect the last committed transaction, never a cache.
@@ -110,12 +110,13 @@ const QUICK_ACTIONS = [
 const CHASSIS_QUICK = ["E36", "E46", "E90", "F30", "G20", "E39", "E60", "F10", "G30"] as const;
 
 export default async function DashboardCockpit() {
-  const [metrics, recent, trend, topParts, company] = await withAuthenticatedTenant(() => Promise.all([
-    dashboardFallback("metrics", getDashboardMetrics, EMPTY_METRICS),
-    dashboardFallback("recent-invoices", () => getRecentInvoices(8), []),
-    dashboardFallback("sales-trend", () => getSalesTrend(7), []),
-    dashboardFallback("top-selling-parts", () => getTopSellingParts(5), []),
-    dashboardFallback("company-profile", getCompanyProfile, {
+  const tenant = await getTenantDbFromSession();
+  const [metrics, recent, trend, topParts, company] = await tenant.run(() => Promise.all([
+    dashboardFallback("metrics", () => getDashboardMetrics(tenant.prisma), EMPTY_METRICS),
+    dashboardFallback("recent-invoices", () => getRecentInvoices(tenant.prisma, 8), []),
+    dashboardFallback("sales-trend", () => getSalesTrend(tenant.prisma, 7), []),
+    dashboardFallback("top-selling-parts", () => getTopSellingParts(tenant.prisma, 5), []),
+    dashboardFallback("company-profile", () => getCompanyProfile(tenant.prisma), {
       name: "BimmerERP",
       commercialName: "",
       phone: "",

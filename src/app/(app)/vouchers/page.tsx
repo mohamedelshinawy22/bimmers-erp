@@ -19,11 +19,11 @@ export default async function VouchersPage({ searchParams }: PageProps) {
   if (!can(user.role, "treasury.read")) redirect("/");
   const filters = normalizeVoucherFilters(searchParams);
   const [data, treasuries, accounts, openInvoices, company] = await Promise.all([
-    getVoucherRegister({ ...filters, limit: 1_000 }),
-    getVoucherFilterTreasuries(),
-    getVoucherAccounts(),
-    getOpenInvoicesForVouchers(),
-    getCompanyProfile(),
+    getVoucherRegister(tenant.prisma, { ...filters, limit: 1_000 }),
+    getVoucherFilterTreasuries(tenant.prisma),
+    getVoucherAccounts(tenant.prisma),
+    getOpenInvoicesForVouchers(tenant.prisma),
+    getCompanyProfile(tenant.prisma),
   ]);
   return <VouchersClient
     rows={data.rows}

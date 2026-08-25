@@ -1,7 +1,5 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { cached } from "@/lib/redis";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { num, startOfToday, startOfYesterday } from "@/lib/utils";
 
 export interface DashboardMetrics {
@@ -21,6 +19,7 @@ export interface DashboardMetrics {
 }
 
 const EXCLUDE_VOIDED = { isVoided: false } satisfies Prisma.InvoiceWhereInput;
+type DashboardDb = Pick<PrismaClient, "invoice" | "treasury" | "account" | "treasuryShift" | "invoiceItem" | "partItem" | "$queryRaw">;
 
 /**
  * Cockpit KPIs.
@@ -31,11 +30,11 @@ const EXCLUDE_VOIDED = { isVoided: false } satisfies Prisma.InvoiceWhereInput;
  * `invalidateCache("dashboard")`, so the figures stay correct while repeat loads
  * within the TTL stop re-scanning the table.
  */
-export async function getDashboardMetrics(): Promise<DashboardMetrics> {
-  return cached("dashboard:metrics", 20, loadDashboardMetrics);
+export async function getDashboardMetrics(db: DashboardDb): Promise<DashboardMetrics> {
+  return loadDashboardMetrics(db);
 }
 
-async function loadDashboardMetrics(): Promise<DashboardMetrics> {
+async function loadDashboardMetrics(db: DashboardDb): Promise<DashboardMetrics> {
   const today = startOfToday();
   const yesterday = startOfYesterday();
 
@@ -51,30 +50,30 @@ async function loadDashboardMetrics(): Promise<DashboardMetrics> {
     profitRows,
     openShift,
   ] = await Promise.all([
-    prisma.invoice.aggregate({
+    db.invoice.aggregate({
       where: { ...EXCLUDE_VOIDED, type: "SALE", createdAt: { gte: today } },
       _sum: { grandTotal: true },
       _count: true,
     }),
-    prisma.invoice.aggregate({
+    db.invoice.aggregate({
       where: { ...EXCLUDE_VOIDED, type: "SALE", createdAt: { gte: yesterday, lt: today } },
       _sum: { grandTotal: true },
     }),
-    prisma.treasury.findMany({
+    db.treasury.findMany({
       where: { isActive: true },
       select: { id: true, name: true, type: true, currentBalance: true },
     }),
     // Negative balance = the account owes us.
-    prisma.account.aggregate({
+    db.account.aggregate({
       where: { type: { in: ["CUSTOMER", "WORKSHOP_BMW"] }, currentBalance: { lt: 0 } },
       _sum: { currentBalance: true },
     }),
     // Positive balance on a supplier = we owe them.
-    prisma.account.aggregate({
+    db.account.aggregate({
       where: { type: "SUPPLIER", currentBalance: { gt: 0 } },
       _sum: { currentBalance: true },
     }),
-    prisma.account.count({
+    db.account.count({
       where: {
         type: "WORKSHOP_BMW",
         currentBalance: { lt: 0 },
@@ -88,10 +87,10 @@ async function loadDashboardMetrics(): Promise<DashboardMetrics> {
         },
       },
     }),
-    prisma.$queryRaw<Array<{ count: bigint }>>(
+    db.$queryRaw<Array<{ count: bigint }>>(
       Prisma.sql`SELECT COUNT(*)::bigint AS count FROM "PartItem" WHERE "stockQuantity" <= "minReorderLevel" AND "isActive" = true`,
     ),
-    prisma.$queryRaw<Array<{ value: Prisma.Decimal | null }>>(
+    db.$queryRaw<Array<{ value: Prisma.Decimal | null }>>(
       Prisma.sql`SELECT COALESCE(SUM("stockQuantity" * "buyPriceAvg"), 0) AS value FROM "PartItem" WHERE "isActive" = true AND "stockQuantity" > 0`,
     ),
     /**
@@ -103,7 +102,7 @@ async function loadDashboardMetrics(): Promise<DashboardMetrics> {
      * invoice via a separate scalar subquery, not inside the line join (which
      * would multiply it by the line count).
      */
-    prisma.$queryRaw<Array<{ profit: Prisma.Decimal | null }>>(
+    db.$queryRaw<Array<{ profit: Prisma.Decimal | null }>>(
       Prisma.sql`
         SELECT COALESCE(line_margin, 0) - COALESCE(header_discount, 0) AS profit
         FROM (
@@ -119,7 +118,7 @@ async function loadDashboardMetrics(): Promise<DashboardMetrics> {
         ) discounts
       `,
     ),
-    prisma.treasuryShift.findFirst({
+    db.treasuryShift.findFirst({
       where: { closedAt: null },
       orderBy: { openedAt: "desc" },
       select: { shiftNumber: true, openedAt: true, treasury: { select: { name: true } } },
@@ -158,8 +157,8 @@ async function loadDashboardMetrics(): Promise<DashboardMetrics> {
   };
 }
 
-export async function getRecentInvoices(limit = 8) {
-  const invoices = await prisma.invoice.findMany({
+export async function getRecentInvoices(db: DashboardDb, limit = 8) {
+  const invoices = await db.invoice.findMany({
     where: { type: { in: ["SALE", "PURCHASE"] } },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -191,11 +190,11 @@ export async function getRecentInvoices(limit = 8) {
 }
 
 /** Sales by day for the cockpit sparkline. */
-export async function getSalesTrend(days = 7) {
+export async function getSalesTrend(db: DashboardDb, days = 7) {
   const since = startOfToday();
   since.setDate(since.getDate() - (days - 1));
 
-  const rows = await prisma.$queryRaw<Array<{ day: Date; total: Prisma.Decimal }>>(
+  const rows = await db.$queryRaw<Array<{ day: Date; total: Prisma.Decimal }>>(
     Prisma.sql`
       SELECT DATE_TRUNC('day', "createdAt") AS day, COALESCE(SUM("grandTotal"), 0) AS total
       FROM "Invoice"
@@ -213,11 +212,11 @@ export async function getSalesTrend(days = 7) {
   });
 }
 
-export async function getTopSellingParts(limit = 5) {
+export async function getTopSellingParts(db: DashboardDb, limit = 5) {
   const since = startOfToday();
   since.setDate(since.getDate() - 30);
 
-  const grouped = await prisma.invoiceItem.groupBy({
+  const grouped = await db.invoiceItem.groupBy({
     by: ["partId"],
     where: { partId: { not: null }, invoice: { type: "SALE", isVoided: false, createdAt: { gte: since } } },
     _sum: { quantity: true, totalPrice: true },
@@ -226,7 +225,7 @@ export async function getTopSellingParts(limit = 5) {
   });
   if (grouped.length === 0) return [];
 
-  const parts = await prisma.partItem.findMany({
+  const parts = await db.partItem.findMany({
     where: { id: { in: grouped.flatMap((g) => g.partId ? [g.partId] : []) } },
     select: { id: true, nameAr: true, oemNumber: true, stockQuantity: true },
   });

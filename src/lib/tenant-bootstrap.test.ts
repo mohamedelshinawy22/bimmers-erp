@@ -26,6 +26,28 @@ describe("tenant baseline bootstrap", () => {
     expect(resolver).toContain("await ensureTenantBaseline(context)");
     expect(resolver).toContain("bootstrapTenantDatabase(context.prisma)");
     expect(resolver).toContain("bootstrapByTenant");
+    expect(resolver).toContain('fullCode: "MAIN-A0-00-A-00"');
+    expect(resolver).toContain('accountNumber: "ACC-0001", isActive: true');
+    expect(resolver).toContain("context.prisma.systemSetting.count()");
+    expect(resolver).toContain("context.prisma.documentCounter.count()");
     expect(resolver).not.toContain("DATABASE_URL");
+  });
+
+  it("keeps fresh operational pages tenant-scoped and allows intentional zero-data rendering", () => {
+    const posPage = source("src/app/(app)/pos/page.tsx");
+    const voucherPage = source("src/app/(app)/vouchers/page.tsx");
+    const invoicePage = source("src/app/(app)/invoices/page.tsx");
+    const dashboard = source("src/server/services/dashboard.service.ts");
+    const catalog = source("src/app/(app)/inventory/inventory-client.tsx");
+    expect(posPage).toContain("getPosAccounts(tenant.prisma)");
+    expect(posPage).toContain("tenant.prisma.treasury.findMany");
+    expect(voucherPage).toContain("getVoucherRegister(tenant.prisma");
+    expect(voucherPage).toContain("getVoucherAccounts(tenant.prisma)");
+    expect(invoicePage).toContain("listInvoices(tenant.prisma");
+    expect(invoicePage).toContain("tenant.prisma.treasury.findMany");
+    expect(dashboard).toContain("getDashboardMetrics(db: DashboardDb)");
+    expect(dashboard).not.toContain('cached("dashboard:metrics"');
+    expect(catalog).toContain("لا توجد أصناف في الكتالوج بعد");
+    expect(catalog).toContain("استيراد بضاعة من إكسيل");
   });
 });

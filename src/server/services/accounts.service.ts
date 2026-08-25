@@ -1,5 +1,5 @@
 import "server-only";
-import { Prisma, type AccountType } from "@prisma/client";
+import { Prisma, type AccountType, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { money, num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
@@ -110,8 +110,8 @@ export async function listAccounts(options: {
  * sale, when only the selected account's vehicles are ever displayed. They are
  * fetched on demand by `getAccountVehicles`.
  */
-export async function getPosAccounts(limit = 500) {
-  const accounts = await prisma.account.findMany({
+export async function getPosAccounts(db: Pick<PrismaClient, "account">, limit = 500) {
+  const accounts = await db.account.findMany({
     where: { isActive: true, type: { in: ["CUSTOMER", "WORKSHOP_BMW"] } },
     orderBy: [{ type: "asc" }, { name: "asc" }],
     take: limit,
@@ -146,7 +146,7 @@ export type PosAccount = Awaited<ReturnType<typeof getPosAccounts>>[number];
 /** Lightweight account search for POS dropdowns when the local account cache is insufficient. */
 export async function searchPosAccounts(query: string, limit = 30): Promise<PosAccount[]> {
   const term = query.trim();
-  if (!term) return getPosAccounts(Math.min(limit, 100));
+  if (!term) return getPosAccounts(prisma, Math.min(limit, 100));
   const { variations } = normalizeSearchTerm(term);
   const accounts = await prisma.account.findMany({
     where: {

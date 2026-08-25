@@ -1,10 +1,11 @@
 import "server-only";
-import { Prisma, type InvoiceType, type PaymentStatus } from "@prisma/client";
+import { Prisma, type InvoiceType, type PaymentStatus, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
 type PurchaseOptionsDb = Pick<typeof prisma, "account" | "treasury">;
+type InvoiceDb = Pick<PrismaClient, "invoice">;
 
 export interface InvoiceListRow {
   id: string;
@@ -30,7 +31,7 @@ export interface InvoiceListRow {
   createdAt: string;
 }
 
-export async function listInvoices(options: {
+export async function listInvoices(db: InvoiceDb, options: {
   query?: string;
   type?: InvoiceType | "ALL";
   status?: PaymentStatus | "ALL";
@@ -66,7 +67,7 @@ export async function listInvoices(options: {
   const where: Prisma.InvoiceWhereInput = and.length ? { AND: and } : {};
 
   const [invoices, total] = await Promise.all([
-    prisma.invoice.findMany({
+    db.invoice.findMany({
       where,
       orderBy: { createdAt: "desc" },
       skip: options.isForPrint ? undefined : (page - 1) * pageSize,
@@ -95,7 +96,7 @@ export async function listInvoices(options: {
         _count: { select: { items: true } },
       },
     }),
-    prisma.invoice.count({ where }),
+    db.invoice.count({ where }),
   ]);
 
   return {
@@ -133,8 +134,8 @@ export async function listInvoices(options: {
 }
 
 /** Full document for the detail drawer and the printable copy. */
-export async function getInvoiceDetail(invoiceId: string) {
-  const invoice = await prisma.invoice.findUnique({
+export async function getInvoiceDetail(db: InvoiceDb, invoiceId: string) {
+  const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
     select: {
       id: true,

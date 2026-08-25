@@ -39,17 +39,20 @@ export function EmptyState({
   description,
   icon,
   colSpan,
+  children,
 }: {
   title: string;
   description?: string;
   icon?: React.ReactNode;
   colSpan?: number;
+  children?: React.ReactNode;
 }) {
   const content = (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
       {icon ? <div className="text-bmw-cardBorder">{icon}</div> : null}
       <p className="text-sm font-bold text-bmw-silver">{title}</p>
       {description ? <p className="max-w-md text-xs text-bmw-muted">{description}</p> : null}
+      {children ? <div className="mt-2 flex flex-wrap justify-center gap-2">{children}</div> : null}
     </div>
   );
   if (colSpan) {

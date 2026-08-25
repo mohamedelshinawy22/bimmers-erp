@@ -18,11 +18,14 @@ async function ensureTenantBaseline(context: TenantContext): Promise<void> {
   if (existing) return existing;
 
   const run = (async () => {
-    const [treasuries, categories, brands, chassis, engines, barcodeConfigs] = await Promise.all([
+    const [treasuries, categories, brands, chassis, engines, barcodeConfigs, bins, walkInAccounts, settings, counters] = await Promise.all([
       context.prisma.treasury.count(), context.prisma.category.count(), context.prisma.brand.count(),
       context.prisma.bmwChassis.count(), context.prisma.bmwEngine.count(), context.prisma.barcodeConfig.count(),
+      context.prisma.warehouseBin.count({ where: { fullCode: "MAIN-A0-00-A-00" } }),
+      context.prisma.account.count({ where: { accountNumber: "ACC-0001", isActive: true } }),
+      context.prisma.systemSetting.count(), context.prisma.documentCounter.count(),
     ]);
-    if (treasuries > 0 && categories > 0 && brands > 0 && chassis > 0 && engines > 0 && barcodeConfigs > 0) return;
+    if (treasuries >= 2 && categories >= 11 && brands >= 12 && chassis >= 20 && engines >= 18 && barcodeConfigs > 0 && bins > 0 && walkInAccounts > 0 && settings >= 14 && counters >= 3) return;
     await bootstrapTenantDatabase(context.prisma);
   })();
   bootstrapByTenant.set(context.route.tenantId, run);
