@@ -125,3 +125,6 @@
 - [x] Diagnose the remaining ACC-0003 Invalid input response against the normalized account-update schema and balance-adjustment payload.
 - [x] Make compatible account-edit preprocessing tolerant and return field-specific Arabic validation feedback instead of generic Invalid input.
 - [ ] Add validation regression coverage, deploy, and obtain authenticated account-edit acceptance with blank optional fields.
+- [x] Diagnose account modal input focus loss for create and edit forms, including nested component definitions and dynamic keys.
+- [x] Stabilize controlled account form inputs so state changes do not remount or blur active fields.
+- [ ] Add focus-stability regression coverage, deploy, and obtain authenticated continuous-typing acceptance.

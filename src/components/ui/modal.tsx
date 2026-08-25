@@ -25,27 +25,38 @@ const SIZES = {
 export function Modal({ open, onClose, title, description, size = "md", footer, children }: ModalProps) {
   const [mounted, setMounted] = React.useState(false);
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const onCloseRef = React.useRef(onClose);
+  const focusedForOpenRef = React.useRef(false);
 
   React.useEffect(() => setMounted(true), []);
+  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      focusedForOpenRef.current = false;
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     document.addEventListener("keydown", onKey);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    // Move focus into the dialog for keyboard/screen-reader users.
-    panelRef.current?.focus();
+    // Move focus into the dialog only once when it opens. Form modals often
+    // receive a fresh onClose callback during controlled-input updates; tying
+    // this effect to that callback would steal focus after every keystroke.
+    if (!focusedForOpenRef.current) {
+      panelRef.current?.focus();
+      focusedForOpenRef.current = true;
+    }
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!mounted || !open) return null;
 
