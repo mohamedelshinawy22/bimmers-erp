@@ -14,6 +14,7 @@ import { activateTenantUsername, authorizeTenantDevice, establishTenantContext, 
 import { reconcileConfiguredRootAdminAlias } from "@/lib/root-admin-alias-reconciliation";
 import { toLoginActionFailure } from "@/lib/login-action-failure";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 /** Constant-time-ish decoy hash so a missing username costs the same as a wrong password. */
 const DECOY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.q8n0PtPYQhbP8Yq9m8kK1lYQ0lM3z2i";
@@ -183,17 +184,18 @@ export async function createUserAction(
  */
 export async function toggleUserActiveAction(
   userId: string,
-): Promise<ActionResult<{ isActive: boolean }>> {
+): Promise<ActionResult<{ isActive: boolean; action: "DEACTIVATED" | "REACTIVATED"; message: string }>> {
   try {
     const actor = await requirePermission("user.manage");
     if (actor.id === userId) {
       return fail("لا يمكنك إيقاف حسابك الخاص.");
     }
+    const tenant = await getTenantDbFromSession();
 
-    const next = await prisma.$transaction(async (tx) => {
+    const next = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const target = await tx.user.findUnique({
         where: { id: userId },
-        select: { id: true, isActive: true, role: true, username: true },
+        select: { id: true, isActive: true, role: true, username: true, fullName: true },
       });
       if (!target) throw new BusinessRuleError("المستخدم غير موجود.");
 
@@ -222,12 +224,14 @@ export async function toggleUserActiveAction(
           performedBy: actor.id,
         },
       });
-      return updated.isActive;
-    });
+      return { isActive: updated.isActive, fullName: target.fullName };
+    }, TX_OPTIONS)));
 
+    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true } })).catch((usageError) => console.error("[toggleUserActiveAction] active-user usage report:", usageError));
     revalidatePath("/settings");
     revalidatePath("/users");
-    return ok({ isActive: next });
+    const action = next.isActive ? "REACTIVATED" as const : "DEACTIVATED" as const;
+    return ok({ isActive: next.isActive, action, message: next.isActive ? `تم تنشيط حساب المستخدم ${next.fullName} بنجاح.` : `تم تعطيل حساب المستخدم ${next.fullName} بنجاح لحماية سجلاته المالية والتدقيقية.` });
   } catch (error) {
     return toActionError(error, "toggleUserActiveAction");
   }

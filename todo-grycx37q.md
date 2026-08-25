@@ -147,3 +147,7 @@
 - [x] Add reusable real-time Arabic/Persian digit and decimal-separator normalization for numeric fields.
 - [x] Apply the shared numeric entry behavior to voucher, catalog, account, invoice, POS, and settings workflows.
 - [ ] Add cross-module normalization regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit the settings user-removal action, tenant scope, user relations, and client confirmation flow.
+- [x] Replace unsafe user hard deletion with protected tenant-scoped deactivation and session revocation where appropriate.
+- [x] Add Arabic removal confirmation and success/error feedback in users and permissions settings.
+- [ ] Add user-removal regressions, validate, deploy, and obtain authenticated acceptance.

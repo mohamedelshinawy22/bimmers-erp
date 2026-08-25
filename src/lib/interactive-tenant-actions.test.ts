@@ -50,4 +50,18 @@ describe("interactive tenant action boundaries", () => {
     expect(actions).toContain("[tenantDeviceHeartbeatAction] active-user usage report:");
     expect(actions).not.toContain('reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } }))');
   });
+
+  it("deactivates users through the explicit tenant database without hard deletion and returns useful Arabic feedback", () => {
+    const actions = source("src/server/actions/auth.actions.ts");
+    const client = source("src/app/(app)/users/users-management-client.tsx");
+    expect(actions).toContain('const tenant = await getTenantDbFromSession()');
+    expect(actions).toContain("tenant.run(() => withTxRetry");
+    expect(actions).toContain("tenant.prisma.$transaction");
+    expect(actions).toContain("data: { isActive: !target.isActive }");
+    expect(actions).toContain("لا يمكنك إيقاف حسابك الخاص.");
+    expect(actions).toContain("لا يمكن إيقاف آخر مدير نظام نشط.");
+    expect(actions).not.toContain("tenant.prisma.user.delete({ where: { id: userId }");
+    expect(client).toContain("إذا كانت لديه سجلات أو فواتير مرتبطة، سيُعطّل الحساب فقط");
+    expect(client).toContain('<Alert variant="success">{notice}</Alert>');
+  });
 });
