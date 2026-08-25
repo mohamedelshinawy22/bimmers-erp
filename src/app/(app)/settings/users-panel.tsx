@@ -14,6 +14,7 @@ import { ROLE_LABELS } from "@/lib/permissions";
 import type { ManagedUser } from "@/server/services/audit.service";
 import { createUserAction, deleteManagedUserPermanentlyAction, toggleUserActiveAction } from "@/server/actions/auth.actions";
 import { ChangePasswordModal } from "@/components/auth/change-password-modal";
+import { UserPermissionsModal } from "@/components/users/user-permissions-modal";
 
 /**
  * Operator management.
@@ -22,7 +23,7 @@ import { ChangePasswordModal } from "@/components/auth/change-password-modal";
  * account-management screen that did not exist — users could only be created by
  * the seed script.
  */
-export function UsersPanel({ users, currentUserId, tenantQuota }: { users: ManagedUser[]; currentUserId: string; tenantQuota: { maxSubUsers: number; activeSubUsers: number } | null }) {
+export function UsersPanel({ users, currentUserId, tenantQuota, treasuries, warehouses }: { users: ManagedUser[]; currentUserId: string; tenantQuota: { maxSubUsers: number; activeSubUsers: number } | null; treasuries: Array<{ id: string; name: string; type: string }>; warehouses: string[] }) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -30,6 +31,7 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
+  const [permissionsTarget, setPermissionsTarget] = useState<ManagedUser | null>(null);
   const quotaReached = Boolean(tenantQuota && tenantQuota.activeSubUsers >= tenantQuota.maxSubUsers);
 
   const toggle = (userId: string) => {
@@ -117,16 +119,17 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
                   )}
                 </TD>
                 <TD>
-                  {u.id === currentUserId ? (
-                    <span className="text-[10px] text-bmw-muted">حسابك</span>
-                  ) : u.role === "SUPER_ADMIN" ? (
-                    <span className="text-[10px] text-bmw-blue">الحساب الرئيسي</span>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => setPermissionsTarget(u)} disabled={pending} title="تعديل الدور وتخصيص الصلاحيات" className="rounded-lg border border-bmw-blue/35 bg-bmw-blue/10 p-1.5 text-bmw-blue transition-colors hover:bg-bmw-blue/20 disabled:opacity-40"><ShieldCheck size={14} /></button>
+                    {u.id === currentUserId ? (
+                      <span className="text-[10px] text-bmw-muted">حسابك</span>
+                    ) : u.role === "SUPER_ADMIN" ? (
+                      <span className="text-[10px] text-bmw-blue">الحساب الرئيسي</span>
+                    ) : <>
                       <button type="button" onClick={() => toggle(u.id)} disabled={pending} title={u.isActive ? "إيقاف الحساب" : "تنشيط الحساب"} className={`rounded-lg border p-1.5 transition-colors disabled:opacity-40 ${u.isActive ? "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"}`}><Power size={14} /></button>
                       <button type="button" onClick={() => setDeleteTarget(u)} disabled={pending} title="حذف المستخدم نهائياً" className="rounded-lg border border-bmw-mRed/35 bg-bmw-mRed/10 p-1.5 text-bmw-mRed transition-colors hover:bg-bmw-mRed/20 disabled:opacity-40"><Trash2 size={14} /></button>
-                    </div>
-                  )}
+                    </>}
+                  </div>
                 </TD>
               </TR>
             ))}
@@ -137,6 +140,7 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
       <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} quotaReached={quotaReached} />
       <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       <DeleteUserModal user={deleteTarget} pending={pending} onClose={() => setDeleteTarget(null)} onConfirm={removePermanently} />
+      {permissionsTarget ? <UserPermissionsModal user={permissionsTarget} treasuries={treasuries} warehouses={warehouses} onClose={() => setPermissionsTarget(null)} onSaved={() => { setPermissionsTarget(null); router.refresh(); }} /> : null}
     </Card>
   );
 }

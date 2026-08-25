@@ -20,10 +20,12 @@ export default async function SettingsPage() {
   if (!can(user.role, "settings.read")) redirect("/");
 
   const canManageUsers = can(user.role, "user.manage");
-  const [groups, users, companyProfile] = await Promise.all([
+  const [groups, users, companyProfile, treasuries, bins] = await Promise.all([
     getSettingsGrouped(tenant.prisma),
     canManageUsers ? listUsers(tenant.prisma) : Promise.resolve(null),
     getCompanyProfile(tenant.prisma),
+    canManageUsers ? tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true } }) : Promise.resolve([]),
+    canManageUsers ? tenant.prisma.warehouseBin.findMany({ distinct: ["warehouseName"], orderBy: { warehouseName: "asc" }, select: { warehouseName: true } }) : Promise.resolve([]),
   ]);
   const tenantQuota = canManageUsers && users
     ? {
@@ -46,6 +48,8 @@ export default async function SettingsPage() {
         currentUserId={user.id}
         companyProfile={companyProfile}
         tenantQuota={tenantQuota}
+        treasuries={treasuries}
+        warehouses={bins.map((bin) => bin.warehouseName)}
       />
     </div>
   );

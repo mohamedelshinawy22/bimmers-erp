@@ -111,4 +111,18 @@ describe("interactive tenant action boundaries", () => {
       expect(actions).not.toContain("pg_advisory_xact_lock");
     }
   });
+
+  it("opens the existing granular permission editor from the active settings users table with tenant-scoped scope options", () => {
+    const settingsPage = source("src/app/(app)/settings/page.tsx");
+    const settingsForm = source("src/app/(app)/settings/settings-form.tsx");
+    const settingsPanel = source("src/app/(app)/settings/users-panel.tsx");
+    expect(settingsPage).toContain("tenant.prisma.treasury.findMany");
+    expect(settingsPage).toContain("tenant.prisma.warehouseBin.findMany");
+    expect(settingsForm).toContain("treasuries={treasuries}");
+    expect(settingsForm).toContain("warehouses={warehouses}");
+    expect(settingsPanel).toContain("UserPermissionsModal");
+    expect(settingsPanel).toContain("تعديل الدور وتخصيص الصلاحيات");
+    expect(settingsPanel).toContain("onClick={() => setPermissionsTarget(u)}");
+    expect(settingsPanel).toContain("permissionsTarget ? <UserPermissionsModal");
+  });
 });

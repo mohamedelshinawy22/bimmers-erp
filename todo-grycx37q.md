@@ -165,3 +165,7 @@
 - [x] Trace the P2010 raw query in tenant user creation and identify the safe quota-enforcement replacement.
 - [x] Remove the failing raw SQL dependency from tenant user creation while preserving quota protection.
 - [ ] Add P2010 regression coverage, validate, deploy, and obtain authenticated user-creation acceptance.
+- [x] Audit existing tenant user permission schema, update actions, and settings/users modal entry points.
+- [x] Add an explicit permission-management action in the active settings and users tables.
+- [x] Complete granular role and permission controls with tenant-scoped persistence safeguards.
+- [ ] Add permissions-management regressions, validate, deploy, and obtain authenticated acceptance.
