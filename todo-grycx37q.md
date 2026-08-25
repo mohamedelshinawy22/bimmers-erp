@@ -155,3 +155,6 @@
 - [x] Implement tenant-scoped permanent deletion for eligible sub-users with financial, self, and primary-admin safeguards.
 - [x] Add distinct suspend/reactivate and permanent-delete controls with explicit Arabic confirmations and feedback.
 - [ ] Add lifecycle integrity regressions, validate, deploy, and obtain authenticated dual-action acceptance.
+- [x] Locate the active settings user-management table and diagnose why the permanent-delete control is absent in production.
+- [x] Render the guarded permanent-delete control and confirmation in the active settings users interface.
+- [ ] Add regression coverage, validate, deploy, and obtain authenticated visible-control acceptance.

@@ -79,4 +79,14 @@ describe("interactive tenant action boundaries", () => {
     expect(client).toContain("deleteManagedUserPermanentlyAction(user.id)");
     expect(client).toContain('<Trash2 size={14} />');
   });
+
+  it("renders the permanent-delete control in the active settings users panel, not only the standalone users page", () => {
+    const settingsPanel = source("src/app/(app)/settings/users-panel.tsx");
+    expect(settingsPanel).toContain("deleteManagedUserPermanentlyAction");
+    expect(settingsPanel).toContain("تأكيد الحذف النهائي للمستخدم");
+    expect(settingsPanel).toContain("onClick={() => setDeleteTarget(u)}");
+    expect(settingsPanel).toContain('<Trash2 size={14} />');
+    expect(settingsPanel).toContain("حذف المستخدم نهائياً");
+    expect(settingsPanel).toContain("تنبيه حماية السجلات المالية");
+  });
 });

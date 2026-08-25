@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Power, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { KeyRound, Power, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { formatDateTime, formatInt } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { ManagedUser } from "@/server/services/audit.service";
-import { createUserAction, toggleUserActiveAction } from "@/server/actions/auth.actions";
+import { createUserAction, deleteManagedUserPermanentlyAction, toggleUserActiveAction } from "@/server/actions/auth.actions";
 import { ChangePasswordModal } from "@/components/auth/change-password-modal";
 
 /**
@@ -28,16 +28,35 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
   const quotaReached = Boolean(tenantQuota && tenantQuota.activeSubUsers >= tenantQuota.maxSubUsers);
 
   const toggle = (userId: string) => {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       const res = await toggleUserActiveAction(userId);
       if (!res.success) {
         setError(res.error);
         return;
       }
+      setNotice(res.data.message);
+      router.refresh();
+    });
+  };
+
+  const removePermanently = (user: ManagedUser) => {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await deleteManagedUserPermanentlyAction(user.id);
+      if (!res.success) {
+        setError(res.error);
+        return;
+      }
+      setDeleteTarget(null);
+      setNotice(res.data.message);
       router.refresh();
     });
   };
@@ -60,6 +79,7 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
 
       <CardContent className="space-y-3">
         {error ? <Alert variant="error">{error}</Alert> : null}
+        {notice ? <Alert variant="success">{notice}</Alert> : null}
         <Table>
           <THead>
             <TR>
@@ -99,20 +119,13 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
                 <TD>
                   {u.id === currentUserId ? (
                     <span className="text-[10px] text-bmw-muted">حسابك</span>
+                  ) : u.role === "SUPER_ADMIN" ? (
+                    <span className="text-[10px] text-bmw-blue">الحساب الرئيسي</span>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => toggle(u.id)}
-                      disabled={pending}
-                      title={u.isActive ? "إيقاف الحساب" : "تنشيط الحساب"}
-                      className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
-                        u.isActive
-                          ? "text-bmw-muted hover:bg-bmw-mRed/10 hover:text-bmw-mRed"
-                          : "text-bmw-muted hover:bg-emerald-500/10 hover:text-emerald-400"
-                      }`}
-                    >
-                      <Power size={14} />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => toggle(u.id)} disabled={pending} title={u.isActive ? "إيقاف الحساب" : "تنشيط الحساب"} className={`rounded-lg border p-1.5 transition-colors disabled:opacity-40 ${u.isActive ? "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"}`}><Power size={14} /></button>
+                      <button type="button" onClick={() => setDeleteTarget(u)} disabled={pending} title="حذف المستخدم نهائياً" className="rounded-lg border border-bmw-mRed/35 bg-bmw-mRed/10 p-1.5 text-bmw-mRed transition-colors hover:bg-bmw-mRed/20 disabled:opacity-40"><Trash2 size={14} /></button>
+                    </div>
                   )}
                 </TD>
               </TR>
@@ -123,8 +136,15 @@ export function UsersPanel({ users, currentUserId, tenantQuota }: { users: Manag
 
       <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} quotaReached={quotaReached} />
       <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+      <DeleteUserModal user={deleteTarget} pending={pending} onClose={() => setDeleteTarget(null)} onConfirm={removePermanently} />
     </Card>
   );
+}
+
+function DeleteUserModal({ user, pending, onClose, onConfirm }: { user: ManagedUser | null; pending: boolean; onClose: () => void; onConfirm: (user: ManagedUser) => void }) {
+  if (!user) return null;
+  const blockedByInvoices = user.invoiceCount > 0;
+  return <Modal open onClose={onClose} title="تأكيد الحذف النهائي للمستخدم" description="لا يمكن التراجع عن الحذف بعد اكتماله." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={() => onConfirm(user)} loading={pending} disabled={blockedByInvoices}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3"><p className="text-sm text-white">هل أنت متأكد من رغبتك في حذف حساب <strong dir="ltr">@{user.username}</strong> نهائياً؟</p>{blockedByInvoices ? <Alert variant="warning">تنبيه حماية السجلات المالية: لا يمكن حذف هذا المستخدم نهائياً لوجود ({user.invoiceCount}) فاتورة مرتبطة به. يمكنك إيقاف الحساب بدلاً من الحذف.</Alert> : <Alert variant="warning">سيتحقق النظام أيضاً من السندات وحركات المخزون والسجلات التشغيلية قبل تنفيذ الحذف.</Alert>}</div></Modal>;
 }
 
 function AddUserModal({ open, onClose, quotaReached }: { open: boolean; onClose: () => void; quotaReached: boolean }) {
