@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
 import type { AccountType } from "@prisma/client";
-import { can, requireUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { can } from "@/lib/auth";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { num } from "@/lib/utils";
 import { getVehicleFormOptions, listAccounts } from "@/server/services/accounts.service";
@@ -29,9 +29,10 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   const balanceFilter = searchParams.balance === "DEBIT" || searchParams.balance === "CREDIT" || searchParams.balance === "ZERO" ? searchParams.balance : "ALL";
   const includeInactive = searchParams.archived === "1";
 
+  try {
   const [result, options, workshops, company, treasuries] = await Promise.all([
-    listAccounts({ query: searchParams.q, type, debtorsOnly, balanceFilter, includeInactive, page, pageSize: 25 }),
-    getVehicleFormOptions(),
+    listAccounts(tenant.prisma, { query: searchParams.q, type, debtorsOnly, balanceFilter, includeInactive, page, pageSize: 25 }),
+    getVehicleFormOptions(tenant.prisma),
     tenant.prisma.account.count({ where: { type: "WORKSHOP_BMW", isActive: true } }).catch(() => 0),
     getCompanyProfile(tenant.prisma),
     tenant.prisma.treasury.findMany({ where: { isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true, currentBalance: true } }).catch(() => []),
@@ -63,5 +64,9 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       }}
     />
   );
+  } catch (error) {
+    console.error("[accounts-page] tenant data load failed", error);
+    return <AccountsClient rows={[]} total={0} page={1} pageSize={25} filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter, includeInactive }} options={{ chassis: [], engines: [] }} canWrite={can(user.role, "account.write")} canForceCleanup={user.role === "SUPER_ADMIN"} canAdjustBalance={user.role === "SUPER_ADMIN" || user.role === "MANAGER"} canViewStatement={can(user.role, "account.viewStatement")} company={{ name: "", commercialName: "", phone: "", phonePrimary: "", phoneSecondary: "", address: "", taxNumber: "", commercialRegister: "", logoUrl: "", invoiceFooter: "" }} canTransact={can(user.role, "treasury.transact")} treasuries={[]} totals={{ receivables: 0, payables: 0, net: 0, debitCount: 0, creditCount: 0, zeroCount: 0, workshops: 0 }} />;
+  }
   });
 }

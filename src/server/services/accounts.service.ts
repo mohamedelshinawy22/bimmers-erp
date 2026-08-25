@@ -25,7 +25,7 @@ export interface AccountRow {
 
 export type AccountBalanceFilter = "ALL" | "DEBIT" | "CREDIT" | "ZERO";
 
-export async function listAccounts(options: {
+export async function listAccounts(db: PrismaClient, options: {
   query?: string;
   type?: AccountType | "ALL";
   /** Legacy alias retained for existing URLs. A negative balance is receivable from the account. */
@@ -58,21 +58,21 @@ export async function listAccounts(options: {
   const where: Prisma.AccountWhereInput = balanceFilter === "ALL" ? baseWhere : { AND: [baseWhere, balanceWhere] };
 
   const [accounts, total, allScopedBalances, debitCount, creditCount, zeroCount] = await Promise.all([
-    prisma.account.findMany({
+    db.account.findMany({
       where,
       orderBy: [{ currentBalance: "asc" }, { name: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: { _count: { select: { vehicles: true } } },
     }),
-    prisma.account.count({ where }),
-    prisma.account.findMany({ where: baseWhere, select: { currentBalance: true, type: true } }),
-    prisma.account.count({ where: { AND: [baseWhere, { type: { in: receivableTypes }, currentBalance: { lt: 0 } }] } }),
-    prisma.account.count({ where: { AND: [baseWhere, { type: { in: payableTypes }, currentBalance: { gt: 0 } }] } }),
-    prisma.account.count({ where: { AND: [baseWhere, { currentBalance: { equals: 0 } }] } }),
+    db.account.count({ where }),
+    db.account.findMany({ where: baseWhere, select: { currentBalance: true, type: true } }),
+    db.account.count({ where: { AND: [baseWhere, { type: { in: receivableTypes }, currentBalance: { lt: 0 } }] } }),
+    db.account.count({ where: { AND: [baseWhere, { type: { in: payableTypes }, currentBalance: { gt: 0 } }] } }),
+    db.account.count({ where: { AND: [baseWhere, { currentBalance: { equals: 0 } }] } }),
   ]);
 
-  const openCounts = await prisma.invoice.groupBy({
+  const openCounts = await db.invoice.groupBy({
     by: ["accountId"],
     where: { accountId: { in: accounts.map((a) => a.id) }, isVoided: false, paymentStatus: { in: ["CREDIT", "PARTIAL"] } },
     _count: { _all: true },
@@ -92,7 +92,7 @@ export async function listAccounts(options: {
       const balance = num(a.currentBalance);
       const limit = num(a.creditLimit);
       const debt = balance < 0 ? Math.abs(balance) : 0;
-      return { id: a.id, accountNumber: a.accountNumber, name: a.name, type: a.type, phone: a.phone, email: a.email, taxNumber: a.taxNumber, creditLimit: limit, currentBalance: balance, debt, creditUtilizationPercent: limit > 0 ? Math.min(999, (debt / limit) * 100) : null, defaultPriceTier: a.defaultPriceTier, isActive: a.isActive, vehicleCount: a._count.vehicles, openInvoiceCount: openMap.get(a.id) ?? 0 };
+      return { id: String(a.id ?? ""), accountNumber: String(a.accountNumber ?? ""), name: String(a.name ?? "حساب بدون اسم"), type: a.type, phone: a.phone ?? null, email: a.email ?? null, taxNumber: a.taxNumber ?? null, creditLimit: limit, currentBalance: balance, debt, creditUtilizationPercent: limit > 0 ? Math.min(999, (debt / limit) * 100) : null, defaultPriceTier: String(a.defaultPriceTier ?? "RETAIL"), isActive: Boolean(a.isActive), vehicleCount: a._count?.vehicles ?? 0, openInvoiceCount: openMap.get(a.id) ?? 0 };
     }),
     total,
     page,
@@ -433,13 +433,13 @@ export async function getAccountStatement(accountId: string, limit = 60) {
   };
 }
 
-export async function getVehicleFormOptions() {
+export async function getVehicleFormOptions(db: Pick<PrismaClient, "bmwChassis" | "bmwEngine">) {
   const [chassis, engines] = await Promise.all([
-    prisma.bmwChassis.findMany({
+    db.bmwChassis.findMany({
       orderBy: [{ series: "asc" }, { code: "asc" }],
       select: { id: true, code: true, series: true },
     }),
-    prisma.bmwEngine.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, displacement: true } }),
+    db.bmwEngine.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, displacement: true } }),
   ]);
   return { chassis, engines };
 }

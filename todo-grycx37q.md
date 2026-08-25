@@ -130,4 +130,8 @@
 - [ ] Add focus-stability regression coverage, deploy, and obtain authenticated continuous-typing acceptance.
 - [x] Diagnose the CreateAccountModal submission failure across validation, tenant routing, and account-number allocation.
 - [x] Normalize compatible create-account values and generate tenant-safe account numbers with clear action-result errors.
-- [ ] Add create-account resilience regressions, deploy, and obtain authenticated Arabic-input acceptance.
+- [x] Add create-account resilience regressions, deploy, and obtain authenticated Arabic-input acceptance.
+- [x] Diagnose voucher-transfer matching crashes for the reported 63-row receipt and 252-row payment workbooks.
+- [x] Harden invoice matching previews for sparse products/accounts and preserve bounded execution batches.
+- [x] Harden account Excel aliases/upserts and Accounts SSR serialization for imported sparse account data.
+- [ ] Add cross-import regression coverage, validate, deploy, and obtain authenticated workflow acceptance.

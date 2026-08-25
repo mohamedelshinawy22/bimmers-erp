@@ -125,6 +125,20 @@ async function findAccount(db: import("@prisma/client").PrismaClient, line: Vali
   return { account: candidates.length === 1 ? candidates[0] : null, candidates, target };
 }
 
+async function findAccountsForPreview(db: import("@prisma/client").PrismaClient, lines: Array<{ line: ValidVoucherLine; kind: VoucherKind }>) {
+  const targets = [...new Set(lines
+    .filter(({ kind }) => kind !== "TRANSFER_IN" && kind !== "TRANSFER_OUT")
+    .map(({ line }) => accountTarget(line))
+    .filter(Boolean))];
+  if (!targets.length) return new Map<string, Array<{ id: string; name: string; type: string }>>();
+  const accounts = await db.account.findMany({ where: { isActive: true, name: { in: targets, mode: "insensitive" } }, select: { id: true, name: true, type: true } });
+  return accounts.reduce((map, account) => {
+    const key = normalizeName(account.name);
+    map.set(key, [...(map.get(key) ?? []), account]);
+    return map;
+  }, new Map<string, Array<{ id: string; name: string; type: string }>>());
+}
+
 async function resolveOrCreateAccount(tx: Prisma.TransactionClient, line: ValidVoucherLine, kind: VoucherKind, autoCreate: boolean, userId: string) {
   const target = accountTarget(line);
   if (!target || kind === "TRANSFER_IN" || kind === "TRANSFER_OUT") return null;
@@ -183,6 +197,11 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
     const tenant = await getTenantDbFromSession();
     const rows = [] as Array<{ row: number; reference: string; kind: VoucherKind; amount: number; accountName: string; itemCategory: string; channels: Array<{ name: string; amount: number }>; isValid: boolean; reason?: string; accountStatus: "MATCHED" | "AUTO_CREATE" | "EXPENSE_ACCOUNT" | "NONE" }>;
     const pairedSourceRows = new Set(input.reconciledTransfers.flatMap((pair) => [`PAYMENT:${pair.paymentRowNumber}`, `RECEIPT:${pair.receiptRowNumber}`]));
+    const previewLines = input.rows.flatMap((rawRow) => {
+      const parsed = voucherLineSchema.safeParse(rawRow);
+      return parsed.success ? [{ line: parsed.data, kind: voucherMovementKind(parsed.data.movementType, input.type) }] : [];
+    });
+    const previewAccountsByName = await tenant.run(() => findAccountsForPreview(tenant.prisma, previewLines));
     for (const rawRow of input.rows) {
       const parsed = voucherLineSchema.safeParse(rawRow);
       if (!parsed.success) { rows.push({ row: Number((rawRow as { sourceRowNumber?: number })?.sourceRowNumber ?? 0), reference: "—", kind: input.type, amount: 0, accountName: "", itemCategory: "", channels: [], isValid: false, reason: parsed.error.issues.map((issue) => issue.message).join(" • "), accountStatus: "NONE" }); continue; }
@@ -193,7 +212,9 @@ export async function previewVoucherImportAction(raw: unknown): Promise<ActionRe
         continue;
       }
       const issue = issueFor(line, input.type, input.autoCreateAccounts);
-      const accountMatch = await tenant.run(() => findAccount(tenant.prisma, line, kind));
+      const target = accountTarget(line);
+      const candidates = !target || kind === "TRANSFER_IN" || kind === "TRANSFER_OUT" ? [] : previewAccountsByName.get(normalizeName(target)) ?? [];
+      const accountMatch = { target, candidates, account: candidates.length === 1 ? candidates[0] ?? null : null };
       const accountRequired = Boolean(accountMatch.target) && kind !== "TRANSFER_IN" && kind !== "TRANSFER_OUT";
       const categoryAutoCreate = !line.accountName.trim() && Boolean(line.itemCategory.trim());
       const accountIssue = accountRequired && !accountMatch.account && !input.autoCreateAccounts && !categoryAutoCreate ? `الحساب «${accountMatch.target}» غير مسجل وتم إيقاف الإنشاء التلقائي.` : undefined;

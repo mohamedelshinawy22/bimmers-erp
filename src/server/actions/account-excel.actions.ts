@@ -9,11 +9,10 @@ import { writeAudit } from "@/lib/audit";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth";
 import { BusinessRuleError } from "@/lib/errors";
+import { parseImportNumber } from "@/lib/import-export/parser";
 import { money, num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
-import { prisma } from "@/lib/prisma";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
-import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 import { nextAccountNumber } from "@/server/services/numbering.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { getCompanyProfile } from "@/server/services/settings.service";
@@ -24,10 +23,11 @@ const balanceFilterSchema = z.enum(["ALL", "DEBIT", "CREDIT", "ZERO"]);
 const exportSchema = z.object({ query: z.string().trim().max(120).optional(), type: z.enum(["ALL", ...accountTypes]).default("ALL"), balanceFilter: balanceFilterSchema.default("ALL"), format: z.enum(["XLSX", "CSV"]).default("XLSX") });
 const accountPrefix: Record<(typeof accountTypes)[number], string> = { CUSTOMER: "ACC", WORKSHOP_BMW: "WRK", SUPPLIER: "SUP", EXPENSE: "EXP" };
 const typeLabel: Record<(typeof accountTypes)[number], string> = { CUSTOMER: "عميل", WORKSHOP_BMW: "ورشة BMW", SUPPLIER: "مورد", EXPENSE: "مصروف" };
-const parseNumber = (value: unknown) => parseSpreadsheetNumber(value);
+const ACCOUNT_IMPORT_BATCH_SIZE = 25;
+const parseNumber = (value: unknown) => parseImportNumber(value) ?? 0;
 const normalizeType = (value: unknown) => {
   const token = String(value ?? "").trim().toUpperCase();
-  if (["CUSTOMER", "عميل", "عملاء"].includes(token)) return "CUSTOMER";
+  if (["CUSTOMER", "عميل", "عملاء", "عميل قطاعي"].includes(token)) return "CUSTOMER";
   if (["WORKSHOP_BMW", "WORKSHOP", "ورشة", "ورش", "ورشة BMW"].includes(token)) return "WORKSHOP_BMW";
   if (["SUPPLIER", "مورد", "موردون"].includes(token)) return "SUPPLIER";
   if (["EXPENSE", "مصروف", "مصروفات"].includes(token)) return "EXPENSE";
@@ -51,6 +51,28 @@ const importRowSchema = z.object({
 });
 const importSchema = z.object({ rows: z.array(z.unknown()).min(1).max(5_000), duplicateMode: z.enum(["SKIP", "UPDATE"]).default("SKIP"), skipInvalidRows: z.boolean().default(true) });
 type ImportRow = z.infer<typeof importRowSchema>;
+type TenantPrisma = import("@prisma/client").PrismaClient;
+type ImportCounts = { chunkCreated: number; chunkUpdated: number; chunkSkipped: number };
+
+async function applyAccountImportRows(db: TenantPrisma, rows: ImportRow[], args: { duplicateMode: "SKIP" | "UPDATE"; jobId: string; userId: string }): Promise<ImportCounts> {
+  return withTxRetry(() => db.$transaction(async (tx) => {
+    let chunkCreated = 0; let chunkUpdated = 0; let chunkSkipped = 0;
+    for (const row of rows) {
+      const duplicate = await tx.account.findFirst({ where: { OR: [...(row.accountNumber ? [{ accountNumber: row.accountNumber }] : []), ...(row.phone ? [{ phone: row.phone }] : []), { name: { equals: row.name, mode: "insensitive" } }] }, select: { id: true, currentBalance: true } });
+      if (duplicate) {
+        if (args.duplicateMode === "SKIP") { chunkSkipped += 1; continue; }
+        const changed = await tx.account.update({ where: { id: duplicate.id }, data: { name: row.name, type: row.type, phone: row.phone || null, email: row.email || null, taxNumber: row.taxNumber || null, address: row.address || null, category: row.category || null, creditLimit: money(row.creditLimit), defaultPriceTier: row.defaultPriceTier, isActive: row.isActive, status: row.isActive ? "ACTIVE" : "INACTIVE" } });
+        await writeAudit(tx, { tableName: "Account", recordId: changed.id, action: "UPDATE", oldData: { importJobId: args.jobId, currentBalance: duplicate.currentBalance }, newData: { ...changed, importJobId: args.jobId, sourceRowNumber: row.sourceRowNumber, openingBalanceIgnored: row.openingBalance }, performedBy: args.userId });
+        chunkUpdated += 1;
+        continue;
+      }
+      const account = await tx.account.create({ data: { accountNumber: row.accountNumber || await nextAccountNumber(tx, accountPrefix[row.type]), name: row.name, type: row.type, phone: row.phone || null, email: row.email || null, taxNumber: row.taxNumber || null, address: row.address || null, category: row.category || null, creditLimit: money(row.creditLimit), currentBalance: money(row.openingBalance), defaultPriceTier: row.defaultPriceTier, isActive: row.isActive, status: row.isActive ? "ACTIVE" : "INACTIVE" } });
+      await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "INSERT", newData: { ...account, importJobId: args.jobId, sourceRowNumber: row.sourceRowNumber, openingBalance: row.openingBalance, openingLedger: "inferred_from_current_balance" }, performedBy: args.userId });
+      chunkCreated += 1;
+    }
+    return { chunkCreated, chunkUpdated, chunkSkipped };
+  }, TX_OPTIONS));
+}
 
 function accountWhere(input: z.infer<typeof exportSchema>): Prisma.AccountWhereInput {
   const and: Prisma.AccountWhereInput[] = [];
@@ -151,27 +173,25 @@ export async function importAccountsAction(raw: unknown): Promise<ActionResult<{
     const job = await tenant.prisma.importJob.create({ data: { type: "ACCOUNTS", status: "PROCESSING", checksum, mapping: { duplicateMode: input.duplicateMode }, createdById: user.id } });
     let created = 0; let updated = 0; let skipped = 0;
     try {
-      for (let start = 0; start < rows.length; start += 100) {
-        const chunk = rows.slice(start, start + 100);
-        const result = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
-          let chunkCreated = 0; let chunkUpdated = 0; let chunkSkipped = 0;
+      for (let start = 0; start < rows.length; start += ACCOUNT_IMPORT_BATCH_SIZE) {
+        const chunk = rows.slice(start, start + ACCOUNT_IMPORT_BATCH_SIZE);
+        try {
+          const result = await applyAccountImportRows(tenant.prisma, chunk, { duplicateMode: input.duplicateMode, jobId: job.id, userId: user.id });
+          created += result.chunkCreated; updated += result.chunkUpdated; skipped += result.chunkSkipped;
+        } catch (chunkError) {
+          if (!input.skipInvalidRows) throw chunkError;
           for (const row of chunk) {
-            const duplicate = await tx.account.findFirst({ where: { OR: [...(row.accountNumber ? [{ accountNumber: row.accountNumber }] : []), ...(row.phone ? [{ phone: row.phone }] : [])] }, select: { id: true, currentBalance: true } });
-            if (duplicate) {
-              if (input.duplicateMode === "SKIP") { chunkSkipped += 1; continue; }
-              const changed = await tx.account.update({ where: { id: duplicate.id }, data: { name: row.name, type: row.type, phone: row.phone || null, email: row.email || null, taxNumber: row.taxNumber || null, address: row.address || null, category: row.category || null, creditLimit: money(row.creditLimit), defaultPriceTier: row.defaultPriceTier, isActive: row.isActive, status: row.isActive ? "ACTIVE" : "INACTIVE" } });
-              await writeAudit(tx, { tableName: "Account", recordId: changed.id, action: "UPDATE", oldData: { importJobId: job.id, currentBalance: duplicate.currentBalance }, newData: { ...changed, importJobId: job.id, sourceRowNumber: row.sourceRowNumber, openingBalanceIgnored: row.openingBalance }, performedBy: user.id });
-              chunkUpdated += 1; continue;
+            try {
+              const result = await applyAccountImportRows(tenant.prisma, [row], { duplicateMode: input.duplicateMode, jobId: job.id, userId: user.id });
+              created += result.chunkCreated; updated += result.chunkUpdated; skipped += result.chunkSkipped;
+            } catch (rowError) {
+              invalid.push({ row: row.sourceRowNumber ?? 0, reason: rowError instanceof Error ? rowError.message : "تعذر ترحيل صف الحساب." });
+              skipped += 1;
             }
-            const account = await tx.account.create({ data: { accountNumber: row.accountNumber || await nextAccountNumber(tx, accountPrefix[row.type]), name: row.name, type: row.type, phone: row.phone || null, email: row.email || null, taxNumber: row.taxNumber || null, address: row.address || null, category: row.category || null, creditLimit: money(row.creditLimit), currentBalance: money(row.openingBalance), defaultPriceTier: row.defaultPriceTier, isActive: row.isActive, status: row.isActive ? "ACTIVE" : "INACTIVE" } });
-            await writeAudit(tx, { tableName: "Account", recordId: account.id, action: "INSERT", newData: { ...account, importJobId: job.id, sourceRowNumber: row.sourceRowNumber, openingBalance: row.openingBalance, openingLedger: "inferred_from_current_balance" }, performedBy: user.id });
-            chunkCreated += 1;
           }
-          return { chunkCreated, chunkUpdated, chunkSkipped };
-        }, TX_OPTIONS));
-        created += result.chunkCreated; updated += result.chunkUpdated; skipped += result.chunkSkipped;
+        }
       }
-      const summary = { total: input.rows.length, valid: rows.length, invalid: invalid.length, created, updated, skipped, duplicateMode: input.duplicateMode, chunkSize: 100 };
+      const summary = { total: input.rows.length, valid: rows.length, invalid: invalid.length, created, updated, skipped, duplicateMode: input.duplicateMode, chunkSize: ACCOUNT_IMPORT_BATCH_SIZE };
       await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
       await writeAudit(tenant.prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
       revalidatePath("/accounts"); revalidatePath("/pos");
@@ -189,14 +209,16 @@ export async function previewAccountsImportAction(raw: unknown): Promise<ActionR
     await requirePermission("account.write");
     const tenant = await getTenantDbFromSession();
     return tenant.run(async () => {
-    const input = z.object({ rows: z.array(z.object({ sourceRowNumber: z.coerce.number().int().positive(), accountNumber: z.string().trim().max(80).optional(), phone: z.string().trim().max(30).optional() })).max(5_000) }).parse(raw);
+    const input = z.object({ rows: z.array(z.object({ sourceRowNumber: z.coerce.number().int().positive(), accountNumber: z.string().trim().max(80).optional(), phone: z.string().trim().max(30).optional(), name: z.string().trim().max(180).optional() })).max(5_000) }).parse(raw);
     const numbers = [...new Set(input.rows.map((row) => row.accountNumber?.trim()).filter((value): value is string => Boolean(value)))];
     const phones = [...new Set(input.rows.map((row) => row.phone?.trim()).filter((value): value is string => Boolean(value)))];
-    if (!numbers.length && !phones.length) return ok({ duplicateRows: [] });
-    const existing = await tenant.prisma.account.findMany({ where: { OR: [...(numbers.length ? [{ accountNumber: { in: numbers } }] : []), ...(phones.length ? [{ phone: { in: phones } }] : [])] }, select: { accountNumber: true, phone: true } });
+    const names = [...new Set(input.rows.map((row) => row.name?.trim()).filter((value): value is string => Boolean(value)))];
+    if (!numbers.length && !phones.length && !names.length) return ok({ duplicateRows: [] });
+    const existing = await tenant.prisma.account.findMany({ where: { OR: [...(numbers.length ? [{ accountNumber: { in: numbers } }] : []), ...(phones.length ? [{ phone: { in: phones } }] : []), ...(names.length ? [{ name: { in: names, mode: "insensitive" as const } }] : [])] }, select: { accountNumber: true, phone: true, name: true } });
     const existingNumbers = new Set(existing.map((account) => account.accountNumber));
     const existingPhones = new Set(existing.flatMap((account) => account.phone ? [account.phone] : []));
-    return ok({ duplicateRows: input.rows.filter((row) => (row.accountNumber && existingNumbers.has(row.accountNumber.trim())) || (row.phone && existingPhones.has(row.phone.trim()))).map((row) => row.sourceRowNumber) });
+    const existingNames = new Set(existing.map((account) => account.name.trim().toLocaleLowerCase("ar-EG")));
+    return ok({ duplicateRows: input.rows.filter((row) => (row.accountNumber && existingNumbers.has(row.accountNumber.trim())) || (row.phone && existingPhones.has(row.phone.trim())) || (row.name && existingNames.has(row.name.trim().toLocaleLowerCase("ar-EG")))).map((row) => row.sourceRowNumber) });
     });
   } catch (error) { return toActionError(error, "previewAccountsImportAction"); }
 }

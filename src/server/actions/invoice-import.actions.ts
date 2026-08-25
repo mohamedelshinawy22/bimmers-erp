@@ -311,6 +311,10 @@ type ImportMatch = {
   treasuryCandidates: Array<{ id: string; name: string }>;
 };
 
+function emptyImportMatch(): ImportMatch {
+  return { account: null, accountCandidates: [], cashFallback: false, part: null, partCandidates: [], treasury: null, treasuryCandidates: [] };
+}
+
 async function matchLines(db: TenantPrisma, lines: ValidLine[], type: InvoiceImportType, mode: "SUMMARY" | "DETAILED"): Promise<ImportMatch[]> {
   const accountTypes: AccountType[] = type === "PURCHASE" || type === "PURCHASE_RETURN" ? [AccountType.SUPPLIER] : [AccountType.CUSTOMER, AccountType.WORKSHOP_BMW];
   const accountTypeSet = new Set<string>(accountTypes);
@@ -369,7 +373,7 @@ export async function previewInvoiceImportAction(raw: unknown): Promise<ActionRe
       return items;
     }, []);
     const matched = await tenant.run(() => matchLines(tenant.prisma, matchable.map((entry) => entry.line), input.type, input.mode));
-    const matchByRow = new Map(matchable.map((entry, index) => [entry.row, matched[index]! ]));
+    const matchByRow = new Map(matchable.map((entry, index) => [entry.row, matched[index] ?? emptyImportMatch()]));
     type PreviewRow = { row: number; documentNumber: string; type: string; accountName: string; oemNumber: string; partName: string; grandTotal: number; accountMatched: boolean; partMatched: boolean; treasuryMatched: boolean; paymentChannels: Array<{ name: string; amount: number }>; accountStatus: "CASH_FALLBACK" | "MATCHED" | "AUTO_CREATE" | "NOT_FOUND"; partStatus: "NOT_APPLICABLE" | "MATCHED_CATALOG" | "UNLINKED_TEXT_ITEM"; isValid: boolean; reason?: string; suggestedFix?: string; errorCode?: "ACCOUNT_NOT_FOUND" | "INVALID_QUANTITY" | "INVALID_AMOUNT" | "TREASURY_NOT_FOUND" | "TYPE_MISMATCH" | "FORMAT_INVALID" };
     const preview: PreviewRow[] = [];
     const rawString = (row: Record<string, unknown>, key: string) => String(row[key] ?? "").trim();

@@ -6,26 +6,27 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/input";
+import { parseImportNumber } from "@/lib/import-export/parser";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { downloadAccountsImportTemplateAction, importAccountsAction, previewAccountsImportAction } from "@/server/actions/account-excel.actions";
 
 type ImportRow = { sourceRowNumber: number; accountNumber: string; name: string; type: string; phone: string; email: string; taxNumber: string; address: string; category: string; creditLimit: string | number; defaultPriceTier: string; openingBalance: string | number; isActive: string | boolean };
 const normalized = (value: unknown) => String(value ?? "").trim().toLocaleLowerCase("ar-EG").replace(/[أإآٱ]/g, "ا").replace(/[ىي]/g, "ي").replace(/ة/g, "ه").replace(/[\s_\-]/g, "");
 const aliases: Record<keyof Omit<ImportRow, "sourceRowNumber">, string[]> = {
-  accountNumber: ["كودالحساب", "رقمالحساب", "accountcode", "accountnumber", "code"],
-  name: ["اسمالحساب", "الاسم", "name", "accountname"],
+  accountNumber: ["كودالحساب", "رقمالحساب", "رقمالعميل", "رقمالمورد", "الكود", "accountcode", "accountnumber", "code"],
+  name: ["اسمالحساب", "اسمالعميل", "اسمالمورد", "الاسم", "العميل", "المورد", "name", "accountname", "customername", "suppliername"],
   type: ["نوعالحساب", "النوع", "type", "accounttype"],
-  phone: ["رقمالهاتف", "التليفون", "الهاتف", "phone", "mobile"],
+  phone: ["رقمالهاتف", "التليفون", "الهاتف", "الموبايل", "mobile", "phone"],
   email: ["البريدالالكتروني", "email"],
   taxNumber: ["الرقمالضريبيالسجل", "الرقمالضريبي", "taxid", "taxnumber"],
   address: ["العنوان", "address"],
   category: ["التصنيف", "category"],
-  creditLimit: ["حدالائتمان", "creditlimit"],
+  creditLimit: ["حدالائتمان", "السقفالمصرفي", "السقفالأتماني", "creditlimit"],
   defaultPriceTier: ["شريحهالتسعير", "شريحةالتسعير", "pricetier", "defaultpricetier"],
-  openingBalance: ["الرصيدالافتتاحي", "openingbalance", "balance"],
-  isActive: ["الحاله", "الحالة", "نشط", "active", "status"],
+  openingBalance: ["الرصيدالافتتاحي", "رصيدافتتاحي", "openingbalance", "balance"],
+  isActive: ["الحاله", "الحالة", "نشط", "فعال", "active", "status"],
 };
-const expectedType = (value: string) => ["customer", "customer", "عميل", "عملاء", "workshop", "workshopbmw", "ورشه", "ورشة", "ورش", "supplier", "مورد", "موردون", "expense", "مصروف", "مصروفات"].includes(normalized(value));
+const expectedType = (value: string) => ["customer", "عميل", "عملاء", "عميلقطاعي", "workshop", "workshopbmw", "ورشه", "ورشة", "ورش", "supplier", "مورد", "موردون", "expense", "مصروف", "مصروفات"].includes(normalized(value));
 const downloadBase64 = (base64: string, fileName: string, mimeType: string) => { const raw = atob(base64); const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0)); const url = URL.createObjectURL(new Blob([bytes], { type: mimeType })); const link = document.createElement("a"); link.href = url; link.download = fileName; link.click(); URL.revokeObjectURL(url); };
 
 export function AccountImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
@@ -39,7 +40,7 @@ export function AccountImportModal({ onClose, onDone }: { onClose: () => void; o
   const [summary, setSummary] = useState("");
   const [existingDuplicateRows, setExistingDuplicateRows] = useState<number[]>([]);
   const [pending, startTransition] = useTransition();
-  const checks = useMemo(() => rows.map((row) => ({ ...row, valid: row.name.trim().length >= 2 && expectedType(row.type), duplicateInFile: Boolean(row.accountNumber && rows.some((other) => other.sourceRowNumber !== row.sourceRowNumber && other.accountNumber && other.accountNumber === row.accountNumber)) || Boolean(row.phone && rows.some((other) => other.sourceRowNumber !== row.sourceRowNumber && other.phone && other.phone === row.phone)), duplicateExisting: existingDuplicateRows.includes(row.sourceRowNumber) })), [rows, existingDuplicateRows]);
+  const checks = useMemo(() => rows.map((row) => ({ ...row, valid: row.name.trim().length >= 2 && expectedType(row.type), duplicateInFile: Boolean(row.accountNumber && rows.some((other) => other.sourceRowNumber !== row.sourceRowNumber && other.accountNumber && other.accountNumber === row.accountNumber)) || Boolean(row.phone && rows.some((other) => other.sourceRowNumber !== row.sourceRowNumber && other.phone && other.phone === row.phone)) || Boolean(row.name && rows.some((other) => other.sourceRowNumber !== row.sourceRowNumber && other.name && normalized(other.name) === normalized(row.name))), duplicateExisting: existingDuplicateRows.includes(row.sourceRowNumber) })), [rows, existingDuplicateRows]);
   const invalidCount = checks.filter((row) => !row.valid).length;
   const duplicateCount = checks.filter((row) => row.duplicateInFile || row.duplicateExisting).length;
 
@@ -49,7 +50,7 @@ export function AccountImportModal({ onClose, onDone }: { onClose: () => void; o
     try {
       const buffer = await file.arrayBuffer(); const workbook = XLSX.read(buffer, { type: "array", raw: false, cellDates: true }); const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
       if (!sheet) throw new Error("لم يتم العثور على ورقة بيانات في الملف.");
-      const toNumber = (value: unknown) => { const number = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, "")); return Number.isFinite(number) ? number : 0; };
+      const toNumber = (value: unknown) => parseImportNumber(value) ?? 0;
       const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false }) as unknown[][];
       const standardHeaderRow = matrix.findIndex((first, index) => {
         const second = matrix[index + 1] ?? [];
@@ -72,7 +73,7 @@ export function AccountImportModal({ onClose, onDone }: { onClose: () => void; o
           }).filter((row) => Object.values(row).some((value) => String(value).trim() !== "" && value !== row.sourceRowNumber));
       if (!mapped.length) throw new Error("الملف لا يحتوي صفوف حسابات قابلة للقراءة.");
       setRows(mapped); setFileName(file.name); setExistingDuplicateRows([]); setStep(3);
-      const preview = await previewAccountsImportAction({ rows: mapped.map((row) => ({ sourceRowNumber: row.sourceRowNumber, accountNumber: row.accountNumber, phone: row.phone })) });
+      const preview = await previewAccountsImportAction({ rows: mapped.map((row) => ({ sourceRowNumber: row.sourceRowNumber, accountNumber: row.accountNumber, phone: row.phone, name: row.name })) });
       if (preview.success) setExistingDuplicateRows(preview.data.duplicateRows);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر قراءة ملف Excel."); }
   };

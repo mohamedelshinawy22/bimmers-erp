@@ -18,5 +18,31 @@ describe("invoice import resilience", () => {
     expect(source).toContain("serializeData({ total: input.rows.length");
     expect(source).toContain("for (let batchStart = 0; batchStart < documentGroups.length; batchStart += IMPORT_BATCH_SIZE)");
     expect(source).toContain("partStatus: \"UNLINKED_TEXT_ITEM\"");
+    expect(source).toContain("matched[index] ?? emptyImportMatch()");
+  });
+
+  it("keeps Accounts SSR scoped to the resolved tenant and renders an empty fallback for corrupt legacy rows", () => {
+    const page = readFileSync(resolve(process.cwd(), "src/app/(app)/accounts/page.tsx"), "utf8");
+    const service = readFileSync(resolve(process.cwd(), "src/server/services/accounts.service.ts"), "utf8");
+    expect(page).toContain("listAccounts(tenant.prisma");
+    expect(page).toContain("getVehicleFormOptions(tenant.prisma)");
+    expect(page).toContain("return <AccountsClient rows={[]} total={0}");
+    expect(service).toContain("export async function listAccounts(db: PrismaClient");
+    expect(service).toContain('name: String(a.name ?? "حساب بدون اسم")');
+    expect(service).toContain("vehicleCount: a._count?.vehicles ?? 0");
+  });
+
+  it("bulk-resolves voucher preview accounts and checks account import collisions by name as well as codes", () => {
+    const vouchers = readFileSync(resolve(process.cwd(), "src/server/actions/voucher-import.actions.ts"), "utf8");
+    const accounts = readFileSync(resolve(process.cwd(), "src/server/actions/account-excel.actions.ts"), "utf8");
+    const preview = vouchers.slice(vouchers.indexOf("export async function previewVoucherImportAction"), vouchers.indexOf("export async function executeVoucherImportChunkAction"));
+    expect(preview).toContain("findAccountsForPreview(tenant.prisma, previewLines)");
+    expect(preview).toContain("previewAccountsByName.get(normalizeName(target))");
+    expect(preview).not.toContain("findAccount(tenant.prisma, line, kind)");
+    expect(accounts).toContain('name: { equals: row.name, mode: "insensitive" }');
+    expect(accounts).toContain('name: { in: names, mode: "insensitive" as const }');
+    expect(accounts).toContain("const ACCOUNT_IMPORT_BATCH_SIZE = 25");
+    expect(accounts).toContain("await applyAccountImportRows(tenant.prisma, [row]");
+    expect(accounts).toContain("parseImportNumber(value) ?? 0");
   });
 });
