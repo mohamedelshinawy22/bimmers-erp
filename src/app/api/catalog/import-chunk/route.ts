@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { executeInventoryImportAction } from "@/server/actions/import.actions";
+import { requirePermission, AuthError, ForbiddenError } from "@/lib/auth";
+import { toActionError } from "@/lib/action-result";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
+import { importCatalogApiChunk } from "@/server/services/catalog-import-api.service";
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +12,14 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    const user = await requirePermission("inventory.import");
     const body = await request.json();
-    const result = await executeInventoryImportAction(body, { revalidate: false });
-    return NextResponse.json(result, { status: result.success ? 200 : 400 });
+    const tenant = await getTenantDbFromSession();
+    const data = await tenant.run(() => importCatalogApiChunk(tenant.prisma, user.id, body));
+    return NextResponse.json({ success: true, data });
   } catch (error) {
-    console.error("[catalog-import-api] unexpected request failure", error);
-    return NextResponse.json({ success: false, error: "تعذر معالجة دفعة الأصناف. أعد المحاولة." }, { status: 400 });
+    const result = toActionError(error, "catalog-import-api");
+    const status = error instanceof AuthError ? 401 : error instanceof ForbiddenError ? 403 : 400;
+    return NextResponse.json(result, { status });
   }
 }

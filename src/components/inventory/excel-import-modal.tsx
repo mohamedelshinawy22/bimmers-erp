@@ -13,6 +13,7 @@ import { normalizeImportHeader, resolveImportColumns } from "@/lib/import-export
 const FIELDS = [["nameAr", "اسم الصنف *"], ["oemNumber", "كود القطعة / OEM *"], ["barcode", "الباركود"], ["brand", "الماركة (اختياري)"], ["category", "التصنيف (اختياري)"], ["chassis", "الشاسيه"], ["engine", "المحرك"], ["cost", "سعر الشراء *"], ["price", "سعر البيع *"], ["quantity", "الكمية الافتتاحية *"], ["bin", "موقع الرف"]] as const;
 type MappedRow = { nameAr: string; oemNumber: string; barcode: string; brand: string; category: string; chassis: string; engine: string; cost: string; price: string; quantity: string; bin: string };
 type SpreadsheetRow = Record<string, unknown> & { __sourceRowNumber?: number };
+type ImportChunkResponse = { success?: boolean; error?: string; data?: { created: number; skipped: number; skippedInvalid: number } };
 const INVENTORY_IMPORT_CHUNK_SIZE = 10;
 
 function cellText(value: unknown) { return String(value ?? "").trim(); }
@@ -130,9 +131,15 @@ export function ExcelImportModal({ open, onClose }: { open: boolean; onClose: ()
     try {
       for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE) {
         const rows = submissionRows.slice(start, start + INVENTORY_IMPORT_CHUNK_SIZE);
-        const response = await fetch("/api/catalog/import-chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mapping, skipInvalidRows, rows }) });
-        const result = await response.json().catch(() => null) as { success?: boolean; error?: string; data?: { created: number; skipped: number; skippedInvalid: number } } | null;
-        if (!response.ok || !result?.success || !result.data) throw new Error(result?.error || `تعذر معالجة الدفعة رقم ${Math.floor(start / INVENTORY_IMPORT_CHUNK_SIZE) + 1}`);
+        let result: ImportChunkResponse | null = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const response = await fetch("/api/catalog/import-chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mapping, skipInvalidRows, rows }) });
+          const parsed = await response.json().catch(() => null) as ImportChunkResponse | null;
+          result = parsed;
+          if (response.ok && result?.success && result.data) break;
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (!result?.success || !result.data) throw new Error(result?.error || `تعذر معالجة الدفعة رقم ${Math.floor(start / INVENTORY_IMPORT_CHUNK_SIZE) + 1}`);
         created += result.data.created; skipped += result.data.skipped; skippedInvalid += result.data.skippedInvalid;
         processed += rows.length;
         setImportProgress({ processed, total: submissionRows.length });

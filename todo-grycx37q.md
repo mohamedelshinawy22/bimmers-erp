@@ -110,3 +110,7 @@
 - [x] Implement a bounded tenant-only Catalog import JSON endpoint with serializable per-chunk results and no RSC revalidation.
 - [x] Migrate the Catalog Excel wizard to sequential API chunk requests followed by a single final refresh.
 - [ ] Add API import isolation/error regressions, validate, deploy, and obtain authenticated bimmers-test acceptance.
+- [x] Inspect the reported bimmers-test and elshafei mid-import API failure and identify the chunk-level escape path.
+- [x] Isolate catalog import collisions per row, return processed/skipped metrics, and keep valid rows progressing.
+- [x] Add one safe client retry per failed JSON chunk and a final imported/skipped summary.
+- [ ] Validate, deploy, and obtain authenticated 899-row completion evidence from bimmers-test and elshafei.

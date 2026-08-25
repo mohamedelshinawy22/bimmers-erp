@@ -41,10 +41,13 @@ describe("Catalog resilience boundaries", () => {
     expect(modal).toContain("const INVENTORY_IMPORT_CHUNK_SIZE = 10");
     expect(modal).toContain("for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE)");
     expect(modal).toContain('fetch("/api/catalog/import-chunk"');
+    expect(modal).toContain("for (let attempt = 0; attempt < 2; attempt += 1)");
+    expect(modal).toContain("setTimeout(resolve, 500)");
     expect(modal).toContain("router.refresh()");
     expect(modal).toContain("جارٍ ترحيل الأصناف");
     expect(route).toContain("export async function POST");
-    expect(route).toContain("revalidate: false");
+    expect(route).toContain("importCatalogApiChunk");
+    expect(route).not.toContain("executeInventoryImportAction");
     expect(route).toContain("NextResponse.json(result");
     expect(middleware).toContain('"/api/catalog/import-chunk"');
   });
