@@ -116,6 +116,7 @@ describe("interactive tenant action boundaries", () => {
     const settingsPage = source("src/app/(app)/settings/page.tsx");
     const settingsForm = source("src/app/(app)/settings/settings-form.tsx");
     const settingsPanel = source("src/app/(app)/settings/users-panel.tsx");
+    const usersPanel = source("src/app/(app)/users/users-management-client.tsx");
     expect(settingsPage).toContain("tenant.prisma.treasury.findMany");
     expect(settingsPage).toContain("tenant.prisma.warehouseBin.findMany");
     expect(settingsForm).toContain("treasuries={treasuries}");
@@ -124,5 +125,9 @@ describe("interactive tenant action boundaries", () => {
     expect(settingsPanel).toContain("تعديل الدور وتخصيص الصلاحيات");
     expect(settingsPanel).toContain("onClick={() => setPermissionsTarget(u)}");
     expect(settingsPanel).toContain("permissionsTarget ? <UserPermissionsModal");
+    expect(usersPanel).toContain("title=\"تعديل الدور وتخصيص الصلاحيات\"");
+    expect(usersPanel).toContain("<ShieldCheck size={14} />");
+    expect(usersPanel).toContain("onClick={() => setEditing(user)}");
+    expect(usersPanel).toContain("<UserPermissionsModal");
   });
 });

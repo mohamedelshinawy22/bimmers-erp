@@ -169,3 +169,4 @@
 - [x] Add an explicit permission-management action in the active settings and users tables.
 - [x] Complete granular role and permission controls with tenant-scoped persistence safeguards.
 - [ ] Add permissions-management regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Add a visually explicit ShieldCheck permissions action to the standalone /users table without duplicating its modal.
