@@ -6,6 +6,23 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Converts Arabic-Indic and Persian digits plus Arabic decimal separators to Western numeric text. */
+export function normalizeDigits(input: string | number | null | undefined): string {
+  if (input === null || input === undefined) return "";
+  return String(input)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٫،]/g, ".");
+}
+
+/** Keeps a browser numeric field editable while normalizing localized digits, separators, and an optional leading minus sign. */
+export function sanitizeNumericInput(value: string | number | null | undefined, options: { allowNegative?: boolean } = {}): string {
+  const normalized = normalizeDigits(value);
+  const negative = options.allowNegative && normalized.trimStart().startsWith("-") ? "-" : "";
+  const decimal = normalized.replace(/[^0-9.]/g, "").replace(/(\..*?)\..*/g, "$1");
+  return `${negative}${decimal}`;
+}
+
 export const CURRENCY = process.env.NEXT_PUBLIC_CURRENCY || "ج.م";
 
 /** ── Money ────────────────────────────────────────────────────────────────

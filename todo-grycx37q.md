@@ -143,3 +143,7 @@
 - [x] Make voucher notes optional, derive a fallback description, and preserve accountless cash posting.
 - [x] Update voucher-form copy and add regression coverage for blank descriptions.
 - [ ] Validate, deploy, and obtain authenticated confirmation for blank-description voucher posting.
+- [x] Audit shared numeric inputs and existing Arabic/Persian number parsing across ERP modules.
+- [x] Add reusable real-time Arabic/Persian digit and decimal-separator normalization for numeric fields.
+- [x] Apply the shared numeric entry behavior to voucher, catalog, account, invoice, POS, and settings workflows.
+- [ ] Add cross-module normalization regressions, validate, deploy, and obtain authenticated acceptance.

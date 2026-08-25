@@ -1,22 +1,33 @@
 import { z } from "zod";
 
+import { normalizeDigits } from "../utils";
+
 export const uuid = z.string().uuid({ message: "معرّف غير صالح" });
 
-export const positiveInt = z
+const normalizeNumericValue = (value: unknown) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+  const compact = normalizeDigits(value).replace(/,/g, "").replace(/\s/g, "").trim();
+  if (!compact) return value;
+  const parsed = Number(compact);
+  return Number.isFinite(parsed) ? parsed : value;
+};
+
+export const positiveInt = z.preprocess(normalizeNumericValue, z
   .number({ error: "يجب إدخال رقم صحيح" })
   .int("يجب إدخال رقم صحيح")
-  .positive("يجب أن يكون الرقم أكبر من صفر");
+  .positive("يجب أن يكون الرقم أكبر من صفر"));
 
-export const nonNegativeMoney = z
+export const nonNegativeMoney = z.preprocess(normalizeNumericValue, z
   .number({ error: "يجب إدخال قيمة رقمية" })
   .nonnegative("لا يمكن إدخال قيمة سالبة")
   .max(99_999_999.99, "القيمة تتجاوز الحد المسموح")
-  .refine((v) => Number.isFinite(v), "قيمة غير صالحة");
+  .refine((v) => Number.isFinite(v), "قيمة غير صالحة"));
 
-export const positiveMoney = z
+export const positiveMoney = z.preprocess(normalizeNumericValue, z
   .number({ error: "يجب إدخال قيمة رقمية" })
   .positive("يجب أن تكون القيمة أكبر من صفر")
-  .max(99_999_999.99, "القيمة تتجاوز الحد المسموح");
+  .max(99_999_999.99, "القيمة تتجاوز الحد المسموح"));
 
 /** BMW OEM part numbers are 11 digits; we accept spaced/dashed input and normalise. */
 export const oemNumber = z

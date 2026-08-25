@@ -1,19 +1,31 @@
 import * as React from "react";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeNumericInput } from "@/lib/utils";
 
 const fieldBase =
   "w-full rounded-xl border border-bmw-cardBorder bg-bmw-carbon px-3 py-2 text-sm text-white placeholder:text-bmw-muted/70 transition-colors focus:border-bmw-blue focus:outline-none focus:ring-1 focus:ring-bmw-blue disabled:cursor-not-allowed disabled:opacity-60";
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type = "text", ...props }, ref) => (
-    <input
+  ({ className, type = "text", onChange, onInput, min, ...props }, ref) => {
+    const numeric = type === "number";
+    const allowNegative = numeric && Number(min) < 0;
+    const normalize = (element: HTMLInputElement) => {
+      if (!numeric) return;
+      const next = sanitizeNumericInput(element.value, { allowNegative });
+      if (next !== element.value) element.value = next;
+    };
+    return <input
       ref={ref}
-      type={type}
-      className={cn(fieldBase, type === "number" && "tabular text-left", className)}
-      dir={type === "number" ? "ltr" : undefined}
+      type={numeric ? "text" : type}
+      inputMode={numeric ? "decimal" : props.inputMode}
+      min={min}
+      data-numeric-input={numeric || undefined}
+      className={cn(fieldBase, numeric && "tabular text-left", className)}
+      dir={numeric ? "ltr" : undefined}
+      onInput={(event) => { normalize(event.currentTarget); onInput?.(event); }}
+      onChange={(event) => { normalize(event.currentTarget); onChange?.(event); }}
       {...props}
-    />
-  ),
+    />;
+  },
 );
 Input.displayName = "Input";
 

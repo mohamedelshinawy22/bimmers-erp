@@ -3,7 +3,7 @@ import { nonNegativeMoney, optionalText, optionalUuid, positiveInt, positiveMone
 
 export const invoiceLineSchema = z.object({
   partId: uuid,
-  quantity: positiveInt.max(100_000, "الكمية كبيرة جداً"),
+  quantity: positiveInt.pipe(z.number().max(100_000, "الكمية كبيرة جداً")),
   unitPrice: nonNegativeMoney,
   /** Per-line discount, absolute value in currency. */
   lineDiscount: nonNegativeMoney.default(0),
@@ -123,7 +123,7 @@ export type SettleInvoiceInput = z.infer<typeof settleInvoiceSchema>;
 
 export const invoiceReturnLineSchema = z.object({
   invoiceItemId: uuid,
-  quantity: positiveInt.max(100_000, "الكمية كبيرة جداً"),
+  quantity: positiveInt.pipe(z.number().max(100_000, "الكمية كبيرة جداً")),
 });
 
 export const createInvoiceReturnSchema = z.object({
