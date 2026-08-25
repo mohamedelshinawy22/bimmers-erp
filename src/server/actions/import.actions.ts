@@ -89,7 +89,7 @@ function codes(value?: string) { return (value ?? "").split(/[,/|;\n]+/).map((pa
 function invalidRowMessage(error: z.ZodError): string { return error.issues.map((issue) => issue.message).join(" • "); }
 function cleanBarcode(value?: string): string | null { const barcode = value?.trim(); return barcode ? barcode : null; }
 
-export async function executeInventoryImportAction(raw: ImportInput) {
+export async function executeInventoryImportAction(raw: ImportInput, options?: { revalidate?: boolean }) {
   try {
     const user = await requirePermission("inventory.import");
     const tenant = await getTenantDbFromSession();
@@ -190,13 +190,15 @@ export async function executeInventoryImportAction(raw: ImportInput) {
       const summary = { total: input.rows.length, valid: rows.length, skippedInvalid: invalidRows.length, created, skipped, barcodeCollisions, chunkSize: 100 };
       await tenant.prisma.importJob.update({ where: { id: job.id }, data: { status: "COMPLETED", summary } });
       await writeAudit(tenant.prisma, { tableName: "ImportJob", recordId: job.id, action: "INSERT", newData: summary, performedBy: user.id });
-      // A cache invalidation must never invalidate an already committed import
-      // chunk or escape as a Server Action render exception.
-      try {
-        revalidatePath("/inventory");
-        revalidatePath("/pos");
-      } catch (revalidationError) {
-        console.error("[executeInventoryImportAction] revalidation failed after a committed chunk", revalidationError);
+      if (options?.revalidate !== false) {
+        // A cache invalidation must never invalidate an already committed import
+        // chunk or escape as a Server Action render exception.
+        try {
+          revalidatePath("/inventory");
+          revalidatePath("/pos");
+        } catch (revalidationError) {
+          console.error("[executeInventoryImportAction] revalidation failed after a committed chunk", revalidationError);
+        }
       }
       return ok({ jobId: job.id, duplicate: false, ...summary });
     } catch (error) {

@@ -106,3 +106,7 @@
 - [x] Diagnose the reported first-20-row Catalog import Server Action exception and capture the production error path.
 - [x] Return fully serializable catalog-chunk success and failure results without allowing revalidation or transaction errors to escape to React.
 - [ ] Validate, deploy, and obtain authenticated confirmation that the 899-row Catalog import progresses from 0% to 100%.
+- [x] Inspect tenant-authenticated API route patterns and define the Catalog import-chunk request contract.
+- [x] Implement a bounded tenant-only Catalog import JSON endpoint with serializable per-chunk results and no RSC revalidation.
+- [x] Migrate the Catalog Excel wizard to sequential API chunk requests followed by a single final refresh.
+- [ ] Add API import isolation/error regressions, validate, deploy, and obtain authenticated bimmers-test acceptance.

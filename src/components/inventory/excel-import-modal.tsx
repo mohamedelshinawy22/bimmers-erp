@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { downloadInventoryImportTemplateAction, executeInventoryImportAction } from "@/server/actions/import.actions";
+import { downloadInventoryImportTemplateAction } from "@/server/actions/import.actions";
 import { parseSpreadsheetNumber, validateInventoryImportRow } from "@/lib/inventory-import";
 import { normalizeImportHeader, resolveImportColumns } from "@/lib/import-export/parser";
 
@@ -27,6 +28,7 @@ function isIgnoredSpreadsheetRow(row: Record<string, unknown>, headers: string[]
 }
 
 export function ExcelImportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
   const [step, setStep] = useState(1);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<SpreadsheetRow[]>([]);
@@ -128,12 +130,14 @@ export function ExcelImportModal({ open, onClose }: { open: boolean; onClose: ()
     try {
       for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE) {
         const rows = submissionRows.slice(start, start + INVENTORY_IMPORT_CHUNK_SIZE);
-        const result = await executeInventoryImportAction({ mapping, skipInvalidRows, rows });
-        if (!result.success) throw new Error(result.error);
+        const response = await fetch("/api/catalog/import-chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mapping, skipInvalidRows, rows }) });
+        const result = await response.json().catch(() => null) as { success?: boolean; error?: string; data?: { created: number; skipped: number; skippedInvalid: number } } | null;
+        if (!response.ok || !result?.success || !result.data) throw new Error(result?.error || `تعذر معالجة الدفعة رقم ${Math.floor(start / INVENTORY_IMPORT_CHUNK_SIZE) + 1}`);
         created += result.data.created; skipped += result.data.skipped; skippedInvalid += result.data.skippedInvalid;
         processed += rows.length;
         setImportProgress({ processed, total: submissionRows.length });
       }
+      router.refresh();
       setMessage(`تم استيراد ${created} صنف، وتخطي ${skipped} صنف مكرر${skippedInvalid ? `، واستبعاد ${skippedInvalid} صف غير صالح` : ""}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "تعذر استيراد دفعة من الأصناف.");

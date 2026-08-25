@@ -28,6 +28,8 @@ describe("Catalog resilience boundaries", () => {
   it("coerces sparse spreadsheet cells, links the normalized category, and only assigns an existing bin", () => {
     const action = source("src/server/actions/import.actions.ts");
     const modal = source("src/components/inventory/excel-import-modal.tsx");
+    const route = source("src/app/api/catalog/import-chunk/route.ts");
+    const middleware = source("src/middleware.ts");
     expect(action).toContain("const spreadsheetText");
     expect(action).toContain("categoryId: category.id");
     expect(action).toContain("const bin = binCode ? await tx.warehouseBin.findUnique");
@@ -38,7 +40,13 @@ describe("Catalog resilience boundaries", () => {
     expect(action).toContain("revalidation failed after a committed chunk");
     expect(modal).toContain("const INVENTORY_IMPORT_CHUNK_SIZE = 10");
     expect(modal).toContain("for (let start = 0; start < submissionRows.length; start += INVENTORY_IMPORT_CHUNK_SIZE)");
+    expect(modal).toContain('fetch("/api/catalog/import-chunk"');
+    expect(modal).toContain("router.refresh()");
     expect(modal).toContain("جارٍ ترحيل الأصناف");
+    expect(route).toContain("export async function POST");
+    expect(route).toContain("revalidate: false");
+    expect(route).toContain("NextResponse.json(result");
+    expect(middleware).toContain('"/api/catalog/import-chunk"');
   });
 
   it("keeps BMW fitment selection discoverable with filtered master-code results and generation presets", () => {

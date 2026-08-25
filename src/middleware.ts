@@ -42,7 +42,7 @@ const PUBLIC_PATHS = [LOGIN_PATH];
 /** Probed by Docker/orchestrators without a session — must bypass the gate entirely. */
 const OPEN_PATHS = ["/api/health"];
 /** API handlers that authenticate internally and must return JSON errors rather than a navigation redirect. */
-const SELF_AUTH_API_PATHS = ["/api/admin/restore-backup", "/api/admin/restore-chunk"];
+const SELF_AUTH_API_PATHS = ["/api/admin/restore-backup", "/api/admin/restore-chunk", "/api/catalog/import-chunk"];
 
 /** `none` = no cookie; `stale` = present but unverifiable; `valid` = verified. */
 type SessionState = "none" | "stale" | "valid";
