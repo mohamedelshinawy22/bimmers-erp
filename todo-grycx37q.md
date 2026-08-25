@@ -122,3 +122,6 @@
 - [x] Replace the long reset transaction with strict tenant-scoped bounded operational-data wipe phases and admin-password verification.
 - [x] Rebootstrap structural zero-state data and reset schema-compatible counters and treasury balances after a successful wipe.
 - [ ] Add factory-reset safety regressions, validate, deploy, and obtain explicit authenticated reset acceptance.
+- [x] Diagnose the remaining ACC-0003 Invalid input response against the normalized account-update schema and balance-adjustment payload.
+- [x] Make compatible account-edit preprocessing tolerant and return field-specific Arabic validation feedback instead of generic Invalid input.
+- [ ] Add validation regression coverage, deploy, and obtain authenticated account-edit acceptance with blank optional fields.

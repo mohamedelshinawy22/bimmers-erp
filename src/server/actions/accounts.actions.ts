@@ -35,8 +35,12 @@ const ACCOUNT_PREFIX: Record<CreateAccountInput["type"], string> = {
 };
 
 const ACCOUNT_TYPE_ALIASES: Record<string, string> = { "عميل": "CUSTOMER", CUSTOMER: "CUSTOMER", "مورد": "SUPPLIER", SUPPLIER: "SUPPLIER", "ورشة": "WORKSHOP_BMW", "ورشة bmw": "WORKSHOP_BMW", WORKSHOP: "WORKSHOP_BMW", WORKSHOP_BMW: "WORKSHOP_BMW", "مصروف": "EXPENSE", EXPENSE: "EXPENSE", OTHER: "OTHER", EMPLOYEE: "EMPLOYEE", ADVANCE: "ADVANCE", PARTNER: "PARTNER" };
-const PRICE_TIER_ALIASES: Record<string, string> = { "قطاعي": "RETAIL", RETAIL: "RETAIL", "جملة": "WHOLESALE", WHOLESALE: "WHOLESALE" };
-const nullableText = (value: unknown) => typeof value === "string" ? value.trim() || null : value ?? null;
+const PRICE_TIER_ALIASES: Record<string, string> = { "قطاعي": "RETAIL", RETAIL: "RETAIL", "جملة": "WHOLESALE", WHOLESALE: "WHOLESALE", "ورش": "WHOLESALE", WORKSHOP: "WHOLESALE" };
+const BALANCE_NATURE_ALIASES: Record<string, string> = { "مدين": "DEBIT", DEBIT: "DEBIT", "دائن": "CREDIT", CREDIT: "CREDIT", "متزن": "ZERO", ZERO: "ZERO" };
+// Existing account schemas accept a blank string for optional values and turn
+// it into null at persistence time. Keep that compatible contract at the
+// action boundary even when browser callers send null.
+const blankOptionalText = (value: unknown) => value === null || value === undefined ? "" : typeof value === "string" ? value.trim() : String(value);
 const safeNonNegativeNumber = (value: unknown) => {
   const parsed = Number(String(value ?? "0").replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[^0-9.-]+/g, ""));
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
@@ -45,7 +49,20 @@ function normalizeAccountUpdate(raw: UpdateAccountInput | Record<string, unknown
   const candidate = raw as Record<string, unknown>;
   const typeKey = String(candidate.type ?? "CUSTOMER").trim().toLocaleUpperCase("ar-EG");
   const priceTierKey = String(candidate.defaultPriceTier ?? candidate.priceTier ?? "RETAIL").trim().toLocaleUpperCase("ar-EG");
-  return { ...candidate, name: String(candidate.name ?? "").trim(), type: ACCOUNT_TYPE_ALIASES[typeKey] ?? typeKey, defaultPriceTier: PRICE_TIER_ALIASES[priceTierKey] ?? priceTierKey, phone: nullableText(candidate.phone), email: nullableText(candidate.email), address: nullableText(candidate.address), taxNumber: nullableText(candidate.taxNumber), category: nullableText(candidate.category), creditLimit: safeNonNegativeNumber(candidate.creditLimit) };
+  const balanceNatureKey = String(candidate.balanceNature ?? "").trim().toLocaleUpperCase("ar-EG");
+  const statusKey = String(candidate.status ?? "ACTIVE").trim().toLocaleUpperCase("ar-EG");
+  return {
+    ...candidate,
+    name: String(candidate.name ?? "").trim(),
+    type: ACCOUNT_TYPE_ALIASES[typeKey] ?? typeKey,
+    defaultPriceTier: PRICE_TIER_ALIASES[priceTierKey] ?? priceTierKey,
+    phone: blankOptionalText(candidate.phone), email: blankOptionalText(candidate.email), address: blankOptionalText(candidate.address), taxNumber: blankOptionalText(candidate.taxNumber), category: blankOptionalText(candidate.category), adjustmentReason: blankOptionalText(candidate.adjustmentReason),
+    creditLimit: safeNonNegativeNumber(candidate.creditLimit),
+    ...(candidate.balanceAmount !== undefined && candidate.balanceAmount !== null ? { balanceAmount: safeNonNegativeNumber(candidate.balanceAmount) } : {}),
+    ...(balanceNatureKey ? { balanceNature: BALANCE_NATURE_ALIASES[balanceNatureKey] ?? balanceNatureKey } : {}),
+    status: statusKey === "نشط" ? "ACTIVE" : statusKey === "غير نشط" ? "INACTIVE" : statusKey,
+    isActive: typeof candidate.isActive === "string" ? candidate.isActive.toLowerCase() !== "false" : candidate.isActive ?? true,
+  };
 }
 
 export async function createAccountAction(

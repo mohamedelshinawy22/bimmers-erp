@@ -10,7 +10,8 @@ describe("account update resilience", () => {
     const update = actions.slice(actions.indexOf("export async function updateAccountAction"), actions.indexOf("export async function createQuickPosAccountAction"));
     expect(actions).toContain("const ACCOUNT_TYPE_ALIASES");
     expect(actions).toContain("const PRICE_TIER_ALIASES");
-    expect(actions).toContain("const nullableText");
+    expect(actions).toContain("const BALANCE_NATURE_ALIASES");
+    expect(actions).toContain("const blankOptionalText");
     expect(actions).toContain("const safeNonNegativeNumber");
     expect(update).toContain("normalizeAccountUpdate(raw)");
     expect(update).toContain("const tenant = await getTenantDbFromSession()");
@@ -26,5 +27,15 @@ describe("account update resilience", () => {
     expect(modal).toContain("category: null");
     expect(modal).toContain("setError(res.error)");
     expect(modal).toContain('setError("تعذر حفظ تعديلات الحساب. أعد المحاولة.")');
+  });
+
+  it("keeps compatible blank and Arabic adjustment inputs valid before Zod parsing", () => {
+    const actions = source("src/server/actions/accounts.actions.ts");
+    expect(actions).toContain('"ورش": "WHOLESALE"');
+    expect(actions).toContain('"مدين": "DEBIT"');
+    expect(actions).toContain('"دائن": "CREDIT"');
+    expect(actions).toContain('value === null || value === undefined ? ""');
+    expect(actions).toContain("balanceAmount: safeNonNegativeNumber(candidate.balanceAmount)");
+    expect(actions).toContain("balanceNature: BALANCE_NATURE_ALIASES[balanceNatureKey]");
   });
 });
