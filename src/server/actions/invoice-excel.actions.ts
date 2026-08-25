@@ -9,6 +9,8 @@ import { prisma } from "@/lib/prisma";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { formatOemNumber, num } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
+import { getCompanyProfile } from "@/server/services/settings.service";
+import { tenantFileToken } from "@/lib/import-export/workbook";
 
 const invoiceTypes = ["SALE", "PURCHASE", "SALE_RETURN", "PURCHASE_RETURN"] as const;
 const paymentStatuses = ["PAID", "PARTIAL", "CREDIT"] as const;
@@ -81,16 +83,16 @@ function paymentChannels(transactions: Array<{ amount: unknown; type: string; st
   return result;
 }
 
-function applySheetStyle(sheet: XLSX.WorkSheet, rowCount: number, detail = false) {
+function applySheetStyle(sheet: XLSX.WorkSheet, rowCount: number, detail = false, headerRow = 0) {
   sheet["!cols"] = [6, 14, 11, 16, 16, 28, 16, 14, 9, 12, 14, 14, 15, 18, 14, 14, 14, 14, 17, 17, 17, 19, 17, 19].map((wch) => ({ wch }));
-  sheet["!autofilter"] = { ref: `A1:X${Math.max(1, rowCount)}` };
-  sheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
+  sheet["!autofilter"] = { ref: `A${headerRow + 1}:X${Math.max(headerRow + 1, rowCount)}` };
+  sheet["!freeze"] = { xSplit: 0, ySplit: headerRow + 1, topLeftCell: `A${headerRow + 2}`, activePane: "bottomLeft", state: "frozen" };
   for (let col = 0; col < summaryHeaders.length; col += 1) {
-    const address = XLSX.utils.encode_cell({ r: 0, c: col });
+    const address = XLSX.utils.encode_cell({ r: headerRow, c: col });
     if (!sheet[address]) sheet[address] = { t: "s", v: summaryHeaders[col] };
     sheet[address].s = { fill: { fgColor: { rgb: "1F4E78" } }, font: { bold: true, color: { rgb: "FFFFFF" }, name: "Segoe UI", sz: 9 }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: { top: { style: "thin", color: { rgb: "9FBAD0" } }, bottom: { style: "thin", color: { rgb: "9FBAD0" } }, left: { style: "thin", color: { rgb: "9FBAD0" } }, right: { style: "thin", color: { rgb: "9FBAD0" } } } };
   }
-  sheet["!rows"] = [{ hpt: 28 }];
+  sheet["!rows"] = Array.from({ length: headerRow + 1 }, (_, index) => ({ hpt: index === headerRow ? 28 : 20 }));
   if (detail) sheet["!cols"][2] = { wch: 34 };
 }
 
@@ -100,7 +102,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
     const tenant = await getTenantDbFromSession();
     return tenant.run(async () => {
     const input = exportSchema.parse(raw);
-    const invoices = await tenant.prisma.invoice.findMany({
+    const [invoices, company] = await Promise.all([tenant.prisma.invoice.findMany({
       where: whereFrom(input),
       orderBy: { createdAt: "desc" },
       take: 10_000,
@@ -110,9 +112,10 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
         items: { select: { quantity: true, unitPrice: true, lineDiscount: true, totalPrice: true, partNameSnapshot: true, oemNumberSnapshot: true, part: { select: { oemNumber: true, nameAr: true, stockQuantity: true } } } },
         transactions: { select: { amount: true, type: true, status: true, treasury: { select: { name: true, type: true } } } },
       },
-    });
+    }), getCompanyProfile(tenant.prisma)]);
 
-    const rows: unknown[][] = [summaryHeaders];
+    const reportTitle = input.mode === "SUMMARY" ? "تقرير فواتير إجمالي" : "تقرير فواتير تفصيلي";
+    const rows: unknown[][] = [[company.name], [reportTitle], [`تاريخ التصدير: ${new Date().toLocaleDateString("ar-EG")}`], summaryHeaders];
     for (const [index, invoice] of invoices.entries()) {
       const multiplier = isReturn(invoice.type) ? -1 : 1;
       const channels = paymentChannels(invoice.transactions);
@@ -137,7 +140,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
     }
 
     const sheet = XLSX.utils.aoa_to_sheet(rows);
-    applySheetStyle(sheet, rows.length, input.mode === "DETAILED");
+    applySheetStyle(sheet, rows.length, input.mode === "DETAILED", 3);
     if (input.mode === "DETAILED") {
       for (let row = 1; row < rows.length; row += 1) {
         const first = sheet[XLSX.utils.encode_cell({ r: row, c: 0 })]?.v;
@@ -156,7 +159,7 @@ export async function exportInvoicesToExcelAction(raw: unknown): Promise<ActionR
     XLSX.utils.book_append_sheet(workbook, sheet, input.mode === "SUMMARY" ? "تقرير إجمالي" : "تقرير تفصيلي");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true });
     const stamp = new Date().toISOString().slice(0, 10);
-    return ok({ fileName: `bimmer_invoice_${input.mode === "SUMMARY" ? "summary" : "detailed"}_${stamp}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: invoices.length });
+    return ok({ fileName: `${tenantFileToken(company.name)}_invoice_${input.mode === "SUMMARY" ? "summary" : "detailed"}_${stamp}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: invoices.length });
     });
   } catch (error) {
     return toActionError(error, "exportInvoicesToExcelAction");

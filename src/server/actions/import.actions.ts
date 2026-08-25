@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
@@ -13,6 +14,8 @@ import { formatOemNumber, money } from "@/lib/utils";
 import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { getCompanyProfile } from "@/server/services/settings.service";
+import { tenantFileToken } from "@/lib/import-export/workbook";
 
 const nonNegativeSpreadsheetNumber = z.preprocess(
   (value) => parseSpreadsheetNumber(value),
@@ -50,6 +53,34 @@ const importSchema = z.object({
 type ImportInput = z.input<typeof importSchema>;
 
 type ValidImportRow = z.infer<typeof importRowSchema>;
+
+const inventoryTemplateHeaders = ["اسم الصنف", "رقم OEM", "الباركود", "الماركة", "التصنيف", "الشاسيه", "المحرك", "سعر الشراء", "سعر البيع", "الكمية الافتتاحية", "موقع الرف"];
+
+export async function downloadInventoryImportTemplateAction() {
+  try {
+    await requirePermission("inventory.import");
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+      const company = await getCompanyProfile(tenant.prisma);
+      const sheet = XLSX.utils.aoa_to_sheet([
+        [company.name],
+        ["نموذج استيراد كتالوج البضاعة"],
+        [`تاريخ الإنشاء: ${new Date().toLocaleDateString("ar-EG")}`],
+        inventoryTemplateHeaders,
+        ["مثال توضيحي فقط — احذفه قبل الاستيراد", "51117111741/742", "", "BMW", "قطع غيار", "E46/F30", "N46", 100, 150, 0, "MAIN-01"],
+      ]);
+      sheet["!cols"] = [32, 20, 18, 18, 18, 20, 16, 16, 16, 18, 16].map((wch) => ({ wch }));
+      sheet["!freeze"] = { xSplit: 0, ySplit: 4, topLeftCell: "A5", activePane: "bottomLeft", state: "frozen" };
+      const workbook = XLSX.utils.book_new();
+      workbook.Workbook = { Views: [{ RTL: true }] };
+      XLSX.utils.book_append_sheet(workbook, sheet, "الكتالوج");
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+      return ok({ fileName: `${tenantFileToken(company.name)}_نموذج_استيراد_الكتالوج.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
+    });
+  } catch (error) {
+    return toActionError(error, "downloadInventoryImportTemplateAction");
+  }
+}
 
 function key(value: string) { return value.trim().toLocaleLowerCase("ar-EG"); }
 function codes(value?: string) { return (value ?? "").split(/[,/|;\n]+/).map((part) => part.trim().toUpperCase()).filter(Boolean).slice(0, 30); }

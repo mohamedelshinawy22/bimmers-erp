@@ -96,3 +96,7 @@
 - [x] Extend first-access tenant bootstrap with all schema-compatible structural master data while preserving zero operational records.
 - [x] Audit and harden fresh-tenant zero states for Catalog, POS, receipts, invoices, and dashboard.
 - [ ] Add lifecycle regression coverage, validate, deploy, and obtain fresh-tenant acceptance verification.
+- [x] Audit and standardize tenant-scoped import/export parsing, chunking, templates, and exports without regressing verified receipt and invoice imports.
+- [x] Establish shared bilingual spreadsheet parsing and bounded tenant-only import transaction primitives with regression coverage.
+- [x] Integrate compatible shared date, number, sparse-text, and header normalization into catalog, invoice, and voucher imports.
+- [x] Standardize tenant-branded templates and exports across catalog, account, invoice, and voucher workflows, then validate production build behavior.

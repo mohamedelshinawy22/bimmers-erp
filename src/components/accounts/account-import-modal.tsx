@@ -51,17 +51,19 @@ export function AccountImportModal({ onClose, onDone }: { onClose: () => void; o
       if (!sheet) throw new Error("لم يتم العثور على ورقة بيانات في الملف.");
       const toNumber = (value: unknown) => { const number = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, "")); return Number.isFinite(number) ? number : 0; };
       const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false }) as unknown[][];
-      const first = matrix[0] ?? []; const second = matrix[1] ?? [];
-      const isStandardTwoRowLayout = normalized(first[0]).includes("رقمالحساب") && normalized(first[1]).includes("اسمالحساب") && normalized(first[2]).includes("الرصيدالحالي") && normalized(second[2]).includes("عليهمدين") && normalized(second[3]).includes("لهدائن");
-      const mapped: ImportRow[] = isStandardTwoRowLayout
-        ? matrix.slice(2).map((record, index) => {
+      const standardHeaderRow = matrix.findIndex((first, index) => {
+        const second = matrix[index + 1] ?? [];
+        return normalized(first[0]).includes("رقمالحساب") && normalized(first[1]).includes("اسمالحساب") && normalized(first[2]).includes("الرصيدالحالي") && normalized(second[2]).includes("عليهمدين") && normalized(second[3]).includes("لهدائن");
+      });
+      const mapped: ImportRow[] = standardHeaderRow >= 0
+        ? matrix.slice(standardHeaderRow + 2).map((record, index) => {
             const name = String(record[1] ?? "").trim();
             const nameKey = normalized(name);
             const debit = toNumber(record[2]); const credit = toNumber(record[3]);
             const priceTier = String(record[12] ?? "").trim();
             const customCode = String(record[8] ?? "").trim();
             const accountNumber = customCode || String(record[0] ?? "").trim();
-            return { sourceRowNumber: index + 3, accountNumber, name, type: String(record[6] ?? "").trim(), phone: String(record[9] ?? "").trim(), email: "", taxNumber: "", address: String(record[10] ?? "").trim(), category: String(record[7] ?? "").trim(), creditLimit: "0", defaultPriceTier: /جمله|wholesale/i.test(priceTier) ? "WHOLESALE" : "RETAIL", openingBalance: String(debit > 0 ? -debit : credit > 0 ? credit : 0), isActive: "true", _isSummary: nameKey.includes("الاجمالي") || nameKey.includes("total") } as ImportRow & { _isSummary: boolean };
+            return { sourceRowNumber: standardHeaderRow + index + 3, accountNumber, name, type: String(record[6] ?? "").trim(), phone: String(record[9] ?? "").trim(), email: "", taxNumber: "", address: String(record[10] ?? "").trim(), category: String(record[7] ?? "").trim(), creditLimit: "0", defaultPriceTier: /جمله|wholesale/i.test(priceTier) ? "WHOLESALE" : "RETAIL", openingBalance: String(debit > 0 ? -debit : credit > 0 ? credit : 0), isActive: "true", _isSummary: nameKey.includes("الاجمالي") || nameKey.includes("total") } as ImportRow & { _isSummary: boolean };
           }).filter((row) => !row._isSummary && Object.values(row).some((value) => String(value).trim() !== "" && value !== row.sourceRowNumber))
         : XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" }).map((record, index) => {
             const entries = Object.entries(record).map(([key, value]) => [normalized(key), value] as const);

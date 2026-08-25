@@ -2,13 +2,14 @@
 
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import * as XLSX from "xlsx";
 import { can, requirePermission } from "@/lib/auth";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
 import { getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { prisma } from "@/lib/prisma";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { normalizeSearchTerm } from "@/lib/search-utils";
+import { getCompanyProfile } from "@/server/services/settings.service";
+import { buildTenantWorkbook, tenantFileToken } from "@/lib/import-export/workbook";
 
 const inventoryExportSchema = z.object({
   scope: z.enum(["ALL", "CRITICAL", "OUT_OF_STOCK", "FILTERED"]),
@@ -63,7 +64,7 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
     if (input.scope === "OUT_OF_STOCK") and.push({ stockQuantity: 0 });
     if (input.scope === "CRITICAL" || (input.scope === "FILTERED" && filters.lowStockOnly)) and.push({ stockQuantity: { gt: 0 } });
 
-    const parts = await tenant.prisma.partItem.findMany({
+    const [parts, company] = await Promise.all([tenant.prisma.partItem.findMany({
       where: { isDeleted: false, isActive: true, ...(and.length ? { AND: and } : {}) },
       orderBy: [{ nameAr: "asc" }, { oemNumber: "asc" }],
       select: {
@@ -79,7 +80,7 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
         sellPriceWholesale: true,
         compatibleChassis: { orderBy: { chassis: { code: "asc" } }, select: { chassis: { select: { code: true } } } },
       },
-    });
+    }), getCompanyProfile(tenant.prisma)]);
 
     const scopedParts = (input.scope === "CRITICAL" || (input.scope === "FILTERED" && filters.lowStockOnly))
       ? parts.filter((part) => Number(part.stockQuantity ?? 0) > 0 && Number(part.stockQuantity ?? 0) <= Number(part.minReorderLevel ?? 0))
@@ -110,21 +111,10 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
       };
     });
 
-    const sheet = XLSX.utils.json_to_sheet(records, { header: headers });
-    sheet["!cols"] = [14, 32, 18, 20, 18, 15, 16, 14, 16, 14, 14, 28].map((wch) => ({ wch }));
     const date = new Date().toISOString().slice(0, 10);
-    const extension = input.format === "XLSX" ? "xlsx" : "csv";
-    const fileName = `bimmer_inventory_${scopeFileToken(input.scope)}_${date}.${extension}`;
-
-    if (input.format === "CSV") {
-      const csv = `\uFEFF${XLSX.utils.sheet_to_csv(sheet)}`;
-      return ok({ fileName, mimeType: "text/csv;charset=utf-8", base64: Buffer.from(csv, "utf8").toString("base64"), count: records.length, costIncluded });
-    }
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, "المخزون");
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    return ok({ fileName, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64"), count: records.length, costIncluded });
+    const exportFile = buildTenantWorkbook({ tenantName: company.name, reportTitle: "تقرير كتالوج المخزون", sheetName: "المخزون", headers, records, widths: [14, 32, 18, 20, 18, 15, 16, 14, 16, 14, 14, 28], format: input.format });
+    const fileName = `${tenantFileToken(company.name)}_inventory_${scopeFileToken(input.scope)}_${date}.${exportFile.extension}`;
+    return ok({ fileName, mimeType: exportFile.mimeType, base64: exportFile.base64, count: records.length, costIncluded });
     });
   } catch (error) {
     console.error("[INVENTORY_EXPORT_ERROR]", error);

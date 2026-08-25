@@ -59,17 +59,16 @@ const headerAliases = {
 } as const;
 
 function normalized(value: unknown) {
-  return String(value ?? "").trim().toLocaleLowerCase("ar-EG").replace(/\s+/g, " ");
+  return normalizeImportHeader(value);
 }
 
 function stringValue(value: unknown) {
-  return String(value ?? "").trim();
+  return normalizeImportText(value);
 }
 
 function numericValue(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? Math.abs(value) : 0;
-  const parsed = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, ""));
-  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+  const parsed = parseImportNumber(value);
+  return parsed === null ? 0 : Math.abs(parsed);
 }
 
 function findColumn(headers: WorksheetCell[], aliases: readonly string[]) {
@@ -94,13 +93,8 @@ function isMasterInvoiceRow(row: WorksheetCell[], documentColumn: number) {
 }
 
 export function normalizeInvoiceImportDate(value: unknown) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  if (typeof value === "number" && Number.isFinite(value)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000).toISOString().slice(0, 10);
-  const raw = stringValue(value);
-  const iso = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
-  if (iso) return `${iso[1]}-${iso[2]!.padStart(2, "0")}-${iso[3]!.padStart(2, "0")}`;
-  const localized = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  return localized ? `${localized[3]}-${localized[2]!.padStart(2, "0")}-${localized[1]!.padStart(2, "0")}` : raw || null;
+  const parsed = parseImportDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : stringValue(value) || null;
 }
 
 function toDateString(value: unknown) {
@@ -310,3 +304,4 @@ export function detailedInvoicesToImportRows(invoices: ParsedMasterInvoice[], ty
 export function detailedInvoiceExtractionStats(invoices: ParsedMasterInvoice[]) {
   return { invoices: invoices.length, items: invoices.reduce((total, invoice) => total + invoice.items.length, 0) };
 }
+import { normalizeImportHeader, normalizeImportText, parseImportDate, parseImportNumber } from "./import-export/parser";

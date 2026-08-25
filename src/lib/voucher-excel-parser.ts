@@ -33,16 +33,15 @@ const aliases = {
   createdByName: ["إضافة المستخدم", "المستخدم", "المسؤول", "created by", "user"],
 } as const;
 
-function normalized(value: unknown) { return String(value ?? "").trim().toLocaleLowerCase("ar-EG").replace(/\s+/g, " "); }
-function value(value: unknown) { return String(value ?? "").trim(); }
+function normalized(value: unknown) { return normalizeImportHeader(value); }
+function value(value: unknown) { return normalizeImportText(value); }
 function numberValue(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? Math.abs(value) : 0;
-  const parsed = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, ""));
-  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+  const parsed = parseImportNumber(value);
+  return parsed === null ? 0 : Math.abs(parsed);
 }
 function dateValue(value: unknown) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  return value ? String(value).trim() : null;
+  const parsed = parseImportDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : value ? normalizeImportText(value) : null;
 }
 function timeValue(value: unknown) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(11, 19);
@@ -113,3 +112,4 @@ export function voucherMovementKind(movement: string, defaultType: VoucherImport
   if (normalizedMovement.includes("قبض") || normalizedMovement.includes("تحصيل")) return "RECEIPT";
   return defaultType;
 }
+import { normalizeImportHeader, normalizeImportText, parseImportDate, parseImportNumber } from "./import-export/parser";

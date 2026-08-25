@@ -18,23 +18,22 @@ import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { voucherMovementKind } from "@/lib/voucher-excel-parser";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { serializeData } from "@/lib/serialize";
+import { normalizeImportText, parseImportDate, parseImportNumber } from "@/lib/import-export/parser";
+import { getCompanyProfile } from "@/server/services/settings.service";
+import { tenantFileToken } from "@/lib/import-export/workbook";
 
 const voucherImportTypes = ["RECEIPT", "PAYMENT"] as const;
 type VoucherImportType = (typeof voucherImportTypes)[number];
 type VoucherKind = "RECEIPT" | "PAYMENT" | "TRANSFER_IN" | "TRANSFER_OUT";
 
 const numeric = (value: unknown) => {
-  if (typeof value === "number") return value;
-  const parsed = Number(String(value ?? "").replace(/[٬,\s]/g, "").replace(/[جج]\.?م?\.?/gi, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseImportNumber(value) ?? 0;
 };
 
-const importText = (value: unknown) => value == null ? "" : String(value).trim();
+const importText = normalizeImportText;
 const importDate = (value: unknown) => {
-  if (value == null || value === "") return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  if (typeof value === "number" && Number.isFinite(value)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000).toISOString().slice(0, 10);
-  return importText(value);
+  const parsed = parseImportDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : importText(value) || null;
 };
 const optionalImportText = (max: number) => z.preprocess(importText, z.string().max(max).optional().default(""));
 
@@ -153,13 +152,14 @@ function issueFor(line: ValidVoucherLine, type: VoucherImportType, autoCreateAcc
   return undefined;
 }
 
-function templateWorkbook(type: VoucherImportType) {
+function templateWorkbook(type: VoucherImportType, tenantName: string) {
   const headers = ["#", "التاريخ", "الوقت", "الحركة", "رقم السند", "المرجع", "المبلغ", "البند", "الحساب", "الخزينة", "درج النقدية", "انستا باي (المحل)", "فودافون كاش (محمد ثروت)", "البنك ABK", "ملاحظات", "إضافة المستخدم"];
   const movement = type === "RECEIPT" ? "قبض" : "صرف";
   const example = [1, "2026-08-21", "10:00", movement, `${type === "RECEIPT" ? "RCV" : "PAY"}-0001`, "", 1000, type === "RECEIPT" ? "تحصيل عميل" : "مصروفات تشغيل", type === "RECEIPT" ? "اسم العميل" : "", "درج النقدية", 1000, 0, 0, 0, "مثال توضيحي فقط — احذفه قبل الاستيراد", "مدير النظام"];
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, example]);
+  const worksheet = XLSX.utils.aoa_to_sheet([[tenantName], [type === "RECEIPT" ? "نموذج استيراد سندات قبض" : "نموذج استيراد سندات صرف"], [`تاريخ الإنشاء: ${new Date().toLocaleDateString("ar-EG")}`], headers, example]);
   worksheet["!cols"] = headers.map((header) => ({ wch: Math.max(14, header.length + 4) }));
-  const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, type === "RECEIPT" ? "سندات قبض" : "سندات صرف");
+  worksheet["!freeze"] = { xSplit: 0, ySplit: 4, topLeftCell: "A5", activePane: "bottomLeft", state: "frozen" };
+  const workbook = XLSX.utils.book_new(); workbook.Workbook = { Views: [{ RTL: true }] }; XLSX.utils.book_append_sheet(workbook, worksheet, type === "RECEIPT" ? "سندات قبض" : "سندات صرف");
   return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 }
 
@@ -167,8 +167,12 @@ export async function downloadVoucherImportTemplateAction(raw: unknown): Promise
   try {
     const input = templateSchema.parse(raw);
     await requirePermission("treasury.transact");
-    const buffer = templateWorkbook(input.type);
-    return ok({ fileName: `نموذج_استيراد_سندات_${input.type === "RECEIPT" ? "قبض" : "صرف"}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
+    const tenant = await getTenantDbFromSession();
+    return tenant.run(async () => {
+      const company = await getCompanyProfile(tenant.prisma);
+      const buffer = templateWorkbook(input.type, company.name);
+      return ok({ fileName: `${tenantFileToken(company.name)}_نموذج_استيراد_سندات_${input.type === "RECEIPT" ? "قبض" : "صرف"}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from(buffer).toString("base64") });
+    });
   } catch (error) { return toActionError(error, "downloadVoucherImportTemplateAction"); }
 }
 
