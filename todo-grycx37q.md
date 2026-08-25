@@ -118,3 +118,7 @@
 - [x] Normalize account update enum/null/decimal inputs through the strict tenant-scoped action with safe serialized results.
 - [x] Ensure the account edit modal presents action errors and refreshes only after a successful update.
 - [ ] Add regression coverage, validate, deploy, and obtain authenticated account-edit acceptance.
+- [x] Inspect the factory-reset timeout against the actual tenant schema, dependency order, and settings modal contract.
+- [x] Replace the long reset transaction with strict tenant-scoped bounded operational-data wipe phases and admin-password verification.
+- [x] Rebootstrap structural zero-state data and reset schema-compatible counters and treasury balances after a successful wipe.
+- [ ] Add factory-reset safety regressions, validate, deploy, and obtain explicit authenticated reset acceptance.
