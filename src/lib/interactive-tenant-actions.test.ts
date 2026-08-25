@@ -89,4 +89,15 @@ describe("interactive tenant action boundaries", () => {
     expect(settingsPanel).toContain("حذف المستخدم نهائياً");
     expect(settingsPanel).toContain("تنبيه حماية السجلات المالية");
   });
+
+  it("creates settings users in the authenticated tenant database and cleans up through that same tenant client", () => {
+    const actions = source("src/server/actions/auth.actions.ts");
+    const createSection = actions.slice(actions.indexOf("export async function createUserAction"), actions.indexOf("export async function toggleUserActiveAction"));
+    expect(createSection).toContain("const tenant = await getTenantDbFromSession()");
+    expect(createSection).toContain("tenant.run(() => withTxRetry");
+    expect(createSection).toContain("tenant.context.route");
+    expect(createSection).toContain("scopedTenant.prisma.user.delete");
+    expect(createSection).not.toContain("const tenant = getTenantContext()");
+    expect(createSection).not.toContain("await prisma.user.delete({ where: { id: createdId } })");
+  });
 });

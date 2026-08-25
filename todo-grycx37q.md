@@ -158,3 +158,7 @@
 - [x] Locate the active settings user-management table and diagnose why the permanent-delete control is absent in production.
 - [x] Render the guarded permanent-delete control and confirmation in the active settings users interface.
 - [ ] Add regression coverage, validate, deploy, and obtain authenticated visible-control acceptance.
+- [x] Audit active create-user actions, validation, modal inputs, and the actual tenant User schema.
+- [x] Harden tenant-scoped create-user execution, quota reporting, and duplicate-safe Arabic error handling.
+- [x] Align settings and users creation modal submission and feedback contracts.
+- [ ] Add creation regressions, validate, deploy, and obtain authenticated acceptance.

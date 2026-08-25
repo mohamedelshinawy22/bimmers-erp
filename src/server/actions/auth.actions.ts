@@ -126,19 +126,21 @@ export async function createUserAction(
 ): Promise<ActionResult<{ id: string; username: string }>> {
   let reservation: { username: string; route: ReturnType<typeof getTenantContext>["route"] } | null = null;
   let createdId: string | null = null;
+  let scopedTenant: Awaited<ReturnType<typeof getTenantDbFromSession>> | null = null;
   try {
     const actor = await requirePermission("user.manage");
     const input = createUserSchema.parse(raw);
     const username = input.username.toLowerCase();
-    const tenant = getTenantContext();
-    await reserveTenantUsername(tenant.route, username, input.role);
-    reservation = { username, route: tenant.route };
+    const tenant = await getTenantDbFromSession();
+    scopedTenant = tenant;
+    await reserveTenantUsername(tenant.context.route, username, input.role);
+    reservation = { username, route: tenant.context.route };
 
-    const created = await withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+    const created = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       if (input.role !== "SUPER_ADMIN") {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.route.tenantId}`}))`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`bimmers:sub-user-quota:${tenant.context.route.tenantId}`}))`;
         const activeSubUsers = await tx.user.count({ where: { isActive: true, role: { not: "SUPER_ADMIN" } } });
-        if (activeSubUsers >= tenant.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.route.maxSubUsers}).`);
+        if (activeSubUsers >= tenant.context.route.maxSubUsers) throw new BusinessRuleError(`تم الوصول إلى الحد الأقصى للمستخدمين الفرعيين المسموح به (${tenant.context.route.maxSubUsers}).`);
       }
       const user = await tx.user.create({
         data: {
@@ -160,15 +162,15 @@ export async function createUserAction(
         },
       });
       return user;
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
     createdId = created.id;
-    await activateTenantUsername(tenant.route, username);
-    await reportTenantSubUserUsage(tenant.route, await tenant.prisma.user.count({ where: { isActive: true } }));
+    await activateTenantUsername(tenant.context.route, username);
+    await reportTenantSubUserUsage(tenant.context.route, await tenant.prisma.user.count({ where: { isActive: true } }));
 
     revalidatePath("/settings");
     return ok({ id: created.id, username: created.username });
   } catch (error) {
-    if (createdId) await prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
+    if (createdId && scopedTenant) await scopedTenant.prisma.user.delete({ where: { id: createdId } }).catch(() => undefined);
     if (reservation) await releaseTenantUsername(reservation.route, reservation.username).catch(() => undefined);
     return toActionError(error, "createUserAction");
   }
