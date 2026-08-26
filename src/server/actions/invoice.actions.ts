@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { can, requirePermission } from "@/lib/auth";
 import { canUseTreasury, getUserAccess, hasPermission } from "@/lib/user-permissions";
 import { ok, toActionError, type ActionResult } from "@/lib/action-result";
+import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import {
   createSaleInvoiceSchema,
   createPurchaseInvoiceSchema,
@@ -54,8 +55,9 @@ export async function createSaleInvoiceAction(
     const user = await requirePermission("invoice.sale");
     const input = createSaleInvoiceSchema.parse(raw);
     const access = await getUserAccess(user.id);
+    const tenant = await getTenantDbFromSession();
 
-    const result = await createSaleInvoice(input, {
+    const result = await tenant.run(() => createSaleInvoice(input, {
       id: user.id,
       // Client-sent override flags are only honoured if the role actually holds
       // the permission — the server never trusts the request alone.
@@ -65,7 +67,7 @@ export async function createSaleInvoiceAction(
       maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100),
       maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999),
       canUseTreasury: (treasuryId) => canUseTreasury(access, treasuryId),
-    });
+    }));
 
     await revalidateAfterInvoice(["/", "/pos", "/inventory", "/treasury", "/accounts"]);
     return ok(result);

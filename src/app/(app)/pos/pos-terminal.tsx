@@ -36,6 +36,7 @@ import { POSAccountCombobox } from "./components/pos-account-combobox";
 import { OemCode } from "@/components/inventory/oem-code";
 import { searchTokens } from "@/lib/catalog-token-search";
 import { QuickCatalogFilterBar, type QuickCatalogFilterState } from "@/components/catalog/quick-catalog-filter-bar";
+import { isWalkInCashAccount, WALK_IN_CREDIT_ERROR } from "@/lib/credit-sale-validation";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -314,11 +315,19 @@ export function PosTerminal({
    * conditions and blocked sales the server would have accepted.
    */
   const balanceAfterSale = account ? round2(account.currentBalance - remaining) : 0;
+  const isWalkInCustomer = isWalkInCashAccount(account);
   const wouldOweUs = !!account && remaining > 0 && balanceAfterSale < 0;
   const creditDebtAfter = wouldOweUs ? Math.abs(balanceAfterSale) : 0;
   const creditBlocked = enforceCreditLimit && wouldOweUs && account!.creditLimit === 0;
   const creditExceeded =
     enforceCreditLimit && wouldOweUs && account!.creditLimit > 0 && creditDebtAfter > account!.creditLimit;
+
+  useEffect(() => {
+    if (isWalkInCustomer && paymentMethod === "ON_ACCOUNT") {
+      setPaymentMethod("CASH");
+      setPaidInput("");
+    }
+  }, [isWalkInCustomer, paymentMethod]);
 
   const canCheckout =
     cart.length > 0 &&
@@ -738,6 +747,8 @@ export function PosTerminal({
               </Alert>
             ) : null}
 
+            {isWalkInCustomer ? <Alert variant="warning">⚠️ البيع الآجل يتطلب تحديد حساب عميل / ورشة مسجل.</Alert> : null}
+
             {error ? <Alert variant="error">{error}</Alert> : null}
 
             <Button
@@ -782,16 +793,19 @@ export function PosTerminal({
             ).map((option) => {
               const Icon = option.icon;
               const active = paymentMethod === option.value;
+              const onAccountDisabled = option.value === "ON_ACCOUNT" && isWalkInCustomer;
               return (
                 <button
                   key={option.value}
                   type="button"
+                  disabled={onAccountDisabled}
                   onClick={() => {
+                    if (onAccountDisabled) { setError(WALK_IN_CREDIT_ERROR); return; }
                     setPaymentMethod(option.value);
                     if (option.value === "ON_ACCOUNT") setPaidInput("0");
                     else setPaidInput("");
                   }}
-                  className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-bold transition-all ${
+                  className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-45 ${
                     active
                       ? "border-bmw-blue bg-bmw-blue/10 text-white"
                       : "border-bmw-cardBorder bg-bmw-carbon text-bmw-muted hover:text-white"
@@ -832,6 +846,8 @@ export function PosTerminal({
           ) : (
             <Alert variant="info">سيتم ترحيل كامل قيمة الفاتورة على حساب العميل كمديونية آجلة.</Alert>
           )}
+
+          {isWalkInCustomer ? <Alert variant="warning">{WALK_IN_CREDIT_ERROR}</Alert> : null}
 
           <div className="space-y-1.5 rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-sm">
             <div className="flex justify-between">

@@ -185,6 +185,8 @@ export async function lockAccountForUpdate(
 ): Promise<{
   id: string;
   name: string;
+  accountNumber: string;
+  category: string | null;
   type: AccountType;
   currentBalance: Prisma.Decimal;
   creditLimit: Prisma.Decimal;
@@ -195,6 +197,8 @@ export async function lockAccountForUpdate(
     Array<{
       id: string;
       name: string;
+      accountNumber: string;
+      category: string | null;
       type: AccountType;
       currentBalance: Prisma.Decimal;
       creditLimit: Prisma.Decimal;
@@ -203,7 +207,7 @@ export async function lockAccountForUpdate(
     }>
   >(
     Prisma.sql`
-      SELECT "id", "name", "type", "currentBalance", "creditLimit", "defaultPriceTier", "isActive"
+      SELECT "id", "name", "accountNumber", "category", "type", "currentBalance", "creditLimit", "defaultPriceTier", "isActive"
       FROM "Account"
       WHERE "id" = ${accountId}
       FOR UPDATE

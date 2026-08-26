@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { BusinessRuleError } from "@/lib/errors";
+import { isWalkInCashAccount, WALK_IN_CREDIT_ERROR } from "@/lib/credit-sale-validation";
 import { prisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/audit";
 
@@ -243,6 +244,9 @@ export async function createSaleInvoice(
       const paymentStatus = remainingAmount.lte(0) ? "PAID" : paidAmount.gt(0) ? "PARTIAL" : "CREDIT";
 
       // ── Credit limit gate ──────────────────────────────────────────────
+      if ((input.paymentMethod === "ON_ACCOUNT" || remainingAmount.gt(0)) && isWalkInCashAccount(account)) {
+        throw new BusinessRuleError(WALK_IN_CREDIT_ERROR);
+      }
       if (remainingAmount.gt(0) && enforceCreditLimit) {
         const balanceAfter = account.currentBalance.sub(remainingAmount);
         if (balanceAfter.lt(0)) {

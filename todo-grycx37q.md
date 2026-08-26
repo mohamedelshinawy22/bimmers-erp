@@ -249,3 +249,7 @@
 - [x] Implement debounced as-you-type URL-synchronized Inventory search without requiring form submission.
 - [x] Add immediate clear and responsive search feedback while retaining quick-filter state.
 - [ ] Add live-search regressions; validate, deploy, and obtain authenticated acceptance for كوعه x5.
+- [x] Audit POS sale-invoice credit validation, walk-in customer detection, and payment-method controls.
+- [x] Return Arabic action results for prohibited walk-in credit sales and enforced credit-limit exceedance without uncaught exceptions.
+- [x] Disable or clearly warn about on-account checkout for the default cash customer and surface exact action errors in POS.
+- [ ] Add POS credit-validation regressions; validate, deploy, and obtain authenticated acceptance.
