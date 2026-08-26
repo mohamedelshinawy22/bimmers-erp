@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { normalizeDigits } from "../utils";
+import { isSupportedOem, normalizeDigits, sanitizeAndNormalizeOem } from "../utils";
 
 export const uuid = z.string().uuid({ message: "معرّف غير صالح" });
 
@@ -29,13 +29,17 @@ export const positiveMoney = z.preprocess(normalizeNumericValue, z
   .positive("يجب أن تكون القيمة أكبر من صفر")
   .max(99_999_999.99, "القيمة تتجاوز الحد المسموح"));
 
-/** BMW OEM part numbers are 11 digits; we accept spaced/dashed input and normalise. */
+/**
+ * OEM and aftermarket identifiers are not limited to the classic eleven-digit
+ * BMW number. Preserve approved punctuation, while normalising Excel-style
+ * integer floats and whitespace for stable duplicate detection.
+ */
 export const oemNumber = z
-  .string()
-  .trim()
-  .min(5, "رقم القطعة قصير جداً")
-  .max(30, "رقم القطعة طويل جداً")
-  .transform((v) => v.replace(/[\s\-.]/g, "").toUpperCase());
+  .preprocess((value) => sanitizeAndNormalizeOem(value), z.string().trim()
+    .min(5, "رقم القطعة قصير جداً")
+    .max(120, "رقم القطعة طويل جداً")
+    .refine(isSupportedOem, "كود OEM يحتوي على رموز غير مدعومة"))
+  .transform((value) => value.replace(/\s+/g, "").toUpperCase());
 
 export const vin = z
   .string()

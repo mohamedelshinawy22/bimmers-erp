@@ -1,3 +1,6 @@
+import { parseImportNumber } from "./import-export/parser";
+import { isSupportedOem, sanitizeAndNormalizeOem } from "./utils";
+
 export type InventoryImportRow = {
   nameAr: string;
   oemNumber: string;
@@ -28,7 +31,9 @@ export const parseSpreadsheetNumber = parseImportNumber;
 export function validateInventoryImportRow(row: InventoryImportRow): InventoryImportRowIssue[] {
   const issues: InventoryImportRowIssue[] = [];
   if (!row.nameAr?.trim()) issues.push({ field: "nameAr", message: "اسم الصنف مطلوب." });
-  if (!row.oemNumber?.trim()) issues.push({ field: "oemNumber", message: "كود الصنف / OEM مطلوب." });
+  const oemNumber = sanitizeAndNormalizeOem(row.oemNumber);
+  if (!oemNumber) issues.push({ field: "oemNumber", message: "كود الصنف / OEM مطلوب." });
+  else if (!isSupportedOem(oemNumber)) issues.push({ field: "oemNumber", message: "كود OEM يحتوي على رموز غير مدعومة." });
 
   const cost = parseSpreadsheetNumber(row.cost);
   const price = parseSpreadsheetNumber(row.price);
@@ -40,4 +45,3 @@ export function validateInventoryImportRow(row: InventoryImportRow): InventoryIm
 
   return issues;
 }
-import { parseImportNumber } from "./import-export/parser";

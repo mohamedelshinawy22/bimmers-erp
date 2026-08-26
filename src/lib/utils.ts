@@ -106,6 +106,28 @@ export function startOfYesterday(): Date {
 
 /** ── BMW domain helpers ───────────────────────────────────────────────── */
 
+/** Approved characters for OEM and aftermarket part identifiers. */
+export const OEM_REGEX = /^[a-zA-Z0-9ء-ي\s\-/_.,:+#()]+$/;
+
+/**
+ * Cleans an OEM value without removing punctuation that is meaningful in
+ * automotive identifiers. Integer spreadsheet codes formatted as `14733.00`
+ * are reduced to `14733`, while genuine decimal-bearing codes stay intact.
+ */
+export function sanitizeAndNormalizeOem(rawOem: unknown): string {
+  if (rawOem === null || rawOem === undefined) return "";
+  let value = normalizeDigits(String(rawOem))
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ")
+    .trim();
+  if (/^\d+\.0+$/.test(value)) value = value.replace(/\.0+$/, "");
+  return value;
+}
+
+export function isSupportedOem(value: string): boolean {
+  return OEM_REGEX.test(value);
+}
+
 /**
  * OEM identifiers are operational codes, not prose. Keep them continuous so RTL
  * layouts cannot reorder legacy ETK chunks (e.g. 17 11 8 484 638) visually.
@@ -113,7 +135,7 @@ export function startOfYesterday(): Date {
  */
 export function formatOemNumber(oem?: string | null): string {
   if (!oem) return "-";
-  return String(oem).trim().replace(/\s+/g, "").toUpperCase();
+  return sanitizeAndNormalizeOem(oem).replace(/\s+/g, "").toUpperCase();
 }
 
 /** Stable comparison key for OEM searching across spaces, hyphens, slashes, dots, and underscores. */

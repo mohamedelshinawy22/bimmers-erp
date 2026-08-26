@@ -216,3 +216,6 @@
 - [x] Return structured server-excluded row numbers and Arabic reasons from every product-import batch.
 - [x] Consolidate pre-validation and server exclusions into the post-execution Inventory import CSV report.
 - [ ] Add consolidated exclusion-report regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit OEM normalization and validation across Inventory import, API chunks, schemas, and product entry paths.
+- [x] Add shared permissive OEM sanitization including Excel trailing-zero float cleanup and invisible-character removal.
+- [ ] Add OEM punctuation and Excel numeric-code regressions, validate, deploy, and obtain authenticated import acceptance.

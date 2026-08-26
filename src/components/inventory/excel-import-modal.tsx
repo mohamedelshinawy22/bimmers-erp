@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { downloadInventoryImportTemplateAction } from "@/server/actions/import.actions";
 import { parseSpreadsheetNumber, validateInventoryImportRow } from "@/lib/inventory-import";
 import { normalizeImportHeader, resolveImportColumns } from "@/lib/import-export/parser";
+import { sanitizeAndNormalizeOem } from "@/lib/utils";
 
 const FIELDS = [["nameAr", "اسم الصنف *"], ["oemNumber", "كود القطعة / OEM *"], ["barcode", "الباركود"], ["brand", "الماركة (اختياري)"], ["category", "التصنيف (اختياري)"], ["chassis", "الشاسيه"], ["engine", "المحرك"], ["cost", "سعر الشراء *"], ["price", "سعر البيع *"], ["quantity", "الكمية الافتتاحية *"], ["bin", "موقع الرف"]] as const;
 type MappedRow = { nameAr: string; oemNumber: string; barcode: string; brand: string; category: string; chassis: string; engine: string; cost: string; price: string; quantity: string; bin: string };
@@ -52,7 +53,7 @@ export function ExcelImportModal({ open, onClose }: { open: boolean; onClose: ()
     return rows.map((row, index) => ({
       sourceRowNumber: Number(row.__sourceRowNumber ?? index + 2),
       row: {
-        nameAr: cell(row, "nameAr"), oemNumber: cell(row, "oemNumber"), barcode: cell(row, "barcode"),
+        nameAr: cell(row, "nameAr"), oemNumber: sanitizeAndNormalizeOem(cell(row, "oemNumber")), barcode: cell(row, "barcode"),
         brand: cell(row, "brand"), category: cell(row, "category"), chassis: cell(row, "chassis"), engine: cell(row, "engine"),
         cost: cell(row, "cost"), price: cell(row, "price"), quantity: cell(row, "quantity"), bin: cell(row, "bin"),
       } satisfies MappedRow,

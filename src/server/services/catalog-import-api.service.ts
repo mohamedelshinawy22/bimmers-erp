@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { writeAudit } from "@/lib/audit";
 import { toActionError } from "@/lib/action-result";
 import { parseImportNumber, normalizeImportText } from "@/lib/import-export/parser";
-import { formatOemNumber, money } from "@/lib/utils";
+import { formatOemNumber, isSupportedOem, money, sanitizeAndNormalizeOem } from "@/lib/utils";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 
@@ -25,9 +25,9 @@ function normalizedRow(raw: unknown, fallbackRow: number) {
   const row = (raw && typeof raw === "object" ? raw : {}) as ImportRow;
   const sourceRowNumber = Number(row.sourceRowNumber) || fallbackRow;
   const nameAr = normalizeImportText(row.nameAr);
-  const oemNumber = normalizeImportText(row.oemNumber);
+  const oemNumber = sanitizeAndNormalizeOem(normalizeImportText(row.oemNumber));
   if (!nameAr || !oemNumber) return { invalid: { sourceRowNumber, error: !nameAr ? "اسم الصنف مطلوب." : "كود OEM مطلوب." } } as const;
-  if (!/^[A-Za-z0-9\s\-/]+$/.test(oemNumber)) return { invalid: { sourceRowNumber, error: "كود OEM يسمح بالحروف والأرقام والمسافات والشرطة والشرطة المائلة فقط." } } as const;
+  if (!isSupportedOem(oemNumber)) return { invalid: { sourceRowNumber, error: "كود OEM يحتوي على رموز غير مدعومة." } } as const;
   const number = (value: unknown, integer = false) => {
     const parsed = parseImportNumber(value);
     const safe = parsed === null || !Number.isFinite(parsed) ? 0 : Math.abs(parsed);

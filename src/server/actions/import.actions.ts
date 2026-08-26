@@ -10,7 +10,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { writeAudit } from "@/lib/audit";
 import { ok, toActionError } from "@/lib/action-result";
 import { BusinessRuleError } from "@/lib/errors";
-import { formatOemNumber, money } from "@/lib/utils";
+import { formatOemNumber, isSupportedOem, money, sanitizeAndNormalizeOem } from "@/lib/utils";
 import { parseSpreadsheetNumber } from "@/lib/inventory-import";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
@@ -29,12 +29,16 @@ const spreadsheetText = (max: number) => z.preprocess(
   (value) => value === null || value === undefined ? "" : String(value).trim(),
   z.string().max(max),
 );
+const spreadsheetOem = z.preprocess(
+  (value) => sanitizeAndNormalizeOem(value),
+  z.string().min(1, "كود OEM مطلوب.").max(120).refine(isSupportedOem, "كود OEM يحتوي على رموز غير مدعومة"),
+);
 
 const importRowSchema = z.object({
   sourceRowNumber: z.coerce.number().int().positive().optional(),
   nameAr: spreadsheetText(240).pipe(z.string().min(1, "اسم الصنف مطلوب.")),
-  // Shared and paired part numbers such as 51117111741/742 are valid catalog identifiers.
-  oemNumber: spreadsheetText(120).pipe(z.string().min(1, "كود OEM مطلوب.").regex(/^[A-Za-z0-9\s\-/]+$/, "كود OEM يسمح بالحروف والأرقام والمسافات والشرطة والشرطة المائلة فقط.")),
+  // OEM identifiers can include maker punctuation such as dots, slashes, pluses, hashes, and parentheses.
+  oemNumber: spreadsheetOem,
   barcode: spreadsheetText(100).optional(),
   brand: spreadsheetText(120).optional(),
   category: spreadsheetText(160).optional(),
