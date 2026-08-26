@@ -512,13 +512,15 @@ function TreasuryReconciliationModal({ treasury, onClose, onDone }: { treasury: 
 
 function DeleteTreasuryModal({ treasury, onClose, onDone }: { treasury: TreasuryRow; onClose: () => void; onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const submit = () => startTransition(async () => {
     const result = await deleteTreasuryAction(treasury.id);
     if (!result.success) { setError(result.error); return; }
-    onDone();
+    setNotice(result.data.message);
+    window.setTimeout(onDone, 850);
   });
-  return <Modal open onClose={onClose} title={`حذف الخزينة — ${treasury.name}`} description="سيُنفّذ الحذف النهائي فقط للخزينة الفارغة التي لا تمتلك أي سجل مالي أو تشغيلي." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> حذف نهائي</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">لا يمكن الحذف إذا كان الرصيد لا يساوي صفراً أو وُجدت حركات أو فواتير أو ورديات أو تحويلات تاريخية. في هذه الحالة عطّل الخزينة بدلاً من حذفها.</Alert><div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-sm"><Row label="الرصيد الحالي" value={`${formatMoney(treasury.currentBalance)} ${CURRENCY}`} bold /><Row label="الحالة" value={treasury.isActive ? "نشطة" : "معطلة"} /></div></div></Modal>;
+  return <Modal open onClose={onClose} title={`حذف الخزينة — ${treasury.name}`} description="سيُنفّذ الحذف النهائي فقط للخزينة غير الافتراضية والفارغة التي لا تمتلك أي سجل مالي أو تشغيلي. الخزينة ذات السجل ستُؤرشف بدلاً من حذفها." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending} disabled={treasury.isDefault}><Trash2 size={15} /> {treasury.isDefault ? "الخزينة الافتراضية محمية" : "حذف أو أرشفة"}</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}{notice ? <Alert variant="success">{notice}</Alert> : null}{treasury.isDefault ? <Alert variant="warning">تنبيه: هذه هي الخزينة الافتراضية للمنشأة، ولا يمكن حذفها نهائياً لتفادي توقف نقاط البيع والتحصيلات. عيّن خزينة نشطة أخرى كافتراضية أولاً إذا أردت تعطيلها لاحقاً.</Alert> : <Alert variant="warning">عند وجود حركات أو فواتير أو ورديات أو تحويلات تاريخية، سيجري تعطيل وأرشفة الخزينة بدلاً من حذفها للحفاظ على السجل المحاسبي.</Alert>}<div className="rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-sm"><Row label="الرصيد الحالي" value={`${formatMoney(treasury.currentBalance)} ${CURRENCY}`} bold /><Row label="الحالة" value={treasury.isActive ? "نشطة" : "معطلة"} /></div></div></Modal>;
 }
 
 function DeleteManualTreasuryTransactionsModal({ transactions, onClose, onDone }: { transactions: TransactionRow[]; onClose: () => void; onDone: () => void }) {

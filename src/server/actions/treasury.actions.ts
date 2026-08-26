@@ -30,6 +30,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 
 const deleteManualTreasuryTransactionsSchema = z.object({ transactionIds: z.array(z.string().uuid()).min(1).max(100) });
+const treasuryIdSchema = z.string().uuid();
 const reconcileTreasuryBalanceSchema = z.object({ treasuryId: z.string().uuid(), targetBalance: z.coerce.number().finite().min(0).max(999_999_999.99), reason: z.string().trim().max(500).default("") });
 
 /** Manual voucher forms may submit an empty select value or the Arabic accountless label. Neither may reach Prisma as an empty foreign key. */
@@ -298,27 +299,36 @@ export async function toggleTreasuryStatusAction(id: string): Promise<ActionResu
   } catch (error) { return toActionError(error, "toggleTreasuryStatusAction"); }
 }
 
-export async function deleteTreasuryAction(id: string): Promise<ActionResult<{ id: string }>> {
+export async function deleteTreasuryAction(id: string): Promise<ActionResult<{ id: string; action: "DELETED" | "ARCHIVED"; message: string }>> {
   try {
     const user = await requirePermission("treasury.manage");
-    await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const treasuryId = treasuryIdSchema.parse(id);
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      await lockTreasuriesForUpdate(tx, [treasuryId]);
       const treasury = await tx.treasury.findUnique({
-        where: { id },
+        where: { id: treasuryId },
         include: { _count: { select: { transactions: true, shifts: true, invoices: true, heldSales: true, transfersSent: true, transfersReceived: true } } },
       });
       if (!treasury) throw new BusinessRuleError("الخزينة غير موجودة.");
+      if (treasury.isDefault) {
+        throw new BusinessRuleError("لا يمكن حذف الخزينة الافتراضية للمنشأة. عيّن خزينة نشطة أخرى كافتراضية أولاً، ثم عدّل هذه الخزينة أو أرشفها عند الحاجة.");
+      }
       if (!treasury.currentBalance.eq(0)) {
         throw new BusinessRuleError("لا يمكن حذف الخزينة لأن رصيدها الحالي لا يساوي صفراً. يرجى تصفية أو تحويل الرصيد إلى خزينة أخرى أولاً.");
       }
       const historyCount = Object.values(treasury._count).reduce((total, count) => total + count, 0);
       if (historyCount > 0) {
-        throw new BusinessRuleError("لا يمكن حذف خزينة لها سجل حركات مالي أو تشغيلي. استخدم تعطيل الخزينة للحفاظ على التاريخ المحاسبي.");
+        const archived = await tx.treasury.update({ where: { id: treasury.id }, data: { isActive: false, isDefault: false } });
+        await writeAudit(tx, { tableName: "Treasury", recordId: treasury.id, action: "UPDATE", oldData: treasury, newData: { ...archived, event: "TREASURY_ARCHIVED_WITH_LINKED_HISTORY", historyCount, reason: "حماية القيود المالية والوردية والفواتير المرتبطة قبل الحذف" }, performedBy: user.id });
+        return { id: archived.id, action: "ARCHIVED" as const, message: `تم تعطيل وأرشفة الخزينة «${archived.name}» للحفاظ على ${historyCount} سجل مالي أو تشغيلي مرتبط.` };
       }
-      await tx.treasury.delete({ where: { id } });
-      await writeAudit(tx, { tableName: "Treasury", recordId: id, action: "DELETE", oldData: treasury, performedBy: user.id });
-    }, TX_OPTIONS));
+      await tx.treasury.delete({ where: { id: treasury.id } });
+      await writeAudit(tx, { tableName: "Treasury", recordId: treasury.id, action: "DELETE", oldData: treasury, newData: { event: "TREASURY_PERMANENTLY_DELETED", historyCount: 0 }, performedBy: user.id });
+      return { id: treasury.id, action: "DELETED" as const, message: `تم حذف الخزينة «${treasury.name}» نهائياً لعدم وجود رصيد أو سجلات مرتبطة.` };
+    }, TX_OPTIONS)));
     revalidateTreasuryConsumers();
-    return ok({ id });
+    return ok(result);
   } catch (error) { return toActionError(error, "deleteTreasuryAction"); }
 }
 

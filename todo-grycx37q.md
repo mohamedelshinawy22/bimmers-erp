@@ -188,3 +188,6 @@
 - [x] Audit the active Treasury reconciliation action, modal payload, transaction numbering, and error path against the reported deficit failure.
 - [x] Fix reconciliation adjustment direction, positive persisted amount, validation, tenant scoping, and Arabic error containment.
 - [ ] Add cash reconciliation regressions, validate, deploy, and obtain authenticated acceptance for deficit and surplus cases.
+- [x] Audit the active Treasury deletion action, actual relation counts, default designation, and client modal behavior.
+- [x] Implement tenant-scoped default-treasury protection, linked-history archival, and clear Arabic deletion outcomes.
+- [ ] Add Treasury deletion safeguard regressions, validate, deploy, and obtain authenticated acceptance.
