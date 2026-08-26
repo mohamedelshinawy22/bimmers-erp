@@ -205,3 +205,7 @@
 - [x] Add serial-safe priority column detection that prefers item descriptions over code columns and validates sampled data rows.
 - [x] Add opt-in partial stocktake reconciliation for matched rows plus an exportable unmatched-row report.
 - [ ] Add corrected stocktake regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit stocktake execution limits, transaction behavior, and product metadata available for safe disambiguation.
+- [x] Implement sequential bounded stocktake batches with user-visible progress and clear batch failure outcomes.
+- [x] Improve name-only stocktake matching with conservative active-product and contextual-data disambiguation.
+- [ ] Add scalable stocktake regressions, validate, deploy, and obtain authenticated 581-row acceptance.

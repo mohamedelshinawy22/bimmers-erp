@@ -14,8 +14,8 @@ describe("physical stock count Excel parser", () => {
     expect(parsed.error).toBeUndefined();
     expect(parsed.headerRowIndex).toBe(2);
     expect(parsed.rows).toEqual([
-      { sourceRowNumber: 4, oemNumber: "51-11-7-111-741", nameAr: "غطاء صدام", actualQuantity: 12 },
-      { sourceRowNumber: 5, oemNumber: "51-11-7-111-742", nameAr: "شبكة أمامية", actualQuantity: 3 },
+      { sourceRowNumber: 4, oemNumber: "51-11-7-111-741", nameAr: "غطاء صدام", brand: "", category: "", actualQuantity: 12 },
+      { sourceRowNumber: 5, oemNumber: "51-11-7-111-742", nameAr: "شبكة أمامية", brand: "", category: "", actualQuantity: 3 },
     ]);
   });
 
@@ -41,5 +41,13 @@ describe("physical stock count Excel parser", () => {
       expect.objectContaining({ oemNumber: "BMW-002", nameAr: "غطاء مصباح أمامي", actualQuantity: 6 }),
       expect.objectContaining({ oemNumber: "BMW-003", nameAr: "شبكة صدام", actualQuantity: 1 }),
     ]);
+  });
+
+  it("carries optional brand and category columns alongside name-only stocktake rows", () => {
+    const parsed = parsePhysicalCountMatrix([
+      ["اسم الصنف", "الماركة", "التصنيف", "الرصيد"],
+      ["فلتر زيت", "عام", "زيوت", 8],
+    ]);
+    expect(parsed.rows).toEqual([expect.objectContaining({ nameAr: "فلتر زيت", brand: "عام", category: "زيوت", actualQuantity: 8 })]);
   });
 });
