@@ -6,6 +6,7 @@ interface PriceShape {
   sellPriceWholesale: number;
   sellPriceMin: number;
   buyPriceLast?: number;
+  costPrice?: number;
 }
 
 export function refinePartPrices(data: PriceShape, ctx: z.RefinementCtx): void {
@@ -18,7 +19,8 @@ export function refinePartPrices(data: PriceShape, ctx: z.RefinementCtx): void {
   if (data.sellPriceMin > 0 && data.sellPriceWholesale > 0 && data.sellPriceMin > data.sellPriceWholesale) {
     ctx.addIssue({ code: "custom", path: ["sellPriceMin"], message: "الحد الأدنى للسعر لا يجب أن يتجاوز سعر الجملة" });
   }
-  if (data.buyPriceLast !== undefined && data.buyPriceLast > 0 && data.sellPriceMin < data.buyPriceLast) {
+  const purchaseCost = data.costPrice ?? data.buyPriceLast;
+  if (purchaseCost !== undefined && purchaseCost > 0 && data.sellPriceMin < purchaseCost) {
     ctx.addIssue({ code: "custom", path: ["sellPriceMin"], message: "الحد الأدنى للسعر أقل من سعر الشراء — سيتحقق خسارة مؤكدة" });
   }
 }
@@ -77,6 +79,7 @@ export const updatePartSchema = z
     barcode: optionalText(60),
     sidePosition: optionalText(60),
     binLocationId: optionalUuid,
+    costPrice: nonNegativeMoney.optional(),
     sellPriceRetail: nonNegativeMoney,
     sellPriceWholesale: nonNegativeMoney,
     sellPriceMin: nonNegativeMoney,

@@ -57,6 +57,7 @@ interface InventoryClientProps {
   };
   permissions: {
     canWrite: boolean;
+    canEditCost: boolean;
     canAdjust: boolean;
     canViewCost: boolean;
     canManageBins: boolean;
@@ -431,6 +432,7 @@ export function InventoryClient({
             bins={options.bins}
             categories={options.categories}
             canManageBins={permissions.canManageBins}
+            canEditCost={permissions.canEditCost}
           />
           {editPart ? (
             <AddPartModal
@@ -443,6 +445,7 @@ export function InventoryClient({
               bins={options.bins}
               categories={options.categories}
               canManageBins={permissions.canManageBins}
+              canEditCost={permissions.canEditCost}
               part={editPart}
             />
           ) : null}

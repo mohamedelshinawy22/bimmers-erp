@@ -21,6 +21,7 @@ interface AddPartModalProps {
   bins: BinOption[];
   categories: string[];
   canManageBins: boolean;
+  canEditCost: boolean;
   /** When provided the modal switches to edit mode. */
   part?: PartRow | null;
 }
@@ -41,6 +42,7 @@ const emptyForm = {
   sellPriceMin: "",
   openingQuantity: "0",
   minReorderLevel: "2",
+  costPrice: "",
 };
 
 const SIDE_POSITIONS = [
@@ -63,6 +65,7 @@ export function AddPartModal({
   bins,
   categories,
   canManageBins,
+  canEditCost,
   part = null,
 }: AddPartModalProps) {
   const router = useRouter();
@@ -82,6 +85,7 @@ export function AddPartModal({
           category: part.category,
           sidePosition: part.sidePosition ?? "",
           buyPriceLast: String(part.buyPriceAvg),
+          costPrice: String(part.buyPriceAvg),
           sellPriceRetail: String(part.sellPriceRetail),
           sellPriceWholesale: String(part.sellPriceWholesale),
           sellPriceMin: String(part.sellPriceMin),
@@ -144,6 +148,7 @@ export function AddPartModal({
         engineCodes,
         imageKey: "",
         imageUrl: "",
+        ...(isEdit && canEditCost ? { costPrice: numeric(form.costPrice) } : {}),
       };
 
       const result = isEdit
@@ -277,17 +282,19 @@ export function AddPartModal({
 
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label={isEdit ? "متوسط التكلفة (للقراءة)" : "سعر الشراء"}
-                error={err("buyPriceLast")}
-                hint={isEdit ? "يُحدَّث تلقائياً من فواتير الشراء" : undefined}
+                label={isEdit ? "سعر الشراء / التكلفة (ج.م)" : "سعر الشراء"}
+                required
+                error={err(isEdit ? "costPrice" : "buyPriceLast")}
+                hint={isEdit ? (canEditCost ? "يمكن لمدير النظام تعديل سعر الشراء الأساسي مباشرة." : "تعديل سعر التكلفة متاح لمدير النظام والمدير فقط.") : undefined}
               >
                 <Input
                   type="number"
                   step="0.01"
                   min={0}
-                  value={form.buyPriceLast}
-                  onChange={set("buyPriceLast")}
-                  disabled={isEdit}
+                  placeholder="0.00"
+                  value={isEdit ? form.costPrice : form.buyPriceLast}
+                  onChange={isEdit ? set("costPrice") : set("buyPriceLast")}
+                  disabled={isEdit && !canEditCost}
                 />
               </Field>
               <Field label="سعر القطاعي" required error={err("sellPriceRetail")}>

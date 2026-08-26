@@ -58,6 +58,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
   ]);
 
       const canViewCost = can(user.role, "part.viewCost") && hasPermission(access, "canViewCostPrice");
+      const canEditCost = hasApplicationPermission(access, "part.editCost");
   // Redact cost server-side. Hiding the column in the DOM still shipped
   // buyPriceAvg in the RSC payload, readable in the network response.
       const rows = canViewCost ? result.rows : result.rows.map((r) => ({ ...r, buyPriceAvg: 0 }));
@@ -78,6 +79,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       }}
       permissions={{
         canWrite: can(user.role, "part.write"),
+        canEditCost,
         canAdjust: can(user.role, "stock.adjust"),
         canViewCost,
         canManageBins: can(user.role, "part.write"),

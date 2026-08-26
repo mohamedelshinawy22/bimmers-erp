@@ -14,6 +14,7 @@ import type { Role } from "@prisma/client";
 export const PERMISSIONS = {
   "part.read": ["SUPER_ADMIN", "MANAGER", "CASHIER", "STOREKEEPER"],
   "part.write": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],
+  "part.editCost": ["SUPER_ADMIN", "MANAGER"],
   "part.deactivate": ["SUPER_ADMIN", "MANAGER"],
   "part.viewCost": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],
   "stock.adjust": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],

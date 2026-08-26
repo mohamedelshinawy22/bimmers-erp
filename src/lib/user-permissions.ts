@@ -116,6 +116,7 @@ export function hasApplicationPermission(access: UserAccess, permission: Permiss
   const gate: Partial<Record<Permission, boolean>> = {
     "part.read": hasPermission(access, "canViewParts"),
     "part.write": hasPermission(access, "canCreateParts") || hasPermission(access, "canEditParts"),
+    "part.editCost": hasPermission(access, "canViewCostPrice"),
     "part.deactivate": hasPermission(access, "canDeleteParts"),
     "part.viewCost": hasPermission(access, "canViewCostPrice"),
     "stock.adjust": hasPermission(access, "canManageAdjustments") || hasPermission(access, "canManageInventoryAudit"),

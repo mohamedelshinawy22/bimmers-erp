@@ -226,3 +226,7 @@
 - [x] Implement safe multi-brand catalog identity handling for OEM, brand, and normalized product name without corrupting existing tenant inventory.
 - [x] Implement OEM-plus-brand, OEM-plus-name, and name-plus-brand stocktake matching priorities before unique fallbacks.
 - [ ] Add multi-brand catalog-import and stocktake-matching regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit product edit pricing fields, permission checks, persistence, and audit behavior for manual purchase-cost corrections.
+- [x] Implement tenant-scoped authorized editing of product purchase/average cost with explicit audit metadata.
+- [x] Update the Inventory product edit modal with a validated editable purchase-cost input and manager/admin guidance.
+- [ ] Add purchase-cost validation, authorization, and audit regressions; validate, deploy, and obtain authenticated acceptance.

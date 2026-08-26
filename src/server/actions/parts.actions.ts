@@ -166,6 +166,7 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
     const tenant = await getTenantDbFromSession();
     await tenant.run(() => ensureCatalogCompositeIdentity(tenant.prisma));
     const input = updatePartSchema.parse({ ...raw, binLocationId: normalizeOptionalPartReference(raw.binLocationId) });
+    if (input.costPrice !== undefined) await requirePermission("part.editCost");
 
     await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
       const before = await tx.partItem.findUnique({
@@ -207,6 +208,8 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
         categoryId = (await tx.category.upsert({ where: { normalizedName }, update: {}, create: { name: input.categoryName.trim(), normalizedName }, select: { id: true } })).id;
       }
 
+      const manualCost = input.costPrice === undefined ? null : money(input.costPrice);
+      const costChanged = manualCost !== null && !manualCost.eq(before.buyPriceAvg);
       const updated = await tx.partItem.update({
         where: { id: input.id },
         data: {
@@ -221,6 +224,7 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
           imageUrl: input.imageUrl || null,
           sidePosition: input.sidePosition || null,
           binLocationId: input.binLocationId ?? null,
+          ...(manualCost === null ? {} : { buyPriceLast: manualCost, buyPriceAvg: manualCost }),
           sellPriceRetail: money(input.sellPriceRetail),
           sellPriceWholesale: money(input.sellPriceWholesale),
           sellPriceMin: money(input.sellPriceMin),
@@ -228,6 +232,17 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
           isActive: input.isActive,
         },
       });
+
+      if (costChanged && manualCost !== null) {
+        await writeAudit(tx, {
+          tableName: "PartItem",
+          recordId: input.id,
+          action: "UPDATE",
+          oldData: { event: "PRODUCT_COST_UPDATED", oldCostPrice: before.buyPriceAvg, oldPurchasePrice: before.buyPriceLast },
+          newData: { event: "PRODUCT_COST_UPDATED", newCostPrice: manualCost, newPurchasePrice: manualCost, source: "MANUAL_PRODUCT_EDIT" },
+          performedBy: user.id,
+        });
+      }
 
       // Resolve newly typed codes before replacing the relation matrix.
       const customChassisIds = await Promise.all(input.chassisCodes.map(async (code) => (await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id));
