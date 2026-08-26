@@ -198,3 +198,6 @@
 - [ ] Inspect the supplied البضاعه2.xlsx header structure and reproduce the stocktake parser rejection.
 - [x] Expand physical stocktake quantity, OEM/code, barcode, and product-name header aliases while retaining safe header selection.
 - [ ] Add flexible stocktake-header regressions, validate, deploy, and obtain authenticated preview acceptance.
+- [x] Audit the active Inventory page loader, catalog row mapper, and production error trace for the catalog boundary failure.
+- [x] Add null-safe relation mapping, explicit client serialization, and tenant-safe fallback behavior for Inventory catalog loads.
+- [ ] Add Inventory loader regressions, validate, deploy, and obtain authenticated acceptance for the catalog page.

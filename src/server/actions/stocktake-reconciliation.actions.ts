@@ -85,5 +85,3 @@ export async function executeStocktakeReconciliationAction(raw: unknown): Promis
     return ok(result);
   } catch (error) { return toActionError(error, "executeStocktakeReconciliationAction"); }
 }
-
-export { CONFIRMATION_PHRASE as STOCKTAKE_CONFIRMATION_PHRASE };

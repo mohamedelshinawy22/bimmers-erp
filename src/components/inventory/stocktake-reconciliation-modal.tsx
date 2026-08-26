@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { formatInt, formatOemNumber } from "@/lib/utils";
 import { parsePhysicalCountMatrix, type PhysicalCountRow } from "@/lib/stocktake-excel-parser";
-import { executeStocktakeReconciliationAction, previewStocktakeReconciliationAction, STOCKTAKE_CONFIRMATION_PHRASE } from "@/server/actions/stocktake-reconciliation.actions";
+import { executeStocktakeReconciliationAction, previewStocktakeReconciliationAction } from "@/server/actions/stocktake-reconciliation.actions";
+
+const STOCKTAKE_CONFIRMATION_PHRASE = "تسوية جرد المخزون";
 
 type PreviewRow = PhysicalCountRow & { status: "MATCHED" | "UNMATCHED" | "AMBIGUOUS" | "INVALID"; message: string; partId: string | null; matchedBy: "OEM" | "NAME" | null; bookQuantity: number | null; delta: number | null; partName: string | null; partOemNumber: string | null };
 type Preview = { rows: PreviewRow[]; matched: number; unmatched: number; ambiguous: number; invalid: number };
