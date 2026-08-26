@@ -259,3 +259,8 @@
 - [x] Add manager credit-override authorization and audit regressions; complete full suite, typecheck, and production-build validation.
 - [x] Deploy the manager credit override to production and verify the live health boundary.
 - [ ] Obtain authenticated POS acceptance for an authorized over-limit sale and an unauthorized blocked sale.
+- [x] Trace the reported POS on-account checkout 500 through the tenant-scoped sale transaction and deployed runtime evidence.
+- [x] Prevent pure on-account sales from creating treasury or payment records that require a physical treasury reference.
+- [x] Preserve actionable Arabic action errors for credit validation and transactional failures without weakening audit or tenant isolation.
+- [x] Add pure-credit sale and POS returned-error regressions; complete full test, typecheck, and production-build validation.
+- [ ] Deploy the POS tenant-context repair and obtain authenticated pure-credit acceptance without creating test invoices.

@@ -23,7 +23,8 @@ const posPartSearchFiltersSchema = z.object({
 export async function searchPosAccountsAction(query: string): Promise<ActionResult<PosAccount[]>> {
   try {
     await requirePermission("account.read");
-    return ok(await searchPosAccounts(query, 30));
+    const tenant = await getTenantDbFromSession();
+    return ok(await tenant.run(() => searchPosAccounts(query, 30)));
   } catch (error) {
     return toActionError(error, "searchPosAccountsAction");
   }
@@ -32,7 +33,8 @@ export async function searchPosAccountsAction(query: string): Promise<ActionResu
 export async function searchSuppliersAction(query: string): Promise<ActionResult<PosAccount[]>> {
   try {
     await requirePermission("account.read");
-    return ok(await searchSupplierAccounts(query, 30));
+    const tenant = await getTenantDbFromSession();
+    return ok(await tenant.run(() => searchSupplierAccounts(query, 30)));
   } catch (error) {
     return toActionError(error, "searchSuppliersAction");
   }
@@ -56,7 +58,8 @@ export async function getAccountVehiclesAction(
 ): Promise<ActionResult<AccountVehicle[]>> {
   try {
     await requirePermission("account.read");
-    return ok(await getAccountVehicles(accountId));
+    const tenant = await getTenantDbFromSession();
+    return ok(await tenant.run(() => getAccountVehicles(accountId)));
   } catch (error) {
     return toActionError(error, "getAccountVehiclesAction");
   }

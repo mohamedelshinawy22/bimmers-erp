@@ -15,10 +15,14 @@ describe("walk-in on-account sale validation", () => {
   it("keeps the friendly Arabic denial in the locked sale transaction and a tenant-run action boundary", () => {
     const service = source("src/server/services/invoice.service.ts");
     const action = source("src/server/actions/invoice.actions.ts");
+    const searchActions = source("src/server/actions/search.actions.ts");
     expect(service).toContain("isWalkInCashAccount(account)");
     expect(service).toContain("WALK_IN_CREDIT_ERROR");
     expect(action).toContain("getTenantDbFromSession()");
+    expect(action).toContain("tenant.run(() => getUserAccess(user.id))");
     expect(action).toContain("tenant.run(() => createSaleInvoice");
+    expect(searchActions).toContain("tenant.run(() => searchPosAccounts(query, 30))");
+    expect(searchActions).toContain("tenant.run(() => getAccountVehicles(accountId))");
     expect(WALK_IN_CREDIT_ERROR).toContain("لا يمكن البيع الآجل");
   });
 
@@ -33,6 +37,12 @@ describe("walk-in on-account sale validation", () => {
     expect(service).toContain("...(creditOverride ? { creditOverride } : {})");
     expect(pos).toContain("const managerCreditOverride = creditRequiresOverride && canOverrideCreditLimit && !isWalkInCustomer");
     expect(pos).toContain("سيتم إتمام البيع الآجل بصلاحية مدير النظام");
+  });
+
+  it("keeps a pure on-account sale independent from treasury posting", () => {
+    const service = source("src/server/services/invoice.service.ts");
+    expect(service).toContain("treasuryId: paidAmount.gt(0) ? input.treasuryId : null");
+    expect(service).toContain("if (paidAmount.gt(0) && input.treasuryId)");
   });
 
   it("disables the POS on-account option and renders a customer-selection warning", () => {

@@ -54,8 +54,11 @@ export async function createSaleInvoiceAction(
   try {
     const user = await requirePermission("invoice.sale");
     const input = createSaleInvoiceSchema.parse(raw);
-    const access = await getUserAccess(user.id);
     const tenant = await getTenantDbFromSession();
+    // `getUserAccess` uses the tenant-scoped Prisma facade, so it must run
+    // inside the same explicit context boundary as the transactional engine.
+    // Server Actions may resume on a fresh async lineage after authentication.
+    const access = await tenant.run(() => getUserAccess(user.id));
 
     const result = await tenant.run(() => createSaleInvoice(input, {
       id: user.id,

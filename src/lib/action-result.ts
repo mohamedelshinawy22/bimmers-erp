@@ -77,6 +77,14 @@ export function toActionError(error: unknown, context: string): ActionResult<nev
     return fail("تعذر الاتصال بقاعدة البيانات. تحقق من إعدادات DATABASE_URL.");
   }
 
+  // This is an application-boundary invariant rather than a database detail.
+  // Keep the remediation actionable without exposing a stack trace or tenant
+  // connection data if an action resumes outside its AsyncLocalStorage scope.
+  if (error instanceof Error && error.message.includes("لم يتم تأسيس سياق مستأجر")) {
+    console.error(`[${context}] tenant context:`, error.message);
+    return fail("تعذر تجهيز سياق المؤسسة للجلسة الحالية. أعد تسجيل الدخول ثم أعد المحاولة.");
+  }
+
   console.error(`[${context}] unexpected:`, error);
   return fail("حدث خطأ غير متوقع. تم تسجيل التفاصيل لدى مسؤول النظام.");
 }
