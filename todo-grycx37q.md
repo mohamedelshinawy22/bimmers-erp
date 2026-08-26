@@ -263,4 +263,5 @@
 - [x] Prevent pure on-account sales from creating treasury or payment records that require a physical treasury reference.
 - [x] Preserve actionable Arabic action errors for credit validation and transactional failures without weakening audit or tenant isolation.
 - [x] Add pure-credit sale and POS returned-error regressions; complete full test, typecheck, and production-build validation.
-- [ ] Deploy the POS tenant-context repair and obtain authenticated pure-credit acceptance without creating test invoices.
+- [x] Deploy the POS tenant-context repair and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated pure-credit POS acceptance without creating test invoices.
