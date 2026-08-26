@@ -201,3 +201,7 @@
 - [x] Audit the active Inventory page loader, catalog row mapper, and production error trace for the catalog boundary failure.
 - [x] Add null-safe relation mapping, explicit client serialization, and tenant-safe fallback behavior for Inventory catalog loads.
 - [ ] Add Inventory loader regressions, validate, deploy, and obtain authenticated acceptance for the catalog page.
+- [ ] Reproduce the stocktake serial/code-to-name misalignment and OEM omission from the reported workbook layout.
+- [x] Add serial-safe priority column detection that prefers item descriptions over code columns and validates sampled data rows.
+- [x] Add opt-in partial stocktake reconciliation for matched rows plus an exportable unmatched-row report.
+- [ ] Add corrected stocktake regressions, validate, deploy, and obtain authenticated acceptance.

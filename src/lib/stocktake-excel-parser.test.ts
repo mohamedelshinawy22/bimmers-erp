@@ -30,4 +30,16 @@ describe("physical stock count Excel parser", () => {
     const byBarcode = parsePhysicalCountMatrix([["الباركود", "الوصف", "المخزون"], ["998877", "صنف باركود", 4]]);
     expect(byBarcode.rows).toEqual([expect.objectContaining({ oemNumber: "998877", nameAr: "صنف باركود", actualQuantity: 4 })]);
   });
+
+  it("never treats serial or item-code columns as product names when a description column exists", () => {
+    const parsed = parsePhysicalCountMatrix([
+      ["م", "كود الصنف", "اسم الصنف", "الرصيد"],
+      [2, "BMW-002", "غطاء مصباح أمامي", 6],
+      [3, "BMW-003", "شبكة صدام", 1],
+    ]);
+    expect(parsed.rows).toEqual([
+      expect.objectContaining({ oemNumber: "BMW-002", nameAr: "غطاء مصباح أمامي", actualQuantity: 6 }),
+      expect.objectContaining({ oemNumber: "BMW-003", nameAr: "شبكة صدام", actualQuantity: 1 }),
+    ]);
+  });
 });

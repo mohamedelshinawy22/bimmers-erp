@@ -6,6 +6,13 @@ export type PhysicalCountRow = { sourceRowNumber: number; oemNumber: string; nam
 
 const headerKey = (value: unknown) => normalizeSearchTerm(normalizeImportHeader(value)).numericNormalized;
 const includesAny = (header: string, aliases: string[]) => aliases.some((alias) => header.includes(alias));
+const SERIAL_HEADERS = new Set(["م", "مسلسل", "ت", "#", "id", "seq", "no", "number"]);
+const isSerialHeader = (raw: unknown) => SERIAL_HEADERS.has(normalizeImportHeader(raw).toLocaleLowerCase("ar-EG"));
+const isOemHeader = (header: string) => includesAny(header, ["oem", "رقموem", "رقمالقطعه", "كودالصنف", "كودالقطعه", "الباركود", "barcode", "partnumber", "partno", "itemcode", "code"]);
+const isStrictNameHeader = (header: string) => includesAny(header, ["اسمالصنف", "اسمالقطعه", "اسمالمنتج", "البيان", "الوصف", "description", "itemname", "productname"]);
+const isFallbackNameHeader = (header: string) => ["الصنف", "المنتج", "القطعه", "item", "product", "name"].includes(header);
+const textValue = (value: unknown) => /[ء-يa-zA-Z]/.test(String(value ?? "").trim());
+const numberValue = (value: unknown) => /^\d+(?:[.,]\d+)?$/.test(String(value ?? "").trim());
 
 function quantityScore(header: string) {
   if (includesAny(header, ["الكميهالفعليه", "الرصيدالفعلي", "actualquantity", "physicalquantity", "physicalcount", "countedquantity"])) return 3;
@@ -14,20 +21,30 @@ function quantityScore(header: string) {
   return 0;
 }
 
-function findBestColumn(headers: string[], predicate: (header: string) => boolean) {
+function findBestColumn(headers: string[], predicate: (header: string, columnIndex: number) => boolean) {
   const index = headers.findIndex(predicate);
   return index >= 0 ? index : -1;
 }
 
 export function resolveStocktakeHeaders(matrix: unknown[][]) {
   for (let index = 0; index < Math.min(5, matrix.length); index += 1) {
-    const headers = (matrix[index] ?? []).map(headerKey);
-    const oem = findBestColumn(headers, (header) => includesAny(header, ["oem", "رقموem", "رقمالقطعه", "كودالصنف", "كودالقطعه", "الباركود", "barcode", "partnumber", "itemcode", "code"]));
-    const name = findBestColumn(headers, (header) => includesAny(header, ["اسمالصنف", "الصنف", "اسمالقطعه", "البيان", "الوصف", "المنتج", "description", "product", "item", "name"]));
+    const rawHeaders = matrix[index] ?? [];
+    const headers = rawHeaders.map(headerKey);
+    const serial = new Set(rawHeaders.flatMap((header, columnIndex) => isSerialHeader(header) ? [columnIndex] : []));
+    const oem = findBestColumn(headers, (header, columnIndex) => !serial.has(columnIndex) && isOemHeader(header));
+    let name = findBestColumn(headers, (header, columnIndex) => !serial.has(columnIndex) && !isOemHeader(header) && isStrictNameHeader(header));
+    if (name < 0) name = findBestColumn(headers, (header, columnIndex) => !serial.has(columnIndex) && !isOemHeader(header) && isFallbackNameHeader(header));
     const actualQuantity = headers.reduce<{ index: number; score: number }>((best, header, columnIndex) => {
+      if (serial.has(columnIndex)) return best;
       const score = quantityScore(header);
       return score > best.score ? { index: columnIndex, score } : best;
     }, { index: -1, score: 0 }).index;
+    const sampleRows = matrix.slice(index + 1).filter((row) => row.some((value) => String(value ?? "").trim())).slice(0, 5);
+    const nameMostlyNumeric = name >= 0 && sampleRows.length > 0 && sampleRows.every((row) => numberValue(row[name]));
+    if (nameMostlyNumeric) {
+      const recoveredName = headers.findIndex((header, columnIndex) => !serial.has(columnIndex) && columnIndex !== actualQuantity && columnIndex !== oem && !isOemHeader(header) && sampleRows.some((row) => textValue(row[columnIndex])));
+      if (recoveredName >= 0) name = recoveredName;
+    }
     if (actualQuantity >= 0 && (oem >= 0 || name >= 0)) return { headerRowIndex: index, oem, name, actualQuantity };
   }
   return null;
@@ -35,7 +52,7 @@ export function resolveStocktakeHeaders(matrix: unknown[][]) {
 
 export function parsePhysicalCountMatrix(matrix: unknown[][]): { rows: PhysicalCountRow[]; headerRowIndex: number | null; error?: string } {
   const resolved = resolveStocktakeHeaders(matrix);
-  if (!resolved) return { rows: [], headerRowIndex: null, error: "تعذر العثور على ترويسة تحتوي الكمية الفعلية مع رقم OEM أو اسم الصنف ضمن أول خمسة صفوف." };
+  if (!resolved) return { rows: [], headerRowIndex: null, error: "تعذر العثور على ترويسة تحتوي الرصيد أو الكمية مع رقم OEM أو كود الصنف أو اسم الصنف ضمن أول خمسة صفوف." };
   const rows = matrix.slice(resolved.headerRowIndex + 1).flatMap((values, offset) => {
     const oemNumber = String(resolved.oem >= 0 ? values[resolved.oem] ?? "" : "").trim();
     const nameAr = String(resolved.name >= 0 ? values[resolved.name] ?? "" : "").trim();

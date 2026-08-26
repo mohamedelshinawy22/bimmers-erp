@@ -26,6 +26,9 @@ describe("invoice detail and Excel stocktake resilience", () => {
     expect(modal).toContain("STOCKTAKE_CONFIRMATION_PHRASE");
     expect(modal).toContain("previewStocktakeReconciliationAction");
     expect(modal).toContain("executeStocktakeReconciliationAction");
-    expect(modal).toContain("لا ينفذ النظام تسوية جزئية");
+    expect(modal).toContain("لا يمكن تنفيذ التسوية قبل معالجة كل الصفوف");
+    expect(modal).toContain("allowPartial");
+    expect(modal).toContain("downloadUnmatchedReport");
+    expect(modal).toContain("تسوية الأصناف المتطابقة فقط");
   });
 });
