@@ -22,6 +22,7 @@ import { StatementPrintDocument } from "@/components/print/templates/universal-d
 import { ARABIC_LABELS as LABELS } from "@/lib/utils";
 import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar";
 import { AccountImportModal } from "@/components/accounts/account-import-modal";
+import { AccountBalanceReconciliationModal } from "@/components/accounts/account-balance-reconciliation-modal";
 import { VoucherDetailsModal } from "@/components/treasury/voucher-details-modal";
 
 interface AccountsClientProps {
@@ -37,6 +38,7 @@ interface AccountsClientProps {
   canWrite: boolean;
   canForceCleanup: boolean;
   canAdjustBalance: boolean;
+  canReconcileBalances: boolean;
   canViewStatement: boolean;
   company: CompanyProfile;
   canTransact: boolean;
@@ -62,6 +64,7 @@ export function AccountsClient({
   canWrite,
   canForceCleanup,
   canAdjustBalance,
+  canReconcileBalances,
   canViewStatement,
   company,
   canTransact,
@@ -82,6 +85,7 @@ export function AccountsClient({
   const [importOpen, setImportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [resettingExpenses, setResettingExpenses] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -125,7 +129,7 @@ export function AccountsClient({
             <p className="text-xs text-bmw-muted">{formatInt(total)} حساب مسجّل</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">{canWrite ? <><Button variant="outline" onClick={() => setImportOpen(true)}><FileText size={16} /> استيراد إكسيل</Button><Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>{canAdjustBalance ? <Button variant="outline" onClick={() => void resetExpenseBalances()} loading={resettingExpenses}><Wallet size={16} /> تصحيح أرصدة المصروفات</Button> : null}<Button onClick={() => setAddOpen(true)}><Plus size={16} /> حساب جديد</Button></> : <Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>}</div>
+        <div className="flex flex-wrap gap-2">{canWrite ? <><Button variant="outline" onClick={() => setImportOpen(true)}><FileText size={16} /> استيراد إكسيل</Button><Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>{canAdjustBalance ? <Button variant="outline" onClick={() => void resetExpenseBalances()} loading={resettingExpenses}><Wallet size={16} /> تصحيح أرصدة المصروفات</Button> : null}{canReconcileBalances ? <Button variant="outline" className="border-amber-500/40 text-amber-200 hover:bg-amber-500/10" onClick={() => setReconcileOpen(true)}><RotateCcw size={16} /> مطابقة الأرصدة</Button> : null}<Button onClick={() => setAddOpen(true)}><Plus size={16} /> حساب جديد</Button></> : <Button variant="outline" onClick={() => void exportExcel()} loading={exporting}><Download size={16} /> تصدير إكسيل</Button>}</div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -369,6 +373,7 @@ export function AccountsClient({
 
       {canWrite ? <AddAccountModal open={addOpen} onClose={() => setAddOpen(false)} /> : null}
       {importOpen ? <AccountImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
+      {reconcileOpen ? <AccountBalanceReconciliationModal onClose={() => setReconcileOpen(false)} onDone={() => { router.refresh(); }} /> : null}
       {editAccount ? (
         <EditAccountModal key={editAccount.id} account={editAccount} canAdjustBalance={canAdjustBalance} onClose={() => setEditAccount(null)} />
       ) : null}

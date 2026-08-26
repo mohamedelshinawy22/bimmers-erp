@@ -176,3 +176,7 @@
 - [x] Inspect the supplied الحسابات2.xlsx dual-header layout and record parser output/counts.
 - [x] Refine Accounts preview labels, code-or-phone fallback, and numeric balance rendering from the supplied workbook evidence.
 - [ ] Add supplied-workbook regression coverage, validate, deploy, and obtain authenticated 48-account import acceptance.
+- [x] Audit actual Account, invoice, return, voucher, and ledger models before defining reconciliation calculations.
+- [x] Define guarded tenant-scoped reconciliation modes that avoid accidental financial data corruption or double counting.
+- [x] Implement a secure Accounts balance reconciliation action and explicit confirmation interface.
+- [ ] Add reconciliation regression coverage, validate, deploy, and obtain authenticated acceptance before applying any live balance rewrite.

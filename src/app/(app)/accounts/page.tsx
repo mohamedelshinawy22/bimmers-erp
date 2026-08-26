@@ -49,6 +49,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
       canWrite={can(user.role, "account.write")}
       canForceCleanup={user.role === "SUPER_ADMIN"}
       canAdjustBalance={user.role === "SUPER_ADMIN" || user.role === "MANAGER"}
+      canReconcileBalances={user.role === "SUPER_ADMIN" || user.role === "MANAGER"}
       canViewStatement={can(user.role, "account.viewStatement")}
       company={company}
       canTransact={can(user.role, "treasury.transact")}
@@ -66,7 +67,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
   );
   } catch (error) {
     console.error("[accounts-page] tenant data load failed", error);
-    return <AccountsClient rows={[]} total={0} page={1} pageSize={25} filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter, includeInactive }} options={{ chassis: [], engines: [] }} canWrite={can(user.role, "account.write")} canForceCleanup={user.role === "SUPER_ADMIN"} canAdjustBalance={user.role === "SUPER_ADMIN" || user.role === "MANAGER"} canViewStatement={can(user.role, "account.viewStatement")} company={{ name: "", commercialName: "", phone: "", phonePrimary: "", phoneSecondary: "", address: "", taxNumber: "", commercialRegister: "", logoUrl: "", invoiceFooter: "" }} canTransact={can(user.role, "treasury.transact")} treasuries={[]} totals={{ receivables: 0, payables: 0, net: 0, debitCount: 0, creditCount: 0, zeroCount: 0, workshops: 0 }} />;
+    return <AccountsClient rows={[]} total={0} page={1} pageSize={25} filters={{ query: searchParams.q ?? "", type: type === "ALL" ? "" : type, debtorsOnly, balanceFilter, includeInactive }} options={{ chassis: [], engines: [] }} canWrite={can(user.role, "account.write")} canForceCleanup={user.role === "SUPER_ADMIN"} canAdjustBalance={user.role === "SUPER_ADMIN" || user.role === "MANAGER"} canReconcileBalances={user.role === "SUPER_ADMIN" || user.role === "MANAGER"} canViewStatement={can(user.role, "account.viewStatement")} company={{ name: "", commercialName: "", phone: "", phonePrimary: "", phoneSecondary: "", address: "", taxNumber: "", commercialRegister: "", logoUrl: "", invoiceFooter: "" }} canTransact={can(user.role, "treasury.transact")} treasuries={[]} totals={{ receivables: 0, payables: 0, net: 0, debitCount: 0, creditCount: 0, zeroCount: 0, workshops: 0 }} />;
   }
   });
 }

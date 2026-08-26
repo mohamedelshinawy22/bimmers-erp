@@ -130,4 +130,19 @@ describe("interactive tenant action boundaries", () => {
     expect(usersPanel).toContain("onClick={() => setEditing(user)}");
     expect(usersPanel).toContain("<UserPermissionsModal");
   });
+
+  it("keeps account-wide reconciliation tenant-scoped, audited, and confirmation protected", () => {
+    const action = source("src/server/actions/account-reconciliation.actions.ts");
+    const modal = source("src/components/accounts/account-balance-reconciliation-modal.tsx");
+    expect(action).toContain('const tenant = await getTenantDbFromSession()');
+    expect(action).toContain("return tenant.run(async () => {");
+    expect(action).toContain('const CONFIRMATION_PHRASE = "مطابقة أرصدة الحسابات"');
+    expect(action).toContain("ACCOUNT_BALANCE_REBUILT_FROM_POSTED_LEDGER");
+    expect(action).toContain("ACCOUNT_BALANCE_SET_FROM_EXCEL_BASELINE");
+    expect(action).toContain("tx.accountBalanceAdjustment.create");
+    expect(action).toContain('invoiceId: transaction.invoiceId');
+    expect(modal).toContain("إعادة احتساب ومطابقة الأرصدة");
+    expect(modal).toContain("parseAccountImportMatrix");
+    expect(modal).toContain("confirmation.trim() === CONFIRMATION_PHRASE");
+  });
 });
