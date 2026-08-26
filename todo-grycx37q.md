@@ -257,4 +257,5 @@
 - [x] Implement tenant-scoped manager/admin credit-limit override for registered customers while preserving the strict walk-in prohibition.
 - [x] Add POS manager override guidance and retain blocking feedback for unauthorized users.
 - [x] Add manager credit-override authorization and audit regressions; complete full suite, typecheck, and production-build validation.
-- [ ] Deploy the manager credit override and obtain authenticated POS acceptance for an authorized over-limit sale and an unauthorized blocked sale.
+- [x] Deploy the manager credit override to production and verify the live health boundary.
+- [ ] Obtain authenticated POS acceptance for an authorized over-limit sale and an unauthorized blocked sale.
