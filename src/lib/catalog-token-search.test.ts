@@ -66,4 +66,13 @@ describe("Arabic-normalized catalog token search", () => {
     expect(service).toContain("searchCatalogProducts(query");
     expect(searchCatalogProducts("x5 كوعه", products).map((item) => item.id)).toEqual(["turbo-elbow"]);
   });
+
+  it("debounces Inventory query changes into a no-scroll URL replacement and clears the query without requiring Enter", () => {
+    const inventory = source("src/app/(app)/inventory/inventory-client.tsx");
+    expect(inventory).toContain("window.setTimeout(() => replaceSearchQuery(query), 220)");
+    expect(inventory).toContain('next.delete("page")');
+    expect(inventory).toContain('router.replace(`/inventory?${next.toString()}`, { scroll: false })');
+    expect(inventory).toContain("جارٍ تحديث النتائج…");
+    expect(inventory).toContain('replaceSearchQuery("")');
+  });
 });

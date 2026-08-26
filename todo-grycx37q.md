@@ -245,3 +245,7 @@
 - [x] Trace the deployed POS and Inventory query path for the confirmed non-contiguous search failure «كوعه x5».
 - [x] Correct normalized server-side candidate retrieval so every token can match non-contiguously and in reverse order.
 - [ ] Add forward/reverse token-search regressions at the query boundary; validate, deploy, and obtain authenticated acceptance.
+- [x] Audit Inventory query state, URL navigation, pagination reset, and visible loading behavior for live catalog search.
+- [x] Implement debounced as-you-type URL-synchronized Inventory search without requiring form submission.
+- [x] Add immediate clear and responsive search feedback while retaining quick-filter state.
+- [ ] Add live-search regressions; validate, deploy, and obtain authenticated acceptance for كوعه x5.

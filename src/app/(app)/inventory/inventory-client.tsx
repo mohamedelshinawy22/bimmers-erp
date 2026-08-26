@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   MapPin,
@@ -17,6 +17,7 @@ import {
   Trash2,
   Download,
   ChevronDown,
+  X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -98,6 +99,7 @@ export function InventoryClient({
   const [ledgerPart, setLedgerPart] = useState<PartRow | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(openPurchaseOnMount);
   const [query, setQuery] = useState(filters.query);
+  const [isSearchPending, startSearchTransition] = useTransition();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [catalogPrintOpen, setCatalogPrintOpen] = useState(false);
@@ -124,6 +126,25 @@ export function InventoryClient({
   };
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  const replaceSearchQuery = (nextQuery: string) => {
+    const next = new URLSearchParams(params.toString());
+    const normalizedQuery = nextQuery.trim();
+    if (normalizedQuery) next.set("q", normalizedQuery);
+    else next.delete("q");
+    next.delete("page");
+    startSearchTransition(() => router.replace(`/inventory?${next.toString()}`, { scroll: false }));
+  };
+
+  useEffect(() => {
+    setQuery(filters.query);
+  }, [filters.query]);
+
+  useEffect(() => {
+    if (query.trim() === filters.query.trim()) return;
+    const timer = window.setTimeout(() => replaceSearchQuery(query), 220);
+    return () => window.clearTimeout(timer);
+  }, [query, filters.query]);
 
   const pushParams = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString());
@@ -190,16 +211,18 @@ export function InventoryClient({
             className="relative md:col-span-2"
             onSubmit={(e) => {
               e.preventDefault();
-              pushParams({ q: query });
+              replaceSearchQuery(query);
             }}
           >
             <Search size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-bmw-muted" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="ابحث برقم OEM، الاسم، الباركود، أو رقم الماركة…"
-              className="pr-9"
+              placeholder="ابحث فورياً بالاسم أو OEM أو الباركود أو الماركة…"
+              className="pl-9 pr-9"
             />
+            {query ? <button type="button" onClick={() => { setQuery(""); replaceSearchQuery(""); }} aria-label="مسح بحث الكتالوج" className="absolute left-2 top-1/2 -translate-y-1/2 rounded p-1 text-bmw-muted transition-colors hover:bg-bmw-card hover:text-white"><X size={15} /></button> : null}
+            {isSearchPending ? <span className="absolute -bottom-4 right-0 text-[10px] text-bmw-blue">جارٍ تحديث النتائج…</span> : null}
           </form>
 
           <Select value={filters.chassis} onChange={(e) => pushParams({ chassis: e.target.value })}>
