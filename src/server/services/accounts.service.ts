@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma, type AccountType, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { money, num } from "@/lib/utils";
+import { matchesAccountBalanceDirection } from "../../lib/account-balance-direction";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 
 export interface AccountRow {
@@ -14,7 +15,7 @@ export interface AccountRow {
   taxNumber: string | null;
   creditLimit: number;
   currentBalance: number;
-  /** Positive number = the account owes the shop. */
+  /** Negative = the account owes the shop; positive = the shop owes the account. */
   debt: number;
   creditUtilizationPercent: number | null;
   defaultPriceTier: string;
@@ -52,9 +53,7 @@ export async function listAccounts(db: PrismaClient, options: {
   if (!options.includeInactive) and.push({ isActive: true });
   const baseWhere: Prisma.AccountWhereInput = and.length ? { AND: and } : {};
   const balanceFilter: AccountBalanceFilter = options.debtorsOnly ? "DEBIT" : options.balanceFilter ?? "ALL";
-  const receivableTypes: AccountType[] = ["CUSTOMER", "WORKSHOP_BMW"];
-  const payableTypes: AccountType[] = ["SUPPLIER"];
-  const balanceWhere: Prisma.AccountWhereInput = balanceFilter === "DEBIT" ? { type: { in: receivableTypes }, currentBalance: { lt: 0 } } : balanceFilter === "CREDIT" ? { type: { in: payableTypes }, currentBalance: { gt: 0 } } : balanceFilter === "ZERO" ? { currentBalance: { equals: 0 } } : {};
+  const balanceWhere: Prisma.AccountWhereInput = balanceFilter === "DEBIT" ? { currentBalance: { lt: 0 } } : balanceFilter === "CREDIT" ? { currentBalance: { gt: 0 } } : balanceFilter === "ZERO" ? { currentBalance: { equals: 0 } } : {};
   const where: Prisma.AccountWhereInput = balanceFilter === "ALL" ? baseWhere : { AND: [baseWhere, balanceWhere] };
 
   const [accounts, total, allScopedBalances, debitCount, creditCount, zeroCount] = await Promise.all([
@@ -67,8 +66,8 @@ export async function listAccounts(db: PrismaClient, options: {
     }),
     db.account.count({ where }),
     db.account.findMany({ where: baseWhere, select: { currentBalance: true, type: true } }),
-    db.account.count({ where: { AND: [baseWhere, { type: { in: receivableTypes }, currentBalance: { lt: 0 } }] } }),
-    db.account.count({ where: { AND: [baseWhere, { type: { in: payableTypes }, currentBalance: { gt: 0 } }] } }),
+    db.account.count({ where: { AND: [baseWhere, { currentBalance: { lt: 0 } }] } }),
+    db.account.count({ where: { AND: [baseWhere, { currentBalance: { gt: 0 } }] } }),
     db.account.count({ where: { AND: [baseWhere, { currentBalance: { equals: 0 } }] } }),
   ]);
 
@@ -78,12 +77,12 @@ export async function listAccounts(db: PrismaClient, options: {
     _count: { _all: true },
   });
   const openMap = new Map(openCounts.map((o) => [o.accountId, o._count._all]));
-  const displayedBalances = allScopedBalances.filter((account) => balanceFilter === "ALL" || (balanceFilter === "DEBIT" && receivableTypes.includes(account.type) && account.currentBalance.lt(0)) || (balanceFilter === "CREDIT" && payableTypes.includes(account.type) && account.currentBalance.gt(0)) || (balanceFilter === "ZERO" && account.currentBalance.eq(0)));
+  const displayedBalances = allScopedBalances.filter((account) => matchesAccountBalanceDirection(num(account.currentBalance), balanceFilter));
   const summary = displayedBalances.reduce((result, account) => {
     const balance = num(account.currentBalance);
-    if (receivableTypes.includes(account.type) && balance < 0) result.receivables += Math.abs(balance);
-    if (payableTypes.includes(account.type) && balance > 0) result.payables += balance;
-    if (receivableTypes.includes(account.type) || payableTypes.includes(account.type)) result.net += balance;
+    if (balance < 0) result.receivables += Math.abs(balance);
+    if (balance > 0) result.payables += balance;
+    result.net += balance;
     return result;
   }, { receivables: 0, payables: 0, net: 0, debitCount, creditCount, zeroCount });
 

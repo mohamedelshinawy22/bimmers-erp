@@ -180,3 +180,8 @@
 - [x] Define guarded tenant-scoped reconciliation modes that avoid accidental financial data corruption or double counting.
 - [x] Implement a secure Accounts balance reconciliation action and explicit confirmation interface.
 - [ ] Add reconciliation regression coverage, validate, deploy, and obtain authenticated acceptance before applying any live balance rewrite.
+- [x] Audit `/accounts` server list filters, summaries, and client direction labels against the current balance sign convention.
+- [x] Decouple debit, credit, and zero filtering plus counters from account type while preserving optional type tabs.
+- [x] Assess duplicate-account merge dependencies and define confirmation, tenant-scoping, and audit safeguards before any merge implementation.
+- [x] Implement a separately confirmed, audited duplicate-account merge workflow only after dependency safeguards are validated.
+- [ ] Add balance-filter regressions, validate, deploy, and obtain authenticated acceptance for customer and supplier cross-direction cases.

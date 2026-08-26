@@ -145,4 +145,25 @@ describe("interactive tenant action boundaries", () => {
     expect(modal).toContain("parseAccountImportMatrix");
     expect(modal).toContain("confirmation.trim() === CONFIRMATION_PHRASE");
   });
+
+  it("keeps account balance direction independent of account type and guards duplicate account consolidation", () => {
+    const service = source("src/server/services/accounts.service.ts");
+    const mergeAction = source("src/server/actions/account-merge.actions.ts");
+    const mergeModal = source("src/components/accounts/merge-duplicate-accounts-modal.tsx");
+    expect(service).toContain('balanceFilter === "DEBIT" ? { currentBalance: { lt: 0 } }');
+    expect(service).toContain('balanceFilter === "CREDIT" ? { currentBalance: { gt: 0 } }');
+    expect(service).toContain("matchesAccountBalanceDirection(num(account.currentBalance), balanceFilter)");
+    expect(service).not.toContain("type: { in: receivableTypes }");
+    expect(service).not.toContain("type: { in: payableTypes }");
+    expect(mergeAction).toContain('const tenant = await getTenantDbFromSession()');
+    expect(mergeAction).toContain("return tenant.run(async () => {");
+    expect(mergeAction).toContain('const CONFIRMATION_PHRASE = "دمج حسابين"');
+    expect(mergeAction).toContain('if (user.role !== "SUPER_ADMIN")');
+    expect(mergeAction).toContain("tx.invoice.updateMany");
+    expect(mergeAction).toContain("tx.treasuryTransaction.updateMany");
+    expect(mergeAction).toContain("tx.accountCheck.updateMany");
+    expect(mergeAction).toContain("DUPLICATE_ACCOUNT_MERGE_TARGET");
+    expect(mergeModal).toContain("دمج حسابين مكررين");
+    expect(mergeModal).toContain("confirmation.trim() === CONFIRMATION_PHRASE");
+  });
 });

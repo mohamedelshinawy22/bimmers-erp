@@ -24,6 +24,7 @@ import { SelectionActionToolbar } from "@/components/ui/selection-action-toolbar
 import { AccountImportModal } from "@/components/accounts/account-import-modal";
 import { AccountBalanceReconciliationModal } from "@/components/accounts/account-balance-reconciliation-modal";
 import { VoucherDetailsModal } from "@/components/treasury/voucher-details-modal";
+import { MergeDuplicateAccountsModal } from "@/components/accounts/merge-duplicate-accounts-modal";
 
 interface AccountsClientProps {
   rows: AccountRow[];
@@ -86,11 +87,12 @@ export function AccountsClient({
   const [exporting, setExporting] = useState(false);
   const [resettingExpenses, setResettingExpenses] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [mergeTargets, setMergeTargets] = useState<[AccountRow, AccountRow] | null>(null);
   const selectedAccounts = rows.filter((account) => selectedIds.includes(account.id));
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const displayedReceivables = rows.filter((account) => (account.type === "CUSTOMER" || account.type === "WORKSHOP_BMW") && account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
-  const displayedPayables = rows.filter((account) => account.type === "SUPPLIER" && account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
+  const displayedReceivables = rows.filter((account) => account.currentBalance < 0).reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  const displayedPayables = rows.filter((account) => account.currentBalance > 0).reduce((sum, account) => sum + account.currentBalance, 0);
   const displayedNet = displayedPayables - displayedReceivables;
   const exportExcel = async () => {
     setExporting(true);
@@ -193,7 +195,7 @@ export function AccountsClient({
         </CardContent>
       </Card>
 
-      <SelectionActionToolbar count={selectedAccounts.length} itemLabel="حساب" onEdit={canWrite && selectedAccounts.length === 1 ? () => setEditAccount(selectedAccounts[0] ?? null) : undefined} onDelete={canWrite ? () => setDeleteTarget(selectedAccounts) : undefined} deleteLabel="حذف نهائي" onClear={() => setSelectedIds([])} />
+      <SelectionActionToolbar count={selectedAccounts.length} itemLabel="حساب" onEdit={canWrite && selectedAccounts.length === 1 ? () => setEditAccount(selectedAccounts[0] ?? null) : undefined} onMerge={canForceCleanup && selectedAccounts.length === 2 ? () => setMergeTargets(selectedAccounts as [AccountRow, AccountRow]) : undefined} onDelete={canWrite ? () => setDeleteTarget(selectedAccounts) : undefined} deleteLabel="حذف نهائي" onClear={() => setSelectedIds([])} />
       <Card>
         <Table>
           <THead>
@@ -374,6 +376,7 @@ export function AccountsClient({
       {canWrite ? <AddAccountModal open={addOpen} onClose={() => setAddOpen(false)} /> : null}
       {importOpen ? <AccountImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); router.refresh(); }} /> : null}
       {reconcileOpen ? <AccountBalanceReconciliationModal onClose={() => setReconcileOpen(false)} onDone={() => { router.refresh(); }} /> : null}
+      {mergeTargets ? <MergeDuplicateAccountsModal accounts={mergeTargets} onClose={() => setMergeTargets(null)} onDone={() => { setMergeTargets(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {editAccount ? (
         <EditAccountModal key={editAccount.id} account={editAccount} canAdjustBalance={canAdjustBalance} onClose={() => setEditAccount(null)} />
       ) : null}
