@@ -267,8 +267,8 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 15, f
       AND: [
         ...filterConditions,
         ...(tokens.length ? [separatorInsensitiveIds.length && tokens.length === 1
-          ? { OR: [{ AND: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
-          : { AND: tokenConditions }] : []),
+          ? { OR: [{ OR: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
+          : { OR: tokenConditions }] : []),
       ],
     },
     select: {
@@ -291,7 +291,10 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 15, f
       compatibleEngines: { select: { engine: { select: { code: true } } } },
     },
     orderBy: [{ stockQuantity: "desc" }, { nameAr: "asc" }],
-    take: Math.max(limit * 8, 96),
+    // Candidate retrieval intentionally uses OR: the shared `searchCatalogProducts`
+    // post-filter below remains authoritative and requires every token. This avoids
+    // Prisma ILIKE candidate loss when words are non-contiguous or normalized differently.
+    take: Math.max(limit * 20, 300),
   });
 
   const matchingRows = tokens.length ? searchCatalogProducts(query, rows.map((row) => ({

@@ -58,4 +58,12 @@ describe("Arabic-normalized catalog token search", () => {
     expect(filterBar).toContain('label: "X5", value: "E70,F15,G05"');
     expect(filterBar).toContain("المتوفر بالمخزن فقط");
   });
+
+  it("uses broad per-token POS candidates before the shared all-token post-filter so word order cannot exclude a match", () => {
+    const service = source("src/server/services/parts.service.ts");
+    expect(service).toContain("{ OR: tokenConditions }");
+    expect(service).toContain("Candidate retrieval intentionally uses OR");
+    expect(service).toContain("searchCatalogProducts(query");
+    expect(searchCatalogProducts("x5 كوعه", products).map((item) => item.id)).toEqual(["turbo-elbow"]);
+  });
 });

@@ -242,3 +242,6 @@
 - [x] Harden catalog token matching for punctuation-separated Arabic and English product data across POS and Inventory.
 - [x] Add reusable POS and Inventory quick filters for chassis/model, active brand, and in-stock availability with one-click reset.
 - [ ] Add quick-filter and token-search regressions; validate, deploy, and obtain authenticated acceptance for كوعه x5.
+- [x] Trace the deployed POS and Inventory query path for the confirmed non-contiguous search failure «كوعه x5».
+- [x] Correct normalized server-side candidate retrieval so every token can match non-contiguously and in reverse order.
+- [ ] Add forward/reverse token-search regressions at the query boundary; validate, deploy, and obtain authenticated acceptance.
