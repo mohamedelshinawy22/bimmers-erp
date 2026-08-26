@@ -24,7 +24,7 @@ describe("dynamic Accounts workbook parser", () => {
       ["LEGACY-10", "ورشة شمال", 0, 0, "ورشة BMW", "WRK-010", "01234567890"],
     ]);
 
-    expect(rows).toEqual([expect.objectContaining({ sourceRowNumber: 3, accountNumber: "WRK-010", name: "ورشة شمال", phone: "01234567890", type: "WORKSHOP_BMW", openingBalance: "0" })]);
+    expect(rows).toEqual([expect.objectContaining({ sourceRowNumber: 3, accountNumber: "WRK-010", name: "ورشة شمال", phone: "01234567890", type: "WORKSHOP_BMW", openingBalance: 0 })]);
   });
 
   it("defaults a blank or absent type column to customer while retaining direct opening balances", () => {
@@ -34,6 +34,21 @@ describe("dynamic Accounts workbook parser", () => {
       [1, "حساب بدون نوع", "ACC-900", "300", "01555555555"],
     ]);
 
-    expect(rows).toEqual([expect.objectContaining({ sourceRowNumber: 3, name: "حساب بدون نوع", accountNumber: "ACC-900", phone: "01555555555", type: "CUSTOMER", openingBalance: "300" })]);
+    expect(rows).toEqual([expect.objectContaining({ sourceRowNumber: 3, name: "حساب بدون نوع", accountNumber: "ACC-900", phone: "01555555555", type: "CUSTOMER", openingBalance: 300 })]);
+  });
+
+  it("uses a repeated second header for debit, credit, and phone mappings while excluding blank summary rows", () => {
+    const rows = parseAccountImportMatrix([
+      ["", "رقم الحساب", "اسم الحساب", "الرصيد الحالى", "الرصيد الحالى", "طبيعة الحساب", "كود الحساب", "بيانات الاتصال"],
+      ["", "رقم الحساب", "اسم الحساب", "عليه - مدين", "له - دائن", "طبيعة الحساب", "كود الحساب", "موبايل"],
+      ["1", "10", "عميل نقدي", "125.50", "0.00", "عميل", "", "01000000000"],
+      ["2", "20", "مورد قطع", "0.00", "88.25", "مورد", "SUP-20", ""],
+      ["", "", "", "100415", "0", "", "", ""],
+    ]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({ sourceRowNumber: 3, accountNumber: "10", phone: "01000000000", type: "CUSTOMER", openingBalance: -125.5 }),
+      expect.objectContaining({ sourceRowNumber: 4, accountNumber: "SUP-20", phone: "", type: "SUPPLIER", openingBalance: 88.25 }),
+    ]);
   });
 });

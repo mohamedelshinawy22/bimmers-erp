@@ -17,7 +17,7 @@ export type ParsedAccountImportRow = {
 };
 
 type FieldName = keyof Omit<ParsedAccountImportRow, "sourceRowNumber">;
-type ColumnMap = Partial<Record<FieldName | "debit" | "credit", number>>;
+type ColumnMap = Partial<Record<FieldName | "code" | "debit" | "credit", number>>;
 
 const normalizeHeader = (value: unknown) => String(value ?? "")
   .trim()
@@ -27,8 +27,9 @@ const normalizeHeader = (value: unknown) => String(value ?? "")
   .replace(/ة/g, "ه")
   .replace(/[^\p{L}\p{N}]/gu, "");
 
-const aliases: Record<FieldName | "debit" | "credit", string[]> = {
-  accountNumber: ["كودالحساب", "رقمالحساب", "رقمالعميل", "رقمالمورد", "الكود", "accountcode", "accountnumber", "code"],
+const aliases: Record<FieldName | "code" | "debit" | "credit", string[]> = {
+  accountNumber: ["رقمالحساب", "رقمالعميل", "رقمالمورد", "accountnumber"],
+  code: ["كودالحساب", "الكود", "accountcode", "code"],
   name: ["اسمالحساب", "اسمالعميل", "اسمالمورد", "الاسم", "العميل", "المورد", "name", "accountname", "customername", "suppliername"],
   type: ["طبيعهالحساب", "نوعالحساب", "النوع", "التصنيف", "type", "accounttype", "classification"],
   phone: ["موبايل", "رقمالهاتف", "التليفون", "الهاتف", "الموبايل", "mobile", "phone"],
@@ -65,17 +66,16 @@ function isHeaderContinuation(row: unknown[], nameColumn?: number, accountNumber
   if (!row.length) return false;
   const headerCells = row.map(normalizeHeader);
   const headerMatches = headerCells.filter((cell) => Object.values(aliases).some((values) => hasAlias(cell, values))).length;
+  const hasBalanceSubheader = headerCells.some((cell) => hasAlias(cell, aliases.debit) || hasAlias(cell, aliases.credit));
   const hasDataIdentifier = Boolean(text(getCell(row, nameColumn)) || text(getCell(row, accountNumberColumn)));
-  return headerMatches > 0 && !hasDataIdentifier;
+  return headerMatches > 0 && (!hasDataIdentifier || hasBalanceSubheader);
 }
 
 function resolveColumns(header: unknown[], continuation: unknown[] | null): ColumnMap {
   const labels = header.map((cell, index) => [normalizeHeader(cell), continuation ? normalizeHeader(continuation[index]) : ""].filter(Boolean).join(" "));
   const map: ColumnMap = {};
   for (const [field, candidates] of Object.entries(aliases) as Array<[keyof ColumnMap, string[]]>) {
-    const column = field === "accountNumber"
-      ? candidates.map((candidate) => labels.findIndex((label) => label === candidate || label.includes(candidate))).find((index) => index >= 0) ?? -1
-      : labels.findIndex((label) => hasAlias(label, candidates));
+    const column = labels.findIndex((label) => hasAlias(label, candidates));
     if (column >= 0) map[field] = column;
   }
   return map;
@@ -103,13 +103,13 @@ export function parseAccountImportMatrix(matrix: unknown[][]): ParsedAccountImpo
 
   return matrix.slice(firstDataRowIndex).flatMap((record, offset) => {
     const name = text(getCell(record, columns.name));
-    const accountNumber = text(getCell(record, columns.accountNumber));
+    const accountNumber = text(getCell(record, columns.code)) || text(getCell(record, columns.accountNumber));
     const phone = text(getCell(record, columns.phone));
     const debit = parseImportNumber(getCell(record, columns.debit)) ?? 0;
     const credit = parseImportNumber(getCell(record, columns.credit)) ?? 0;
-    const directBalance = getCell(record, columns.openingBalance);
-    const hasValues = [name, accountNumber, phone, text(directBalance), text(getCell(record, columns.debit)), text(getCell(record, columns.credit))].some(Boolean);
-    if (!hasValues || isSummaryName(name)) return [];
+    const directBalance = parseImportNumber(getCell(record, columns.openingBalance)) ?? 0;
+    const hasValues = [name, accountNumber, phone, directBalance, debit, credit].some(Boolean);
+    if (!name || !hasValues || isSummaryName(name)) return [];
 
     return [{
       sourceRowNumber: firstDataRowIndex + offset + 1,
@@ -123,7 +123,7 @@ export function parseAccountImportMatrix(matrix: unknown[][]): ParsedAccountImpo
       category: text(getCell(record, columns.category)),
       creditLimit: text(getCell(record, columns.creditLimit)),
       defaultPriceTier: /جمله|wholesale/i.test(text(getCell(record, columns.defaultPriceTier))) ? "WHOLESALE" : "RETAIL",
-      openingBalance: debit > 0 ? -debit : credit > 0 ? credit : text(directBalance),
+      openingBalance: debit > 0 ? -debit : credit > 0 ? credit : directBalance,
       isActive: text(getCell(record, columns.isActive)) || "true",
     }];
   });

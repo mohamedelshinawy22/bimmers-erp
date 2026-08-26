@@ -173,3 +173,6 @@
 - [x] Audit the existing accounts Excel parser and workbook header assumptions.
 - [x] Add dynamic Arabic header detection, index-column skipping, and safe account-type/balance fallbacks.
 - [ ] Add flexible account-workbook regression coverage, validate, deploy, and obtain authenticated import acceptance.
+- [x] Inspect the supplied الحسابات2.xlsx dual-header layout and record parser output/counts.
+- [x] Refine Accounts preview labels, code-or-phone fallback, and numeric balance rendering from the supplied workbook evidence.
+- [ ] Add supplied-workbook regression coverage, validate, deploy, and obtain authenticated 48-account import acceptance.
