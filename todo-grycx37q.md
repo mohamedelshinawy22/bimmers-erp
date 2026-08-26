@@ -230,3 +230,7 @@
 - [x] Implement tenant-scoped authorized editing of product purchase/average cost with explicit audit metadata.
 - [x] Update the Inventory product edit modal with a validated editable purchase-cost input and manager/admin guidance.
 - [ ] Add purchase-cost validation, authorization, and audit regressions; validate, deploy, and obtain authenticated acceptance.
+- [x] Audit stock-ledger row financial mapping and footer totals by movement type and direction.
+- [x] Correct purchase-cost and sales-price attribution so each appears only in its designated ledger columns.
+- [x] Correct ledger footer totals for incoming purchase cost and outgoing sales proceeds.
+- [ ] Add stock-ledger financial mapping and aggregation regressions; validate, deploy, and obtain authenticated acceptance for بلف كمبروسر f02.

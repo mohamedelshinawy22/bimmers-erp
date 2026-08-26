@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { money, num, sanitizeOemForSearch } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
+import { mapStockLedgerFinancials } from "@/lib/stock-ledger-financials";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
 
 /** Plain-JSON shape safe to hand to client components (no Decimal instances). */
@@ -343,18 +344,28 @@ export async function getStockLedger(db: PartsDb, partId: string, limit = 100) {
       invoice: { select: { id: true, invoiceNumber: true, type: true, isVoided: true, account: { select: { name: true } }, items: { where: { partId }, select: { unitPrice: true, unitCostSnapshot: true, totalPrice: true, quantity: true, binLocationSnapshot: true } } } },
     },
   });
-  return moves.map((m) => ({
+  return moves.map((m) => {
+    const item = m.invoice?.items[0];
+    const financials = mapStockLedgerFinancials({
+      reason: m.reason,
+      quantityDelta: m.quantityDelta,
+      movementUnitCost: num(m.unitCost),
+      invoiceUnitCost: item ? num(item.unitCostSnapshot) : null,
+      invoiceUnitSalePrice: item ? num(item.unitPrice) : null,
+      invoiceTotalSalePrice: item ? num(item.totalPrice) : null,
+    });
+    return {
     id: m.id,
     seq: m.seq.toString(),
     reason: m.reason,
     quantityDelta: m.quantityDelta,
     balanceAfter: m.balanceAfter,
-    unitCost: num(m.unitCost),
-    unitSalePrice: m.invoice?.items[0] ? num(m.invoice.items[0].unitPrice) : null,
-    totalSalePrice: m.invoice?.items[0] ? num(m.invoice.items[0].totalPrice) : null,
-    invoiceUnitCost: m.invoice?.items[0] ? num(m.invoice.items[0].unitCostSnapshot) : null,
-    invoiceTotalCost: m.invoice?.items[0] ? num(m.invoice.items[0].unitCostSnapshot) * m.invoice.items[0].quantity : null,
-    binCode: m.invoice?.items[0]?.binLocationSnapshot ?? m.part.binLocation?.fullCode ?? null,
+    unitCost: financials.purchaseUnitCost ?? 0,
+    purchaseUnitCost: financials.purchaseUnitCost,
+    totalCost: financials.totalCost,
+    unitSalePrice: financials.unitSalePrice,
+    totalSalePrice: financials.totalSalePrice,
+    binCode: item?.binLocationSnapshot ?? m.part.binLocation?.fullCode ?? null,
     performedBy: m.performedBy.fullName,
     invoiceId: m.invoice?.id ?? null,
     invoiceNumber: m.invoice?.invoiceNumber ?? null,
@@ -363,5 +374,6 @@ export async function getStockLedger(db: PartsDb, partId: string, limit = 100) {
     partyName: m.invoice?.account.name ?? null,
     note: m.note,
     createdAt: m.createdAt.toISOString(),
-  }));
+  };
+  });
 }
