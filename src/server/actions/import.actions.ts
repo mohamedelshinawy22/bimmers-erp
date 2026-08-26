@@ -16,6 +16,8 @@ import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { getCompanyProfile } from "@/server/services/settings.service";
 import { tenantFileToken } from "@/lib/import-export/workbook";
+import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
+import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
 
 const nonNegativeSpreadsheetNumber = z.preprocess(
   (value) => parseSpreadsheetNumber(value),
@@ -98,6 +100,7 @@ export async function executeInventoryImportAction(raw: ImportInput, options?: {
     const user = await requirePermission("inventory.import");
     const tenant = await getTenantDbFromSession();
     return tenant.run(async () => {
+    await ensureCatalogCompositeIdentity(tenant.prisma);
     const input = importSchema.parse(raw);
     const validation = input.rows.map((row, index) => ({ sourceRowNumber: index + 1, result: importRowSchema.safeParse(row) }));
     const invalidRows = validation
@@ -145,8 +148,8 @@ export async function executeInventoryImportAction(raw: ImportInput, options?: {
             const brand = await tx.brand.upsert({ where: { normalizedName: key(row.brand) }, update: {}, create: { name: row.brand, normalizedName: key(row.brand) }, select: { id: true } });
             // A shared OEM is valid across brands. A repeated row for the same
             // OEM + brand is idempotently skipped, preserving opening-stock safety.
-            const exists = await tx.partItem.findUnique({ where: { oemNumber_brandId: { oemNumber: row.oemNumber, brandId: brand.id } }, select: { id: true } });
-            if (exists) { chunkSkipped += 1; continue; }
+            const sameOemBrand = await tx.partItem.findMany({ where: { oemNumber: row.oemNumber, brandId: brand.id }, select: { oemNumber: true, nameAr: true } });
+            if (sameOemBrand.some((part) => hasSameCatalogIdentity(part, row))) { chunkSkipped += 1; continue; }
 
             const category = await tx.category.upsert({ where: { normalizedName: key(row.category) }, update: {}, create: { name: row.category, normalizedName: key(row.category) }, select: { id: true } });
             const chassisIds: string[] = [];

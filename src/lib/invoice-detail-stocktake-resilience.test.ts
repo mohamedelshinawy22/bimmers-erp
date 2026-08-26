@@ -35,7 +35,8 @@ describe("invoice detail and Excel stocktake resilience", () => {
     expect(action).toContain("adjustments.length > 1_000");
     expect(action).toContain("for (const batch of batches)");
     expect(action).toContain("تم اعتماد ${adjusted} تعديل سابق بأمان");
-    expect(action).toContain("بعد اختيار الصنف العام النشط");
+    expect(action).toContain("matchStocktakeProduct");
+    expect(action).toContain('matchedBy: match.matchedBy');
     expect(modal).toContain("Math.ceil(changed.length / 200)");
   });
 });

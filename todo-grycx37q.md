@@ -222,3 +222,7 @@
 - [x] Audit duplicate product matching in stocktake preview and execution batches.
 - [x] Aggregate duplicate matched stocktake rows by product ID before stocktake transactions while preserving count and audit semantics.
 - [ ] Add duplicate-stocktake regression coverage, validate, deploy, and obtain authenticated acceptance using البضاعه3.xlsx.
+- [x] Audit multi-brand OEM uniqueness, catalog import deduplication, and stocktake ambiguity resolution.
+- [x] Implement safe multi-brand catalog identity handling for OEM, brand, and normalized product name without corrupting existing tenant inventory.
+- [x] Implement OEM-plus-brand, OEM-plus-name, and name-plus-brand stocktake matching priorities before unique fallbacks.
+- [ ] Add multi-brand catalog-import and stocktake-matching regressions, validate, deploy, and obtain authenticated acceptance.

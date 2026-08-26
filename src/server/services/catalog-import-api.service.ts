@@ -6,6 +6,8 @@ import { parseImportNumber, normalizeImportText } from "@/lib/import-export/pars
 import { formatOemNumber, isSupportedOem, money, sanitizeAndNormalizeOem } from "@/lib/utils";
 import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
+import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
+import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
 
 type Db = PrismaClient;
 type ImportRow = { sourceRowNumber?: number; nameAr?: unknown; oemNumber?: unknown; barcode?: unknown; brand?: unknown; category?: unknown; chassis?: unknown; engine?: unknown; cost?: unknown; price?: unknown; quantity?: unknown; bin?: unknown };
@@ -43,8 +45,8 @@ function normalizedRow(raw: unknown, fallbackRow: number) {
 async function importRow(db: Db, userId: string, jobId: string, row: NonNullable<ReturnType<typeof normalizedRow>["row"]>) {
   return withTxRetry(() => db.$transaction(async (tx) => {
     const brand = await tx.brand.upsert({ where: { normalizedName: key(row.brand) }, update: {}, create: { name: row.brand, normalizedName: key(row.brand) }, select: { id: true } });
-    const duplicate = await tx.partItem.findUnique({ where: { oemNumber_brandId: { oemNumber: row.oemNumber, brandId: brand.id } }, select: { id: true } });
-    if (duplicate) return { created: 0, skipped: 1, barcodeCollision: 0 };
+    const sameOemBrand = await tx.partItem.findMany({ where: { oemNumber: row.oemNumber, brandId: brand.id }, select: { oemNumber: true, nameAr: true } });
+    if (sameOemBrand.some((part) => hasSameCatalogIdentity(part, row))) return { created: 0, skipped: 1, barcodeCollision: 0 };
     const category = await tx.category.upsert({ where: { normalizedName: key(row.category) }, update: {}, create: { name: row.category, normalizedName: key(row.category) }, select: { id: true } });
     const chassisIds: string[] = []; for (const code of new Set(codes(row.chassis))) chassisIds.push((await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id);
     const engineIds: string[] = []; for (const code of new Set(codes(row.engine))) engineIds.push((await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id);
@@ -71,6 +73,7 @@ async function importRow(db: Db, userId: string, jobId: string, row: NonNullable
 
 /** Direct API implementation: every source row has an independent short transaction. */
 export async function importCatalogApiChunk(db: Db, userId: string, raw: ApiInput): Promise<CatalogApiChunkResult> {
+  await ensureCatalogCompositeIdentity(db);
   const entries = Array.isArray(raw.rows) ? raw.rows.slice(0, MAX_ROWS_PER_CHUNK) : [];
   if (!entries.length) return { created: 0, skipped: 0, skippedInvalid: 0, barcodeCollisions: 0, failedRows: [] };
   const normalized = entries.map((row, index) => normalizedRow(row, index + 1));

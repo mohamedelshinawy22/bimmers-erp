@@ -26,6 +26,8 @@ import { adjustStock } from "@/server/services/stock.service";
 import { searchParts } from "@/server/services/parts.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
+import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
+import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
 
 function normalizeOptionalPartReference(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -50,6 +52,7 @@ export async function createPartAction(
   try {
     const user = await requirePermission("part.write");
     const tenant = await getTenantDbFromSession();
+    await tenant.run(() => ensureCatalogCompositeIdentity(tenant.prisma));
     const input = createPartSchema.parse({
       ...raw,
       binLocationId: normalizeOptionalPartReference(raw.binLocationId),
@@ -90,6 +93,8 @@ export async function createPartAction(
 
     const part = await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
       const buyPrice = money(input.buyPriceLast);
+      const sameOemBrand = await tx.partItem.findMany({ where: { oemNumber: input.oemNumber, brandId: masters.brandId }, select: { oemNumber: true, nameAr: true } });
+      if (sameOemBrand.some((candidate) => hasSameCatalogIdentity(candidate, input))) throw new BusinessRuleError("يوجد صنف مطابق بنفس OEM والماركة والاسم.");
       const created = await tx.partItem.create({
         data: {
           oemNumber: input.oemNumber,
@@ -159,6 +164,7 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
   try {
     const user = await requirePermission("part.write");
     const tenant = await getTenantDbFromSession();
+    await tenant.run(() => ensureCatalogCompositeIdentity(tenant.prisma));
     const input = updatePartSchema.parse({ ...raw, binLocationId: normalizeOptionalPartReference(raw.binLocationId) });
 
     await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
@@ -193,6 +199,8 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
         brandId = (await tx.brand.upsert({ where: { normalizedName }, update: {}, create: { name: input.brandName.trim(), normalizedName }, select: { id: true } })).id;
       }
       if (!brandId) throw new BusinessRuleError("يجب اختيار أو إضافة الماركة.");
+      const sameOemBrand = await tx.partItem.findMany({ where: { oemNumber: before.oemNumber, brandId, id: { not: input.id } }, select: { oemNumber: true, nameAr: true } });
+      if (sameOemBrand.some((candidate) => hasSameCatalogIdentity(candidate, { oemNumber: before.oemNumber, nameAr: input.nameAr }))) throw new BusinessRuleError("يوجد صنف آخر مطابق بنفس OEM والماركة والاسم.");
       let categoryId = input.categoryId;
       if (!categoryId && input.categoryName) {
         const normalizedName = input.categoryName.trim().toLocaleLowerCase("ar-EG");

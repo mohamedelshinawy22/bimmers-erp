@@ -11,7 +11,7 @@ const isSerialHeader = (raw: unknown) => SERIAL_HEADERS.has(normalizeImportHeade
 const isOemHeader = (header: string) => includesAny(header, ["oem", "رقموem", "رقمالقطعه", "كودالصنف", "كودالقطعه", "الباركود", "barcode", "partnumber", "partno", "itemcode", "code"]);
 const isStrictNameHeader = (header: string) => includesAny(header, ["اسمالصنف", "اسمالقطعه", "اسمالمنتج", "البيان", "الوصف", "description", "itemname", "productname"]);
 const isFallbackNameHeader = (header: string) => ["الصنف", "المنتج", "القطعه", "item", "product", "name"].includes(header);
-const isBrandHeader = (header: string) => includesAny(header, ["الماركه", "العلامهالتجاريه", "brand"]);
+const isBrandHeader = (header: string) => includesAny(header, ["الماركه", "العلامهالتجاريه", "الشركه", "brand", "company", "manufacturer"]);
 const isCategoryHeader = (header: string) => includesAny(header, ["التصنيف", "الفئه", "القسم", "category"]);
 const textValue = (value: unknown) => /[ء-يa-zA-Z]/.test(String(value ?? "").trim());
 const numberValue = (value: unknown) => /^\d+(?:[.,]\d+)?$/.test(String(value ?? "").trim());

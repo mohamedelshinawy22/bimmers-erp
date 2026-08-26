@@ -50,4 +50,11 @@ describe("physical stock count Excel parser", () => {
     ]);
     expect(parsed.rows).toEqual([expect.objectContaining({ nameAr: "فلتر زيت", brand: "عام", category: "زيوت", actualQuantity: 8 })]);
   });
+
+  it("recognizes company and manufacturer aliases as the brand context for composite matching", () => {
+    const byCompany = parsePhysicalCountMatrix([["OEM", "اسم الصنف", "الشركة", "الرصيد"], ["51757424887", "فانوس أمامي", "STERN", 3]]);
+    const byManufacturer = parsePhysicalCountMatrix([["OEM", "اسم الصنف", "Manufacturer", "الرصيد"], ["51757424887", "فانوس أمامي", "AVORTEX", 4]]);
+    expect(byCompany.rows).toEqual([expect.objectContaining({ brand: "STERN", actualQuantity: 3 })]);
+    expect(byManufacturer.rows).toEqual([expect.objectContaining({ brand: "AVORTEX", actualQuantity: 4 })]);
+  });
 });
