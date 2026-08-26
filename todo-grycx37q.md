@@ -195,3 +195,6 @@
 - [x] Fix invoice detail tenant loading and null-safe response serialization for item-ledger links.
 - [x] Implement guarded Excel physical-count matching, discrepancy preview, and audited stock quantity reconciliation.
 - [ ] Add invoice-details and physical-stock reconciliation regressions, validate, deploy, and obtain authenticated acceptance.
+- [ ] Inspect the supplied البضاعه2.xlsx header structure and reproduce the stocktake parser rejection.
+- [x] Expand physical stocktake quantity, OEM/code, barcode, and product-name header aliases while retaining safe header selection.
+- [ ] Add flexible stocktake-header regressions, validate, deploy, and obtain authenticated preview acceptance.

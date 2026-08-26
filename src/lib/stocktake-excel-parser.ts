@@ -4,15 +4,30 @@ import { normalizeSearchTerm } from "./search-utils";
 
 export type PhysicalCountRow = { sourceRowNumber: number; oemNumber: string; nameAr: string; actualQuantity: number | null };
 
-const has = (header: string, values: string[]) => values.some((value) => header.includes(value));
 const headerKey = (value: unknown) => normalizeSearchTerm(normalizeImportHeader(value)).numericNormalized;
+const includesAny = (header: string, aliases: string[]) => aliases.some((alias) => header.includes(alias));
+
+function quantityScore(header: string) {
+  if (includesAny(header, ["الكميهالفعليه", "الرصيدالفعلي", "actualquantity", "physicalquantity", "physicalcount", "countedquantity"])) return 3;
+  if (includesAny(header, ["الرصيد", "الكميه", "العدد", "المخزون", "رصيد", "كميه", "quantity", "qty", "stock", "count", "balance"])) return 2;
+  if (includesAny(header, ["فعلي", "actual"])) return 1;
+  return 0;
+}
+
+function findBestColumn(headers: string[], predicate: (header: string) => boolean) {
+  const index = headers.findIndex(predicate);
+  return index >= 0 ? index : -1;
+}
 
 export function resolveStocktakeHeaders(matrix: unknown[][]) {
   for (let index = 0; index < Math.min(5, matrix.length); index += 1) {
     const headers = (matrix[index] ?? []).map(headerKey);
-    const oem = headers.findIndex((header) => has(header, ["oem", "رقمالقطعه", "كودالقطعه", "رقمالصنف", "partnumber"]));
-    const name = headers.findIndex((header) => has(header, ["اسمالصنف", "اسمالقطعه", "الصنف", "الاسم", "name"]));
-    const actualQuantity = headers.findIndex((header) => has(header, ["الكميهالفعليه", "الرصيدالفعلي", "العدد", "actualquantity", "physicalquantity"]));
+    const oem = findBestColumn(headers, (header) => includesAny(header, ["oem", "رقموem", "رقمالقطعه", "كودالصنف", "كودالقطعه", "الباركود", "barcode", "partnumber", "itemcode", "code"]));
+    const name = findBestColumn(headers, (header) => includesAny(header, ["اسمالصنف", "الصنف", "اسمالقطعه", "البيان", "الوصف", "المنتج", "description", "product", "item", "name"]));
+    const actualQuantity = headers.reduce<{ index: number; score: number }>((best, header, columnIndex) => {
+      const score = quantityScore(header);
+      return score > best.score ? { index: columnIndex, score } : best;
+    }, { index: -1, score: 0 }).index;
     if (actualQuantity >= 0 && (oem >= 0 || name >= 0)) return { headerRowIndex: index, oem, name, actualQuantity };
   }
   return null;

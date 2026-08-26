@@ -20,6 +20,14 @@ describe("physical stock count Excel parser", () => {
   });
 
   it("requires a physical quantity header with either OEM or product name in the first five rows", () => {
-    expect(parsePhysicalCountMatrix([["اسم الصنف", "كمية"], ["صنف", 3]])).toMatchObject({ rows: [], headerRowIndex: null });
+    expect(parsePhysicalCountMatrix([["م", "كمية"], [1, 3]])).toMatchObject({ rows: [], headerRowIndex: null });
+  });
+
+  it("accepts flexible catalog headings such as balance, OEM, barcode, item, and description", () => {
+    const byBalance = parsePhysicalCountMatrix([["رقم OEM", "الصنف", "الرصيد"], ["11-22", "صنف رصيد", "7"]]);
+    expect(byBalance.rows).toEqual([expect.objectContaining({ oemNumber: "11-22", nameAr: "صنف رصيد", actualQuantity: 7 })]);
+
+    const byBarcode = parsePhysicalCountMatrix([["الباركود", "الوصف", "المخزون"], ["998877", "صنف باركود", 4]]);
+    expect(byBarcode.rows).toEqual([expect.objectContaining({ oemNumber: "998877", nameAr: "صنف باركود", actualQuantity: 4 })]);
   });
 });
