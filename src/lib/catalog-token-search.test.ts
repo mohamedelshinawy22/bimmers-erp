@@ -20,6 +20,11 @@ describe("Arabic-normalized catalog token search", () => {
     expect(searchCatalogProducts("كوعه avortex", products)).toEqual([]);
   });
 
+  it("treats automotive punctuation as token separators and finds an X5 match across Arabic product name and compatibility", () => {
+    expect(normalizeSearchTerm("كوعه/تربو+x5").normalized).toBe("كوعه تربو x5");
+    expect(searchCatalogProducts("كوعه x5", products).map((item) => item.id)).toEqual(["turbo-elbow"]);
+  });
+
   it("keeps common Arabic spelling variants discoverable from the server query candidates", () => {
     expect(normalizeSearchTerm("كوعه").variations).toContain("كوعة");
     expect(normalizeSearchTerm("إكص").variations).toContain("اكص");
@@ -36,6 +41,21 @@ describe("Arabic-normalized catalog token search", () => {
     expect(terminal).toContain('role="listbox"');
     expect(terminal).toContain('event.key === "ArrowDown"');
     expect(terminal).toContain('event.key === "Enter"');
-    expect(action).toContain("quickSearchParts(tenant.prisma, query, 15)");
+    expect(action).toContain("quickSearchParts(tenant.prisma, query, 15, filters)");
+  });
+
+  it("wires controlled automotive quick filters through POS, Inventory, and their tenant search boundaries", () => {
+    const service = source("src/server/services/parts.service.ts");
+    const pos = source("src/app/(app)/pos/pos-terminal.tsx");
+    const inventory = source("src/app/(app)/inventory/inventory-client.tsx");
+    const filterBar = source("src/components/catalog/quick-catalog-filter-bar.tsx");
+    expect(service).toContain("inStockOnly");
+    expect(service).toContain('split(",")');
+    expect(pos).toContain("QuickCatalogFilterBar");
+    expect(pos).toContain("searchPartsForPosAction(term, { brandId");
+    expect(inventory).toContain("QuickCatalogFilterBar");
+    expect(inventory).toContain("available: next.inStockOnly ? \"1\" : null");
+    expect(filterBar).toContain('label: "X5", value: "E70,F15,G05"');
+    expect(filterBar).toContain("المتوفر بالمخزن فقط");
   });
 });

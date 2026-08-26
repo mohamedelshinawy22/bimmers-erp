@@ -20,6 +20,7 @@ const inventoryExportSchema = z.object({
     engineCode: z.string().trim().max(60).optional(),
     category: z.string().trim().max(120).optional(),
     brandId: z.string().trim().max(80).optional(),
+    inStockOnly: z.boolean().optional(),
     lowStockOnly: z.boolean().optional(),
   }).optional(),
 });
@@ -57,10 +58,14 @@ export async function exportInventoryDataAction(raw: unknown): Promise<ActionRes
         ]),
       ] });
     }
-    if (filters.chassisCode) and.push({ compatibleChassis: { some: { chassis: { code: filters.chassisCode.toUpperCase() } } } });
+    if (filters.chassisCode) {
+      const chassisCodes = filters.chassisCode.split(",").map((code) => code.trim().toUpperCase()).filter(Boolean);
+      if (chassisCodes.length) and.push({ compatibleChassis: { some: { chassis: { code: { in: chassisCodes } } } } });
+    }
     if (filters.engineCode) and.push({ compatibleEngines: { some: { engine: { code: filters.engineCode.toUpperCase() } } } });
     if (filters.category) and.push({ category: filters.category });
     if (filters.brandId) and.push({ brandId: filters.brandId });
+    if (filters.inStockOnly) and.push({ stockQuantity: { gt: 0 } });
     if (input.scope === "OUT_OF_STOCK") and.push({ stockQuantity: 0 });
     if (input.scope === "CRITICAL" || (input.scope === "FILTERED" && filters.lowStockOnly)) and.push({ stockQuantity: { gt: 0 } });
 

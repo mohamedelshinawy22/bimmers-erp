@@ -32,6 +32,8 @@ export function normalizeSearchTerm(term: string): { normalized: string; numeric
     .replace(/[أإآٱ]/g, "ا")
     .replace(/[يى]/g, "ي")
     .replace(/ة/g, "ه")
+    .replace(/[ؤئ]/g, "ء")
+    .replace(/[\-_/\\.,:;+()]+/g, " ")
     .replace(/\s+/g, " ");
   const numericNormalized = normalized.replace(/[\s\-_/().]/g, "");
   const easternNormalized = translateDigits(numericNormalized, WESTERN_DIGITS, EASTERN_DIGITS);

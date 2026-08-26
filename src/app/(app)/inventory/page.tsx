@@ -18,6 +18,8 @@ interface PageProps {
     chassis?: string;
     engine?: string;
     category?: string;
+    brand?: string;
+    available?: string;
     lowStock?: string;
     page?: string;
     new?: string;
@@ -37,6 +39,8 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       const query = searchParams.q ?? "";
       const chassisCode = searchParams.chassis ?? "";
       const category = searchParams.category ?? "";
+      const brandId = searchParams.brand ?? "";
+      const inStockOnly = searchParams.available === "1";
       const lowStockOnly = searchParams.lowStock === "1";
       const canPurchase = can(user.role, "invoice.purchase");
 
@@ -46,6 +50,8 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       chassisCode: chassisCode || undefined,
       engineCode: searchParams.engine || undefined,
       category: category || undefined,
+      brandId: brandId || undefined,
+      inStockOnly,
       lowStockOnly,
       page,
       pageSize: 25,
@@ -69,7 +75,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       total={result.total}
       page={result.page}
       pageSize={result.pageSize}
-      filters={{ query, chassis: chassisCode, category, lowStock: lowStockOnly }}
+      filters={{ query, chassis: chassisCode, category, brandId, inStockOnly, lowStock: lowStockOnly }}
       options={{
         brands: serializeData(options.brands),
         chassis: serializeData(options.chassis),

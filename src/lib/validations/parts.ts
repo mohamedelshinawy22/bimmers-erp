@@ -122,10 +122,11 @@ export type AdjustStockInput = z.infer<typeof adjustStockSchema>;
 
 export const searchPartsSchema = z.object({
   query: z.string().trim().max(100).default(""),
-  chassisCode: z.string().trim().max(20).optional(),
+  chassisCode: z.string().trim().max(80).optional(),
   engineCode: z.string().trim().max(20).optional(),
   category: z.string().trim().max(80).optional(),
   brandId: optionalUuid,
+  inStockOnly: z.boolean().default(false),
   lowStockOnly: z.boolean().default(false),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),

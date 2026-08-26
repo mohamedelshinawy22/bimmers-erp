@@ -5,6 +5,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { canUseTreasury, getUserAccess, hasApplicationPermission, hasPermission } from "@/lib/user-permissions";
 import { getPosAccounts } from "@/server/services/accounts.service";
 import { getSetting } from "@/server/services/settings.service";
+import { getPartFormOptions } from "@/server/services/parts.service";
 import { PosTerminal } from "./pos-terminal";
 
 export const metadata = { title: "نقطة البيع" };
@@ -17,7 +18,7 @@ export default async function PosPage() {
   const access = await getUserAccess(user.id);
   if (!hasApplicationPermission(access, "invoice.sale")) redirect("/");
 
-  const [accounts, allTreasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter] =
+  const [accounts, allTreasuries, taxRateRaw, companyName, enforceCredit, allowNegative, receiptFooter, catalogOptions] =
     await Promise.all([
       getPosAccounts(tenant.prisma),
       tenant.prisma.treasury.findMany({
@@ -30,6 +31,7 @@ export default async function PosPage() {
       getSetting("ENFORCE_CREDIT_LIMIT", "true", tenant.prisma),
       getSetting("ALLOW_NEGATIVE_STOCK", "false", tenant.prisma),
       getSetting("INVOICE_FOOTER", "", tenant.prisma),
+      getPartFormOptions(tenant.prisma).catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
     ]);
 
   const treasuries = allTreasuries.filter((treasury) => canUseTreasury(access, treasury.id));
@@ -62,6 +64,7 @@ export default async function PosPage() {
         enforceCreditLimit={enforceCredit === "true"}
         allowNegativeStock={allowNegative === "true" && hasPermission(access, "canNegativeSell")}
         receiptFooter={receiptFooter}
+        catalogBrands={catalogOptions.brands}
       />
     </div>
   );

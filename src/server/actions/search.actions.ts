@@ -5,6 +5,13 @@ import { toActionError, ok, type ActionResult } from "@/lib/action-result";
 import { quickSearchParts, type PosPartRow } from "@/server/services/parts.service";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getAccountVehicles, searchPosAccounts, searchSupplierAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
+import { z } from "zod";
+
+const posPartSearchFiltersSchema = z.object({
+  brandId: z.string().trim().max(80).optional(),
+  chassisCode: z.string().trim().max(80).optional(),
+  inStockOnly: z.boolean().optional(),
+}).optional();
 
 /**
  * Thin authenticated wrapper so the POS can search on keystroke.
@@ -31,11 +38,12 @@ export async function searchSuppliersAction(query: string): Promise<ActionResult
   }
 }
 
-export async function searchPartsForPosAction(query: string): Promise<ActionResult<PosPartRow[]>> {
+export async function searchPartsForPosAction(query: string, rawFilters?: unknown): Promise<ActionResult<PosPartRow[]>> {
   try {
     await requirePermission("part.read");
     const tenant = await getTenantDbFromSession();
-    const rows = await tenant.run(() => quickSearchParts(tenant.prisma, query, 15));
+    const filters = posPartSearchFiltersSchema.parse(rawFilters);
+    const rows = await tenant.run(() => quickSearchParts(tenant.prisma, query, 15, filters));
     return ok(rows);
   } catch (error) {
     return toActionError(error, "searchPartsForPosAction");

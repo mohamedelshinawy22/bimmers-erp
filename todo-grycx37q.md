@@ -238,3 +238,7 @@
 - [x] Implement Arabic-normalized tokenized POS product search with accessible live dropdown navigation.
 - [x] Audit and fix legacy stock-ledger purchase-cost fallback from invoice item values when movement cost is absent or zero.
 - [ ] Add POS search and legacy ledger-cost fallback regressions; validate, deploy, and obtain authenticated acceptance.
+- [x] Audit shared catalog search normalization, POS search inputs, Inventory filtering, and tenant-provided brand/chassis options.
+- [x] Harden catalog token matching for punctuation-separated Arabic and English product data across POS and Inventory.
+- [x] Add reusable POS and Inventory quick filters for chassis/model, active brand, and in-stock availability with one-click reset.
+- [ ] Add quick-filter and token-search regressions; validate, deploy, and obtain authenticated acceptance for كوعه x5.

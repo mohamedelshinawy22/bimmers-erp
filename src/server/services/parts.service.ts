@@ -133,30 +133,44 @@ export async function searchParts(
   if (input.query) {
     const q = input.query.trim();
     const oemKey = sanitizeOemForSearch(q);
+    const tokens = searchTokens(q);
     // PostgreSQL comparison key removes visual separators in stored legacy OEMs too,
     // so 17 11-8 484 638, 17118484638, and 17/118/484638 resolve identically.
     const separatorInsensitiveIds = oemKey.length >= 2
       ? await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT 10000`)
       : [];
-    and.push({
-      OR: [
-        { oemNumber: { contains: oemKey, mode: "insensitive" } },
-        ...(separatorInsensitiveIds.length ? [{ id: { in: separatorInsensitiveIds.map((row) => row.id) } }] : []),
-        { nameAr: { contains: q } },
-        { nameEn: { contains: q, mode: "insensitive" } },
-        { brandPartNumber: { contains: q, mode: "insensitive" } },
-        { barcode: { equals: oemKey } },
-      ],
+    const tokenConditions: Prisma.PartItemWhereInput[] = tokens.map((token) => {
+      const tokenNormalized = normalizeSearchTerm(token);
+      const tokenOemKey = sanitizeOemForSearch(token);
+      return {
+        OR: [
+          { barcode: { equals: tokenNormalized.numericNormalized } },
+          { oemNumber: { contains: tokenOemKey || token, mode: "insensitive" } },
+          ...tokenNormalized.variations.flatMap((term) => [
+            { nameAr: { contains: term } },
+            { nameEn: { contains: term, mode: "insensitive" as const } },
+            { brandPartNumber: { contains: term, mode: "insensitive" as const } },
+            { brand: { name: { contains: term, mode: "insensitive" as const } } },
+            { compatibleChassis: { some: { chassis: { code: { contains: term, mode: "insensitive" as const } } } } },
+            { compatibleEngines: { some: { engine: { code: { contains: term, mode: "insensitive" as const } } } } },
+          ]),
+        ],
+      };
     });
+    and.push(separatorInsensitiveIds.length && tokens.length === 1
+      ? { OR: [{ AND: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
+      : { AND: tokenConditions });
   }
   if (input.chassisCode) {
-    and.push({ compatibleChassis: { some: { chassis: { code: input.chassisCode.toUpperCase() } } } });
+    const chassisCodes = input.chassisCode.split(",").map((code) => code.trim().toUpperCase()).filter(Boolean);
+    if (chassisCodes.length) and.push({ compatibleChassis: { some: { chassis: { code: { in: chassisCodes } } } } });
   }
   if (input.engineCode) {
     and.push({ compatibleEngines: { some: { engine: { code: input.engineCode.toUpperCase() } } } });
   }
   if (input.category) and.push({ category: input.category });
   if (input.brandId) and.push({ brandId: input.brandId });
+  if (input.inStockOnly) and.push({ stockQuantity: { gt: 0 } });
   if (input.lowStockOnly) {
     // Column-to-column comparison; Prisma's query builder cannot express it, so
     // it is pushed down as a raw filter. Printing deliberately expands this
@@ -214,11 +228,12 @@ function toPosRow(p: { id: string; oemNumber: string; nameAr: string; nameEn: st
   return { id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel, duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0, duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0, duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name] };
 }
 
-export async function quickSearchParts(db: PartsDb, query: string, limit = 15): Promise<PosPartRow[]> {
+export async function quickSearchParts(db: PartsDb, query: string, limit = 15, filters?: { brandId?: string; chassisCode?: string; inStockOnly?: boolean }): Promise<PosPartRow[]> {
   const { normalized, numericNormalized, variations } = normalizeSearchTerm(query);
   const oemKey = sanitizeOemForSearch(query);
   const tokens = searchTokens(query);
-  if (tokens.length === 0) return [];
+  const chassisCodes = (filters?.chassisCode ?? "").split(",").map((code) => code.trim().toUpperCase()).filter(Boolean);
+  if (tokens.length === 0 && !filters?.brandId && chassisCodes.length === 0 && !filters?.inStockOnly) return [];
   const separatorInsensitiveIds = oemKey.length >= 2
     ? await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT ${Math.max(limit * 8, 96)}`)
     : [];
@@ -240,13 +255,21 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 15): 
     };
   });
 
+  const filterConditions: Prisma.PartItemWhereInput[] = [
+    ...(filters?.brandId ? [{ brandId: filters.brandId }] : []),
+    ...(chassisCodes.length ? [{ compatibleChassis: { some: { chassis: { code: { in: chassisCodes } } } } }] : []),
+    ...(filters?.inStockOnly ? [{ stockQuantity: { gt: 0 } }] : []),
+  ];
   const rows = await db.partItem.findMany({
     where: {
       isActive: true,
       isDeleted: false,
-      ...(separatorInsensitiveIds.length && tokens.length === 1
-        ? { OR: [{ AND: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
-        : { AND: tokenConditions }),
+      AND: [
+        ...filterConditions,
+        ...(tokens.length ? [separatorInsensitiveIds.length && tokens.length === 1
+          ? { OR: [{ AND: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
+          : { AND: tokenConditions }] : []),
+      ],
     },
     select: {
       id: true,
@@ -271,11 +294,11 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 15): 
     take: Math.max(limit * 8, 96),
   });
 
-  const matchingRows = searchCatalogProducts(query, rows.map((row) => ({
+  const matchingRows = tokens.length ? searchCatalogProducts(query, rows.map((row) => ({
     ...row,
     brandName: row.brand.name,
     compatibility: [...row.compatibleChassis.map((entry) => entry.chassis.code), ...row.compatibleEngines.map((entry) => entry.engine.code)].join(" "),
-  })), limit);
+  })), limit) : rows.slice(0, limit);
   const duplicates = await getDuplicateMetadata(db, matchingRows);
   return matchingRows.map((row) => toPosRow(row, duplicates));
 }

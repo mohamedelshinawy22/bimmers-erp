@@ -35,6 +35,7 @@ import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { POSAccountCombobox } from "./components/pos-account-combobox";
 import { OemCode } from "@/components/inventory/oem-code";
 import { searchTokens } from "@/lib/catalog-token-search";
+import { QuickCatalogFilterBar, type QuickCatalogFilterState } from "@/components/catalog/quick-catalog-filter-bar";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -84,6 +85,7 @@ interface PosTerminalProps {
   enforceCreditLimit: boolean;
   allowNegativeStock: boolean;
   receiptFooter: string;
+  catalogBrands?: Array<{ id: string; name: string }>;
   initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; vehicleId: string | null; paymentMethod: PaymentMethod; discountAmount: number; paidAmount: number; notes: string | null; lines: CartLine[] };
 }
 
@@ -110,6 +112,7 @@ export function PosTerminal({
   enforceCreditLimit,
   allowNegativeStock,
   receiptFooter,
+  catalogBrands = [],
   initialDraft,
 }: PosTerminalProps) {
   const router = useRouter();
@@ -118,6 +121,7 @@ export function PosTerminal({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PosPartRow[]>([]);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const [catalogFilters, setCatalogFilters] = useState<QuickCatalogFilterState>({ chassis: "", brandId: "", inStockOnly: false });
   const [searching, setSearching] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
 
@@ -191,7 +195,7 @@ export function PosTerminal({
   /* ── Search (debounced, out-of-order safe) ──────────────────────────────── */
   useEffect(() => {
     const term = query.trim();
-    if (term.length < 1) {
+    if (term.length < 1 && !catalogFilters.chassis && !catalogFilters.brandId && !catalogFilters.inStockOnly) {
       setResults([]);
       setActiveResultIndex(0);
       setSearching(false);
@@ -200,7 +204,7 @@ export function PosTerminal({
     setSearching(true);
     const id = ++requestId.current;
     const timer = setTimeout(async () => {
-      const result = await searchPartsForPosAction(term);
+      const result = await searchPartsForPosAction(term, { brandId: catalogFilters.brandId || undefined, chassisCode: catalogFilters.chassis || undefined, inStockOnly: catalogFilters.inStockOnly });
       // Discard stale responses so fast typing can't rewind the list.
       if (id !== requestId.current) return;
       setSearching(false);
@@ -208,7 +212,7 @@ export function PosTerminal({
       else setError(result.error);
     }, 220);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [catalogFilters, query]);
 
   /* ── Cart operations ────────────────────────────────────────────────────── */
   const addToCart = useCallback(
@@ -452,6 +456,13 @@ export function PosTerminal({
                 </button>
               ) : null}
             </div>
+
+            <QuickCatalogFilterBar
+              value={catalogFilters}
+              brands={catalogBrands}
+              onChange={setCatalogFilters}
+              onClear={() => { setQuery(""); setCatalogFilters({ chassis: "", brandId: "", inStockOnly: false }); setResults([]); setActiveResultIndex(0); searchRef.current?.focus(); }}
+            />
 
             {searching ? <p className="text-xs text-bmw-muted">جاري البحث…</p> : null}
 

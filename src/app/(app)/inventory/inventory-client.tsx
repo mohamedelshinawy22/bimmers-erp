@@ -41,13 +41,14 @@ import type { CompanyProfile } from "@/server/services/settings.service";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { PartCatalogPrintDocument } from "@/components/print/templates/universal-document-templates";
 import type { PartCatalogPrintData } from "@/components/print/universal-print-types";
+import { QuickCatalogFilterBar } from "@/components/catalog/quick-catalog-filter-bar";
 
 interface InventoryClientProps {
   rows: PartRow[];
   total: number;
   page: number;
   pageSize: number;
-  filters: { query: string; chassis: string; category: string; lowStock: boolean };
+  filters: { query: string; chassis: string; category: string; brandId: string; inStockOnly: boolean; lowStock: boolean };
   options: {
     brands: Array<{ id: string; name: string; isOem: boolean }>;
     chassis: ChassisOption[];
@@ -115,7 +116,7 @@ export function InventoryClient({
       return;
     }
     setCatalogPrintLoading(true);
-    const result = await getPartsForPrintAction({ query: filters.query, chassisCode: filters.chassis || undefined, category: filters.category || undefined, lowStockOnly: filters.lowStock });
+    const result = await getPartsForPrintAction({ query: filters.query, chassisCode: filters.chassis || undefined, category: filters.category || undefined, brandId: filters.brandId || undefined, inStockOnly: filters.inStockOnly, lowStockOnly: filters.lowStock });
     setCatalogPrintLoading(false);
     if (!result.success) { setCatalogPrintError(result.error); return; }
     setCatalogPrintData(toCatalogPrintData(result.data.rows, company, "كتالوج وقائمة أسعار الأصناف المصفاة"));
@@ -227,7 +228,7 @@ export function InventoryClient({
             >
               <SlidersHorizontal size={14} /> النواقص الحرجة فقط
             </Button>
-            {(filters.query || filters.chassis || filters.category || filters.lowStock) && (
+            {(filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock) && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -239,6 +240,14 @@ export function InventoryClient({
                 مسح الفلاتر
               </Button>
             )}
+          </div>
+          <div className="md:col-span-4">
+            <QuickCatalogFilterBar
+              value={{ chassis: filters.chassis, brandId: filters.brandId, inStockOnly: filters.inStockOnly }}
+              brands={options.brands}
+              onChange={(next) => pushParams({ chassis: next.chassis, brand: next.brandId, available: next.inStockOnly ? "1" : null })}
+              onClear={() => { setQuery(""); router.push("/inventory"); }}
+            />
           </div>
         </CardContent>
       </Card>
@@ -266,11 +275,11 @@ export function InventoryClient({
             {rows.length === 0 ? (
               <EmptyState
                 colSpan={permissions.canViewCost ? 12 : 11}
-                title={filters.query || filters.chassis || filters.category || filters.lowStock ? "لا توجد أصناف مطابقة" : "لا توجد أصناف في الكتالوج بعد"}
-                description={filters.query || filters.chassis || filters.category || filters.lowStock ? "عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج." : "ابدأ بإدخال صنف جديد أو استيراد قائمة البضاعة من ملف إكسيل."}
+                title={filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock ? "لا توجد أصناف مطابقة" : "لا توجد أصناف في الكتالوج بعد"}
+                description={filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock ? "عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج." : "ابدأ بإدخال صنف جديد أو استيراد قائمة البضاعة من ملف إكسيل."}
                 icon={<Boxes size={32} />}
               >
-                {!filters.query && !filters.chassis && !filters.category && !filters.lowStock && permissions.canWrite ? <>
+                {!filters.query && !filters.chassis && !filters.category && !filters.brandId && !filters.inStockOnly && !filters.lowStock && permissions.canWrite ? <>
                   <Button size="sm" onClick={() => setAddOpen(true)}><PackagePlus size={14} /> إدخال صنف جديد</Button>
                   <Button size="sm" variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={14} /> استيراد بضاعة من إكسيل</Button>
                 </> : null}
@@ -504,7 +513,7 @@ function InventoryExportMenu({ filters }: { filters: InventoryClientProps["filte
     setError(null);
     startTransition(async () => {
       try {
-        const result = await exportInventoryDataAction({ scope, format, filters: { query: filters.query || undefined, chassisCode: filters.chassis || undefined, category: filters.category || undefined, lowStockOnly: filters.lowStock } });
+        const result = await exportInventoryDataAction({ scope, format, filters: { query: filters.query || undefined, chassisCode: filters.chassis || undefined, category: filters.category || undefined, brandId: filters.brandId || undefined, inStockOnly: filters.inStockOnly, lowStockOnly: filters.lowStock } });
         if (!result.success) { setError(result.error); return; }
         const anchor = document.createElement("a");
         anchor.href = `data:${result.data.mimeType};base64,${result.data.base64}`;
