@@ -11,11 +11,13 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { lockPartsForUpdate, recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { writeAudit } from "@/lib/audit";
+import { consolidateStocktakeAdjustments } from "@/lib/stocktake-adjustments";
 
 const CONFIRMATION_PHRASE = "تسوية جرد المخزون";
 const sourceRowSchema = z.object({ sourceRowNumber: z.number().int().positive(), oemNumber: z.string().trim().max(200).default(""), nameAr: z.string().trim().max(300).default(""), brand: z.string().trim().max(200).default(""), category: z.string().trim().max(200).default(""), actualQuantity: z.number().finite().nullable() });
 const previewSchema = z.object({ rows: z.array(sourceRowSchema).min(1).max(5_000) });
-const executeSchema = z.object({ adjustments: z.array(z.object({ partId: z.string().uuid(), sourceRowNumber: z.number().int().positive(), actualQuantity: z.number().int().min(0).max(9_999_999) })).min(1).max(1_000), reason: z.string().trim().min(5, "سبب تسوية الجرد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.").max(500), confirmation: z.string().trim() });
+const stocktakeAdjustmentSchema = z.object({ partId: z.string().uuid(), sourceRowNumber: z.number().int().positive(), sourceRowNumbers: z.array(z.number().int().positive()).max(5_000).optional(), actualQuantity: z.number().int().min(0).max(9_999_999) });
+const executeSchema = z.object({ adjustments: z.array(stocktakeAdjustmentSchema).min(1).max(5_000), reason: z.string().trim().min(5, "سبب تسوية الجرد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.").max(500), confirmation: z.string().trim() });
 const STOCKTAKE_BATCH_SIZE = 200;
 
 type PreviewRow = { sourceRowNumber: number; oemNumber: string; nameAr: string; brand: string; category: string; actualQuantity: number | null; status: "MATCHED" | "UNMATCHED" | "AMBIGUOUS" | "INVALID"; message: string; partId: string | null; matchedBy: "OEM" | "NAME" | null; bookQuantity: number | null; delta: number | null; partName: string | null; partOemNumber: string | null };
@@ -79,10 +81,11 @@ export async function executeStocktakeReconciliationAction(raw: unknown): Promis
     requireStocktakeAdministrator(user.role);
     const input = executeSchema.parse(raw);
     if (input.confirmation !== CONFIRMATION_PHRASE) throw new BusinessRuleError(`اكتب عبارة التأكيد التالية كاملة: ${CONFIRMATION_PHRASE}`);
-    if (new Set(input.adjustments.map((row) => row.partId)).size !== input.adjustments.length) throw new BusinessRuleError("يتكرر صنف واحد في دفعة الجرد. أزل الصف المكرر ثم أعد المعاينة.");
+    const adjustments = consolidateStocktakeAdjustments(input.adjustments);
+    if (adjustments.length > 1_000) throw new BusinessRuleError("يتجاوز عدد الأصناف الفريدة المطلوب تسويتها الحد الآمن وهو 1000 صنف. قسّم الملف إلى دفعات أصغر.");
     const tenant = await getTenantDbFromSession();
     let adjusted = 0; let unchanged = 0; let batchDelta = 0; let completedBatches = 0;
-    const batches = Array.from({ length: Math.ceil(input.adjustments.length / STOCKTAKE_BATCH_SIZE) }, (_, index) => input.adjustments.slice(index * STOCKTAKE_BATCH_SIZE, (index + 1) * STOCKTAKE_BATCH_SIZE));
+    const batches = Array.from({ length: Math.ceil(adjustments.length / STOCKTAKE_BATCH_SIZE) }, (_, index) => adjustments.slice(index * STOCKTAKE_BATCH_SIZE, (index + 1) * STOCKTAKE_BATCH_SIZE));
     for (const batch of batches) {
       try {
         const batchResult = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
@@ -95,8 +98,9 @@ export async function executeStocktakeReconciliationAction(raw: unknown): Promis
             const delta = row.actualQuantity - part.stockQuantity;
             if (delta === 0) { batchUnchanged += 1; continue; }
             await tx.partItem.update({ where: { id: part.id }, data: { stockQuantity: row.actualQuantity } });
-            await recordStockMovement(tx, { partId: part.id, reason: "STOCKTAKE", quantityDelta: delta, balanceAfter: row.actualQuantity, unitCost: money(part.buyPriceAvg), performedById: user.id, note: `جرد فعلي عبر Excel — صف ${row.sourceRowNumber}: ${input.reason}` });
-            await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "UPDATE", oldData: { stockQuantity: part.stockQuantity }, newData: { stockQuantity: row.actualQuantity, event: "EXCEL_STOCKTAKE_RECONCILIATION", sourceRowNumber: row.sourceRowNumber, delta, reason: input.reason }, performedBy: user.id });
+            const sourceRows = row.sourceRowNumbers.join("، ");
+            await recordStockMovement(tx, { partId: part.id, reason: "STOCKTAKE", quantityDelta: delta, balanceAfter: row.actualQuantity, unitCost: money(part.buyPriceAvg), performedById: user.id, note: `جرد فعلي عبر Excel — الصفوف ${sourceRows}: ${input.reason}` });
+            await writeAudit(tx, { tableName: "PartItem", recordId: part.id, action: "UPDATE", oldData: { stockQuantity: part.stockQuantity }, newData: { stockQuantity: row.actualQuantity, event: "EXCEL_STOCKTAKE_RECONCILIATION", sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers, delta, reason: input.reason }, performedBy: user.id });
             batchAdjusted += 1; batchNetDelta += delta;
           }
           return { batchAdjusted, batchUnchanged, batchNetDelta };

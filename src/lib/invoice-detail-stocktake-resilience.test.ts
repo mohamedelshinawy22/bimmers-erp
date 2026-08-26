@@ -31,7 +31,8 @@ describe("invoice detail and Excel stocktake resilience", () => {
     expect(modal).toContain("downloadUnmatchedReport");
     expect(modal).toContain("تسوية الأصناف المتطابقة فقط");
     expect(action).toContain("const STOCKTAKE_BATCH_SIZE = 200");
-    expect(action).toContain("max(1_000)");
+    expect(action).toContain("max(5_000)");
+    expect(action).toContain("adjustments.length > 1_000");
     expect(action).toContain("for (const batch of batches)");
     expect(action).toContain("تم اعتماد ${adjusted} تعديل سابق بأمان");
     expect(action).toContain("بعد اختيار الصنف العام النشط");

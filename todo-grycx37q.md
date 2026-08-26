@@ -219,3 +219,6 @@
 - [x] Audit OEM normalization and validation across Inventory import, API chunks, schemas, and product entry paths.
 - [x] Add shared permissive OEM sanitization including Excel trailing-zero float cleanup and invisible-character removal.
 - [ ] Add OEM punctuation and Excel numeric-code regressions, validate, deploy, and obtain authenticated import acceptance.
+- [x] Audit duplicate product matching in stocktake preview and execution batches.
+- [x] Aggregate duplicate matched stocktake rows by product ID before stocktake transactions while preserving count and audit semantics.
+- [ ] Add duplicate-stocktake regression coverage, validate, deploy, and obtain authenticated acceptance using البضاعه3.xlsx.

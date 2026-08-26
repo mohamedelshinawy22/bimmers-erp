@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { formatInt, formatOemNumber } from "@/lib/utils";
 import { parsePhysicalCountMatrix, type PhysicalCountRow } from "@/lib/stocktake-excel-parser";
+import { consolidateStocktakeAdjustments } from "@/lib/stocktake-adjustments";
 import { executeStocktakeReconciliationAction, previewStocktakeReconciliationAction } from "@/server/actions/stocktake-reconciliation.actions";
 
 const STOCKTAKE_CONFIRMATION_PHRASE = "تسوية جرد المخزون";
 
 type PreviewRow = PhysicalCountRow & { status: "MATCHED" | "UNMATCHED" | "AMBIGUOUS" | "INVALID"; message: string; partId: string | null; matchedBy: "OEM" | "NAME" | null; bookQuantity: number | null; delta: number | null; partName: string | null; partOemNumber: string | null };
 type Preview = { rows: PreviewRow[]; matched: number; unmatched: number; ambiguous: number; invalid: number };
+type ConsolidatedPreviewRow = PreviewRow & { sourceRowNumbers: number[] };
 
 export function StocktakeReconciliationModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -23,7 +25,18 @@ export function StocktakeReconciliationModal({ onClose, onDone }: { onClose: () 
   const [confirmation, setConfirmation] = useState("");
   const [allowPartial, setAllowPartial] = useState(false);
   const [pending, startTransition] = useTransition();
-  const changed = useMemo(() => preview?.rows.filter((row) => row.status === "MATCHED" && row.delta !== 0) ?? [], [preview]);
+  const matchedAdjustments = useMemo(() => preview?.rows.flatMap((row) => row.status === "MATCHED" && row.partId && row.actualQuantity !== null ? [{ partId: row.partId, sourceRowNumber: row.sourceRowNumber, actualQuantity: row.actualQuantity }] : []) ?? [], [preview]);
+  const changed = useMemo<ConsolidatedPreviewRow[]>(() => {
+    if (!preview) return [];
+    const rowsByPartId = new Map(preview.rows.filter((row): row is PreviewRow & { partId: string; actualQuantity: number } => row.status === "MATCHED" && Boolean(row.partId) && row.actualQuantity !== null).map((row) => [row.partId, row]));
+    return consolidateStocktakeAdjustments(matchedAdjustments).flatMap((adjustment) => {
+      const row = rowsByPartId.get(adjustment.partId);
+      if (!row || row.bookQuantity === null) return [];
+      const delta = adjustment.actualQuantity - row.bookQuantity;
+      return delta === 0 ? [] : [{ ...row, ...adjustment, delta }];
+    });
+  }, [preview, matchedAdjustments]);
+  const aggregatedDuplicateRows = matchedAdjustments.length - new Set(matchedAdjustments.map((row) => row.partId)).size;
   const hasIssues = Boolean(preview && (preview.unmatched || preview.ambiguous || preview.invalid));
   const canExecute = changed.length > 0 && changed.length <= 1_000 && (!hasIssues || allowPartial) && reason.trim().length >= 5 && confirmation.trim() === STOCKTAKE_CONFIRMATION_PHRASE;
 
@@ -57,7 +70,7 @@ export function StocktakeReconciliationModal({ onClose, onDone }: { onClose: () 
 
   const execute = () => startTransition(async () => {
     setError("");
-    const result = await executeStocktakeReconciliationAction({ adjustments: changed.map((row) => ({ partId: row.partId!, sourceRowNumber: row.sourceRowNumber, actualQuantity: row.actualQuantity! })), reason, confirmation });
+    const result = await executeStocktakeReconciliationAction({ adjustments: changed.map((row) => ({ partId: row.partId!, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers, actualQuantity: row.actualQuantity! })), reason, confirmation });
     if (!result.success) { setError(result.error); return; }
     onDone();
   });
@@ -69,6 +82,7 @@ export function StocktakeReconciliationModal({ onClose, onDone }: { onClose: () 
       <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-bmw-cardBorder bg-bmw-carbon/40 p-5 text-sm text-bmw-silver hover:border-bmw-blue/60"><Upload size={18} className="text-bmw-blue" />{fileName || "رفع ملف الجرد الفعلي (XLSX / XLS)"}<input className="sr-only" type="file" accept=".xlsx,.xls" onChange={(event) => void loadFile(event.target.files?.[0])} /></label>
       {preview ? <>
         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5"><Stat label="مطابق" value={preview.matched} tone="text-emerald-300" /><Stat label="فروق تحتاج تسوية" value={changed.length} tone="text-amber-300" /><Stat label="غير مطابق" value={preview.unmatched} tone="text-bmw-mRed" /><Stat label="ملتبس" value={preview.ambiguous} tone="text-bmw-mRed" /><Stat label="غير صالح" value={preview.invalid} tone="text-bmw-mRed" /></div>
+        {aggregatedDuplicateRows > 0 ? <Alert variant="info">تم تجميع {formatInt(aggregatedDuplicateRows)} صف مكرر مطابق لنفس الصنف، وجمع كمياته الفعلية قبل التسوية. سيُنشأ لكل صنف تعديل وحركة جرد واحدة فقط مع حفظ أرقام كل الصفوف المصدرية.</Alert> : null}
         {hasIssues ? <div className="space-y-2"><Alert variant={allowPartial ? "warning" : "error"}>{allowPartial ? `سيُطبّق الجرد على ${formatInt(changed.length)} صنف مطابق ذي فرق فقط، مع تخطي الصفوف غير المطابقة أو الملتبسة أو غير الصالحة.` : "لا يمكن تنفيذ التسوية قبل معالجة كل الصفوف غير المطابقة أو الملتبسة أو غير الصالحة، إلا عند تفعيل خيار التسوية الجزئية أدناه."}</Alert><label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-bmw-silver"><input type="checkbox" className="mt-1 accent-bmw-blue" checked={allowPartial} onChange={(event) => setAllowPartial(event.target.checked)} /><span><b>تسوية الأصناف المتطابقة فقط وتخطي غير المطابق / غير الصالح</b><br /><small>لن تُنشأ أي حركة للأصناف المستبعدة.</small></span></label><Button type="button" variant="outline" size="sm" onClick={downloadUnmatchedReport}>تحميل تقرير الصفوف المستبعدة CSV</Button></div> : null}
         {changed.length > 200 ? <Alert variant="info">سيعالج النظام {formatInt(changed.length)} فرقاً داخل {formatInt(Math.ceil(changed.length / 200))} دفعات خادمية متتابعة. كل دفعة تسجل حركاتها وتدقيقها بصورة مستقلة وآمنة.</Alert> : null}
         {changed.length > 1_000 ? <Alert variant="warning">تحتوي المعاينة على أكثر من 1000 فرق؛ قسّم الملف إلى دفعات أصغر لتبقى العملية ضمن وقت التنفيذ الآمن.</Alert> : null}
