@@ -16,7 +16,9 @@ export async function getInvoicePrintDataAction(invoiceId: string): Promise<Acti
     if (!invoice) return { success: false, error: "الفاتورة غير موجودة." };
     const isReturn = invoice.type === "SALE_RETURN" || invoice.type === "PURCHASE_RETURN";
     const needsLedgerFallback = isReturn || (invoice.type === "PURCHASE" && (invoice.accountBalanceBefore === null || invoice.accountBalanceAfter === null));
-    const historicLedger = needsLedgerFallback ? await getAccountDetailedLedger(invoice.account.id) : null;
+    const historicLedger = needsLedgerFallback
+      ? await tenant.run(() => getAccountDetailedLedger(invoice.account.id))
+      : null;
     const linkedLedgerRows = historicLedger?.rows.filter((row) => row.invoiceId === invoice.id) ?? [];
     const ledgerDocumentRow = linkedLedgerRows.find((row) => row.type === invoice.type && row.documentKind === "INVOICE");
     const reconstructedBalanceBefore = ledgerDocumentRow

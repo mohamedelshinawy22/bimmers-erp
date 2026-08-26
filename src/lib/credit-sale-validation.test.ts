@@ -47,11 +47,13 @@ describe("walk-in on-account sale validation", () => {
 
   it("runs all return entry points inside the authenticated tenant boundary", () => {
     const action = source("src/server/actions/invoice.actions.ts");
+    const printAction = source("src/server/actions/invoice-print.actions.ts");
     expect(action).toContain("const tenant = await getTenantDbFromSession();");
     expect(action).toContain("tenant.run(() => tenant.prisma.invoice.findUnique");
     expect(action).toContain("tenant.run(() => createInvoiceReturn(input");
     expect(action.match(/tenant\.run\(\(\) => tenant\.prisma\.invoice\.findUnique/g)?.length).toBeGreaterThanOrEqual(3);
     expect(action.match(/tenant\.run\(\(\) => createInvoiceReturn\(input/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(printAction).toContain("tenant.run(() => getAccountDetailedLedger(invoice.account.id))");
   });
 
   it("disables the POS on-account option and renders a customer-selection warning", () => {

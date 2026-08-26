@@ -271,3 +271,8 @@
 - [x] Complete full test, typecheck, and production-build validation for the return tenant-context repair.
 - [x] Deploy the return tenant-context repair and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated sales-return acceptance without creating test financial data.
+- [x] Trace the reported return print-preview tenant-context failure across sales, purchase, invoice, and detail loader actions.
+- [x] Bind all affected return print and detail data fetches to the authenticated tenant context without changing document data or layout.
+- [x] Add tenant-bound return print/detail action regressions and safe Arabic error coverage.
+- [x] Complete full test, typecheck, and production-build validation for the return print-loader repair.
+- [ ] Deploy the return print-loader repair and obtain authenticated return-print preview acceptance without creating financial data.
