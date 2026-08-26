@@ -212,3 +212,7 @@
 - [x] Audit Inventory Excel import preview rows and confirmation-step invalid-row data.
 - [x] Add expandable excluded-row details and a downloadable invalid-row CSV report in Inventory import confirmation.
 - [ ] Add Inventory import exclusion-report regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit the product-import chunk response and server-side skip paths behind the preview versus post-execution mismatch.
+- [x] Return structured server-excluded row numbers and Arabic reasons from every product-import batch.
+- [x] Consolidate pre-validation and server exclusions into the post-execution Inventory import CSV report.
+- [ ] Add consolidated exclusion-report regressions, validate, deploy, and obtain authenticated acceptance.

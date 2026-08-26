@@ -31,12 +31,26 @@ describe("inventory spreadsheet parsing", () => {
   it("exposes every invalid-row reason and CSV report from the confirmation step", () => {
     const modal = readFileSync(resolve(process.cwd(), "src/components/inventory/excel-import-modal.tsx"), "utf8");
     expect(modal).toContain("<details");
-    expect(modal).toContain("عرض تفاصيل {invalidCount} صف غير صالح");
+    expect(modal).toContain("عرض تفاصيل {excludedReportRows.length} صف مستبعد");
     expect(modal).toContain("رقم الصف في الإكسيل");
     expect(modal).toContain("كود OEM / الصنف");
     expect(modal).toContain("سبب الاستبعاد");
     expect(modal).toContain("تحميل تقرير الصفوف غير الصالحة CSV");
     expect(modal).toContain("inventory-import-invalid-rows.csv");
     expect(modal).toContain("issues.map((issue) => issue.message).join");
+  });
+
+  it("consolidates client validation failures with server batch exclusions in one post-execution report", () => {
+    const modal = readFileSync(resolve(process.cwd(), "src/components/inventory/excel-import-modal.tsx"), "utf8");
+    const service = readFileSync(resolve(process.cwd(), "src/server/services/catalog-import-api.service.ts"), "utf8");
+    expect(service).toContain("failedRows: Array<{ sourceRowNumber: number; error: string }>");
+    expect(service).toContain("failedRows.push({ sourceRowNumber: row.sourceRowNumber, error: errorText(error) })");
+    expect(modal).toContain("failedRows?: Array<{ sourceRowNumber: number; error: string }>");
+    expect(modal).toContain("[serverExcludedRows, setServerExcludedRows]");
+    expect(modal).toContain("const excludedReportRows");
+    expect(modal).toContain("for (const failed of result.data.failedRows ?? [])");
+    expect(modal).toContain("setServerExcludedRows(serverFailures)");
+    expect(modal).toContain("new Set([...invalidRows.map");
+    expect(modal).toContain("eligibleChecks = skipInvalidRows");
   });
 });
