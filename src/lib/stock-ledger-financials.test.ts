@@ -12,7 +12,7 @@ describe("stock ledger financial attribution", () => {
       quantityDelta: 1,
       movementUnitCost: 2800,
       invoiceUnitCost: 2800,
-      invoiceUnitSalePrice: 7000,
+      invoiceUnitPrice: 7000,
       invoiceTotalSalePrice: 7000,
     });
     expect(purchase.purchaseUnitCost).toBe(2800);
@@ -22,14 +22,28 @@ describe("stock ledger financial attribution", () => {
   });
 
   it("places a sale line's price solely in sale columns and preserves the requested independent footer totals", () => {
-    const purchase = mapStockLedgerFinancials({ reason: "PURCHASE", quantityDelta: 1, movementUnitCost: 2800, invoiceUnitCost: 2800, invoiceUnitSalePrice: 7000, invoiceTotalSalePrice: 7000 });
-    const sale = mapStockLedgerFinancials({ reason: "SALE", quantityDelta: -1, movementUnitCost: 2800, invoiceUnitCost: 2800, invoiceUnitSalePrice: 4200, invoiceTotalSalePrice: 4200 });
+    const purchase = mapStockLedgerFinancials({ reason: "PURCHASE", quantityDelta: 1, movementUnitCost: 2800, invoiceUnitCost: 2800, invoiceUnitPrice: 7000, invoiceTotalSalePrice: 7000 });
+    const sale = mapStockLedgerFinancials({ reason: "SALE", quantityDelta: -1, movementUnitCost: 2800, invoiceUnitCost: 2800, invoiceUnitPrice: 4200, invoiceTotalSalePrice: 4200 });
     const stocktake = mapStockLedgerFinancials({ reason: "STOCKTAKE", quantityDelta: 1, movementUnitCost: 2800 });
     expect(sale.purchaseUnitCost).toBeNull();
     expect(sale.totalCost).toBeNull();
     expect(sale.unitSalePrice).toBe(4200);
     expect(sale.totalSalePrice).toBe(4200);
     expect(calculateStockLedgerTotals([purchase, sale, stocktake])).toEqual({ inbound: 2, outbound: 1, cost: 2800, sales: 4200 });
+  });
+
+  it("falls back from a zero-valued legacy movement to the invoice item unit price before the product purchase cost", () => {
+    const legacyPurchase = mapStockLedgerFinancials({
+      reason: "PURCHASE",
+      quantityDelta: 1,
+      movementUnitCost: 0,
+      invoiceUnitCost: 0,
+      invoiceUnitPrice: 2800,
+      fallbackPurchaseUnitCost: 2400,
+    });
+    expect(legacyPurchase.purchaseUnitCost).toBe(2800);
+    expect(legacyPurchase.totalCost).toBe(2800);
+    expect(legacyPurchase.unitSalePrice).toBeNull();
   });
 
   it("uses the shared mapper in the tenant service and designated financial values in the visible table, CSV, and footer", () => {

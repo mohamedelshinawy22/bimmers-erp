@@ -34,6 +34,7 @@ import { InvoicePrintPreviewModal } from "@/components/print/invoice-print-previ
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { POSAccountCombobox } from "./components/pos-account-combobox";
 import { OemCode } from "@/components/inventory/oem-code";
+import { searchTokens } from "@/lib/catalog-token-search";
 
 /**
  * Available = on hand − reserved, matching the server's check in
@@ -48,6 +49,17 @@ function QuickAccountModal({ onClose, onCreated }: { onClose: () => void; onCrea
 
 function availableOf(part: PosPartRow): number {
   return part.stockQuantity - part.stockReserved;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function HighlightedProductName({ value, query }: { value: string; query: string }) {
+  const tokens = query.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return <>{value}</>;
+  const matcher = new RegExp(`(${tokens.map(escapeRegExp).join("|")})`, "gi");
+  return <>{value.split(matcher).map((part, index) => tokens.some((token) => part.localeCompare(token, undefined, { sensitivity: "accent" }) === 0) ? <mark key={`${part}-${index}`} className="rounded bg-amber-400/20 px-0.5 text-amber-200">{part}</mark> : part)}</>;
 }
 
 interface CartLine {
@@ -105,6 +117,7 @@ export function PosTerminal({
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PosPartRow[]>([]);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
 
@@ -178,8 +191,9 @@ export function PosTerminal({
   /* ── Search (debounced, out-of-order safe) ──────────────────────────────── */
   useEffect(() => {
     const term = query.trim();
-    if (term.length < 2) {
+    if (term.length < 1) {
       setResults([]);
+      setActiveResultIndex(0);
       setSearching(false);
       return;
     }
@@ -190,7 +204,7 @@ export function PosTerminal({
       // Discard stale responses so fast typing can't rewind the list.
       if (id !== requestId.current) return;
       setSearching(false);
-      if (result.success) setResults(result.data);
+      if (result.success) { setResults(result.data); setActiveResultIndex(0); }
       else setError(result.error);
     }, 220);
     return () => clearTimeout(timer);
@@ -229,6 +243,7 @@ export function PosTerminal({
       });
       setQuery("");
       setResults([]);
+      setActiveResultIndex(0);
       searchRef.current?.focus();
     },
     [isWholesale, allowNegativeStock, isEditMode],
@@ -410,6 +425,16 @@ export function PosTerminal({
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" && results.length > 0) { event.preventDefault(); setActiveResultIndex((index) => (index + 1) % results.length); }
+                  else if (event.key === "ArrowUp" && results.length > 0) { event.preventDefault(); setActiveResultIndex((index) => (index - 1 + results.length) % results.length); }
+                  else if (event.key === "Enter" && results[activeResultIndex]) { event.preventDefault(); addToCart(results[activeResultIndex]!); }
+                  else if (event.key === "Escape") { event.preventDefault(); setResults([]); setActiveResultIndex(0); }
+                }}
+                role="combobox"
+                aria-expanded={results.length > 0}
+                aria-controls="pos-part-search-results"
+                aria-activedescendant={results[activeResultIndex] ? `pos-part-result-${results[activeResultIndex]!.id}` : undefined}
                 placeholder="ابحث بالباركود أو رقم OEM أو اسم الصنف… (F8)"
                 className="h-12 pr-10 text-base"
               />
@@ -419,6 +444,7 @@ export function PosTerminal({
                   onClick={() => {
                     setQuery("");
                     setResults([]);
+                    setActiveResultIndex(0);
                   }}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-bmw-muted hover:text-white"
                 >
@@ -430,17 +456,21 @@ export function PosTerminal({
             {searching ? <p className="text-xs text-bmw-muted">جاري البحث…</p> : null}
 
             {results.length > 0 ? (
-              <ul className="max-h-72 divide-y divide-bmw-cardBorder overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon">
-                {results.map((part) => (
+              <ul id="pos-part-search-results" role="listbox" className="max-h-72 divide-y divide-bmw-cardBorder overflow-y-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon">
+                {results.map((part, index) => (
                   <li key={part.id}>
                     <button
+                      id={`pos-part-result-${part.id}`}
+                      role="option"
+                      aria-selected={index === activeResultIndex}
                       type="button"
                       onClick={() => addToCart(part)}
+                      onMouseEnter={() => setActiveResultIndex(index)}
                       disabled={!allowNegativeStock && availableOf(part) <= 0}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-right transition-colors hover:bg-bmw-card disabled:cursor-not-allowed disabled:opacity-50"
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-right transition-colors hover:bg-bmw-card disabled:cursor-not-allowed disabled:opacity-50 ${index === activeResultIndex ? "bg-bmw-blue/10 ring-1 ring-inset ring-bmw-blue/40" : ""}`}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-sm font-bold text-white">{part.nameAr}</p>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم</Badge> : null}</div>
+                        <div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-sm font-bold text-white"><HighlightedProductName value={part.nameAr} query={query} /></p><Badge variant="muted">{part.brandName || "عام"}</Badge>{part.duplicateNameCount > 1 ? <Badge variant="muted" title="يوجد أكثر من صنف نشط بالاسم نفسه">مكرر الاسم</Badge> : null}</div>
                         <p className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-bmw-muted">
                           <OemCode value={part.oemNumber} className="text-bmw-muted" />
                           {part.duplicateOemCount > 1 ? <Badge variant="warning" title={`الماركات المتاحة: ${part.duplicateBrands.join("، ")}`}>مكرر OEM ×{part.duplicateOemCount}</Badge> : null}

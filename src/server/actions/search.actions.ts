@@ -35,7 +35,7 @@ export async function searchPartsForPosAction(query: string): Promise<ActionResu
   try {
     await requirePermission("part.read");
     const tenant = await getTenantDbFromSession();
-    const rows = await tenant.run(() => quickSearchParts(tenant.prisma, query, 12));
+    const rows = await tenant.run(() => quickSearchParts(tenant.prisma, query, 15));
     return ok(rows);
   } catch (error) {
     return toActionError(error, "searchPartsForPosAction");

@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { money, num, sanitizeOemForSearch } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 import { mapStockLedgerFinancials } from "@/lib/stock-ledger-financials";
+import { searchCatalogProducts, searchTokens } from "@/lib/catalog-token-search";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
 
 /** Plain-JSON shape safe to hand to client components (no Decimal instances). */
@@ -213,23 +214,21 @@ function toPosRow(p: { id: string; oemNumber: string; nameAr: string; nameEn: st
   return { id: p.id, oemNumber: p.oemNumber, nameAr: p.nameAr, nameEn: p.nameEn, brandName: p.brand.name, isOem: p.brand.isOem, brandPartNumber: p.brandPartNumber, category: p.category, sidePosition: p.sidePosition, binCode: p.binLocation?.fullCode ?? null, sellPriceRetail: num(p.sellPriceRetail), sellPriceWholesale: num(p.sellPriceWholesale), sellPriceMin: num(p.sellPriceMin), stockQuantity: p.stockQuantity, stockReserved: p.stockReserved, minReorderLevel: p.minReorderLevel, duplicateOemCount: duplicates.oemCounts.get(p.oemNumber) ?? 0, duplicateNameCount: duplicates.nameCounts.get(p.nameAr) ?? 0, duplicateBrands: duplicates.brandsByOem.get(p.oemNumber) ?? [p.brand.name] };
 }
 
-export async function quickSearchParts(db: PartsDb, query: string, limit = 12): Promise<PosPartRow[]> {
+export async function quickSearchParts(db: PartsDb, query: string, limit = 15): Promise<PosPartRow[]> {
   const { normalized, numericNormalized, variations } = normalizeSearchTerm(query);
   const oemKey = sanitizeOemForSearch(query);
-  if (normalized.length < 2) return [];
+  const tokens = searchTokens(query);
+  if (tokens.length === 0) return [];
   const separatorInsensitiveIds = oemKey.length >= 2
     ? await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PartItem" WHERE regexp_replace("oemNumber", '[[:space:]_./-]', '', 'g') ILIKE ${`%${oemKey}%`} LIMIT ${Math.max(limit * 8, 96)}`)
     : [];
-
-  const rows = await db.partItem.findMany({
-    where: {
-      isActive: true,
-      isDeleted: false,
+  const tokenConditions: Prisma.PartItemWhereInput[] = tokens.map((token) => {
+    const tokenVariants = normalizeSearchTerm(token).variations;
+    return {
       OR: [
-        { barcode: { equals: numericNormalized } },
-        { oemNumber: { contains: oemKey || numericNormalized, mode: "insensitive" } },
-        ...(separatorInsensitiveIds.length ? [{ id: { in: separatorInsensitiveIds.map((row) => row.id) } }] : []),
-        ...variations.flatMap((term) => [
+        { barcode: { equals: normalizeSearchTerm(token).numericNormalized } },
+        { oemNumber: { contains: sanitizeOemForSearch(token) || token, mode: "insensitive" } },
+        ...tokenVariants.flatMap((term) => [
           { nameAr: { contains: term } },
           { nameEn: { contains: term, mode: "insensitive" as const } },
           { brandPartNumber: { contains: term, mode: "insensitive" as const } },
@@ -238,6 +237,16 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 12): 
           { compatibleEngines: { some: { engine: { code: { contains: term, mode: "insensitive" as const } } } } },
         ]),
       ],
+    };
+  });
+
+  const rows = await db.partItem.findMany({
+    where: {
+      isActive: true,
+      isDeleted: false,
+      ...(separatorInsensitiveIds.length && tokens.length === 1
+        ? { OR: [{ AND: tokenConditions }, { id: { in: separatorInsensitiveIds.map((row) => row.id) } }] }
+        : { AND: tokenConditions }),
     },
     select: {
       id: true,
@@ -255,13 +264,20 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 12): 
       minReorderLevel: true,
       brand: { select: { name: true, isOem: true } },
       binLocation: { select: { fullCode: true } },
+      compatibleChassis: { select: { chassis: { select: { code: true } } } },
+      compatibleEngines: { select: { engine: { select: { code: true } } } },
     },
     orderBy: [{ stockQuantity: "desc" }, { nameAr: "asc" }],
-    take: limit,
+    take: Math.max(limit * 8, 96),
   });
 
-  const duplicates = await getDuplicateMetadata(db, rows);
-  return rows.map((row) => toPosRow(row, duplicates));
+  const matchingRows = searchCatalogProducts(query, rows.map((row) => ({
+    ...row,
+    brandName: row.brand.name,
+    compatibility: [...row.compatibleChassis.map((entry) => entry.chassis.code), ...row.compatibleEngines.map((entry) => entry.engine.code)].join(" "),
+  })), limit);
+  const duplicates = await getDuplicateMetadata(db, matchingRows);
+  return matchingRows.map((row) => toPosRow(row, duplicates));
 }
 
 export async function getPosPartsByIds(db: PartsDb, ids: string[]): Promise<PosPartRow[]> {
@@ -340,7 +356,7 @@ export async function getStockLedger(db: PartsDb, partId: string, limit = 100) {
     take: limit,
     include: {
       performedBy: { select: { fullName: true } },
-      part: { select: { binLocation: { select: { fullCode: true } } } },
+      part: { select: { buyPriceAvg: true, buyPriceLast: true, binLocation: { select: { fullCode: true } } } },
       invoice: { select: { id: true, invoiceNumber: true, type: true, isVoided: true, account: { select: { name: true } }, items: { where: { partId }, select: { unitPrice: true, unitCostSnapshot: true, totalPrice: true, quantity: true, binLocationSnapshot: true } } } },
     },
   });
@@ -351,8 +367,9 @@ export async function getStockLedger(db: PartsDb, partId: string, limit = 100) {
       quantityDelta: m.quantityDelta,
       movementUnitCost: num(m.unitCost),
       invoiceUnitCost: item ? num(item.unitCostSnapshot) : null,
-      invoiceUnitSalePrice: item ? num(item.unitPrice) : null,
+      invoiceUnitPrice: item ? num(item.unitPrice) : null,
       invoiceTotalSalePrice: item ? num(item.totalPrice) : null,
+      fallbackPurchaseUnitCost: num(m.part.buyPriceLast) || num(m.part.buyPriceAvg),
     });
     return {
     id: m.id,

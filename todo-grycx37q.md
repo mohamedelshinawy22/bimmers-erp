@@ -234,3 +234,7 @@
 - [x] Correct purchase-cost and sales-price attribution so each appears only in its designated ledger columns.
 - [x] Correct ledger footer totals for incoming purchase cost and outgoing sales proceeds.
 - [ ] Add stock-ledger financial mapping and aggregation regressions; validate, deploy, and obtain authenticated acceptance for بلف كمبروسر f02.
+- [x] Audit POS autocomplete search normalization, multi-keyword matching, and keyboard-selection behavior.
+- [x] Implement Arabic-normalized tokenized POS product search with accessible live dropdown navigation.
+- [x] Audit and fix legacy stock-ledger purchase-cost fallback from invoice item values when movement cost is absent or zero.
+- [ ] Add POS search and legacy ledger-cost fallback regressions; validate, deploy, and obtain authenticated acceptance.

@@ -5,6 +5,20 @@ function translateDigits(value: string, from: string, to: string): string {
   return value.replace(new RegExp(`[${from}]`, "g"), (digit) => to[from.indexOf(digit)] ?? digit);
 }
 
+function arabicEquivalentVariations(value: string): string[] {
+  const alternatives: Record<string, string[]> = {
+    ا: ["ا", "أ", "إ", "آ", "ٱ"],
+    ي: ["ي", "ى"],
+    ه: ["ه", "ة"],
+  };
+  let variants = [""];
+  for (const character of value) {
+    const options = alternatives[character] ?? [character];
+    variants = variants.flatMap((prefix) => options.map((option) => `${prefix}${option}`)).slice(0, 96);
+  }
+  return variants;
+}
+
 /**
  * Produces comparable Arabic/English and numeric search tokens without changing
  * stored data. Database queries can use the returned variations as ILIKE terms.
@@ -25,7 +39,7 @@ export function normalizeSearchTerm(term: string): { normalized: string; numeric
   return {
     normalized,
     numericNormalized,
-    variations: [...new Set([original, normalized, numericNormalized, easternNormalized].filter(Boolean))],
+    variations: [...new Set([original, normalized, numericNormalized, easternNormalized, ...arabicEquivalentVariations(normalized)].filter(Boolean))],
   };
 }
 

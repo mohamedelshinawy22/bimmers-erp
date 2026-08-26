@@ -35,19 +35,26 @@ export function mapStockLedgerFinancials(input: {
   quantityDelta: number;
   movementUnitCost: number | null | undefined;
   invoiceUnitCost?: number | null;
-  invoiceUnitSalePrice?: number | null;
+  invoiceUnitPrice?: number | null;
   invoiceTotalSalePrice?: number | null;
+  fallbackPurchaseUnitCost?: number | null;
 }): LedgerFinancialRow {
   const quantity = Math.abs(Number(input.quantityDelta) || 0);
   const isPurchase = purchaseReasons.has(input.reason);
   const isSale = saleReasons.has(input.reason);
   const movementCost = finite(input.movementUnitCost);
   const invoiceCost = finite(input.invoiceUnitCost);
-  const saleUnit = finite(input.invoiceUnitSalePrice);
+  const invoiceUnitPrice = finite(input.invoiceUnitPrice);
+  const fallbackPurchaseCost = finite(input.fallbackPurchaseUnitCost);
   const invoiceSaleTotal = finite(input.invoiceTotalSalePrice);
-  const purchaseUnitCost = costBearingReasons.has(input.reason) ? (isPurchase ? invoiceCost ?? movementCost : movementCost) : null;
+  const firstPositive = (...values: Array<number | null>) => values.find((value): value is number => value !== null && value > 0) ?? 0;
+  const purchaseUnitCost = costBearingReasons.has(input.reason)
+    ? isPurchase
+      ? firstPositive(movementCost, invoiceCost, invoiceUnitPrice, fallbackPurchaseCost)
+      : firstPositive(movementCost, fallbackPurchaseCost)
+    : null;
   const totalCost = purchaseUnitCost === null ? null : purchaseUnitCost * quantity;
-  const unitSalePrice = isSale ? saleUnit : null;
+  const unitSalePrice = isSale ? invoiceUnitPrice : null;
   const totalSalePrice = unitSalePrice === null ? null : invoiceSaleTotal ?? unitSalePrice * quantity;
   return { reason: input.reason, quantityDelta: input.quantityDelta, purchaseUnitCost, totalCost, unitSalePrice, totalSalePrice };
 }
