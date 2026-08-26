@@ -35,6 +35,7 @@ import { PurchaseInvoiceModal } from "./components/purchase-invoice-modal";
 import { StockLedgerModal } from "./components/stock-ledger-modal";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { ExcelImportModal } from "@/components/inventory/excel-import-modal";
+import { StocktakeReconciliationModal } from "@/components/inventory/stocktake-reconciliation-modal";
 import { OemCode } from "@/components/inventory/oem-code";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
@@ -103,6 +104,7 @@ export function InventoryClient({
   const [catalogPrintError, setCatalogPrintError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PartRow[] | null>(null);
   const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
+  const [stocktakeOpen, setStocktakeOpen] = useState(false);
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
   const openCatalogPrint = async () => {
     setCatalogPrintError(null);
@@ -157,6 +159,7 @@ export function InventoryClient({
           <Button variant="outline" onClick={() => void openCatalogPrint()} loading={catalogPrintLoading} disabled={total === 0}><Printer size={16} /> {selectedParts.length ? `طباعة قائمة أسعار (${selectedParts.length})` : `طباعة جميع النتائج (${formatInt(total)})`}</Button>
           {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
           {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
+          {permissions.canAdjust ? <Button variant="outline" onClick={() => setStocktakeOpen(true)}><FileSpreadsheet size={16} /> جرد وتسوية كميات</Button> : null}
           {permissions.canWrite ? (
             <Button onClick={() => setAddOpen(true)}>
               <PackagePlus size={16} /> إدخال صنف جديد
@@ -469,6 +472,7 @@ export function InventoryClient({
       {barcodePrintOpen ? <BarcodePrintModal parts={selectedParts} company={{ name: company.name, logoUrl: company.logoUrl }} onClose={() => setBarcodePrintOpen(false)} /> : null}
       {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
+      {stocktakeOpen ? <StocktakeReconciliationModal onClose={() => setStocktakeOpen(false)} onDone={() => { setStocktakeOpen(false); router.refresh(); }} /> : null}
 
       {permissions.canPurchase ? (
         <PurchaseInvoiceModal

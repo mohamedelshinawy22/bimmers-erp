@@ -216,7 +216,7 @@ export async function getInvoiceDetail(db: InvoiceDb, invoiceId: string) {
       partId: it.part?.id ?? null,
       oemNumber: it.part?.oemNumber ?? it.oemNumberSnapshot ?? "—",
       nameAr: it.part?.nameAr ?? it.partNameSnapshot ?? "صنف نصي غير مربوط",
-      brandName: it.part?.brand.name ?? "غير مربوط بالمخزن",
+      brandName: it.part?.brand?.name ?? "غير مربوط بالمخزن",
       quantity: it.quantity,
       unitPrice: num(it.unitPrice),
       unitCostSnapshot: num(it.unitCostSnapshot),

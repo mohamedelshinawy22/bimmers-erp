@@ -45,11 +45,13 @@ export async function getInvoiceDetailAction(invoiceId: string): Promise<ActionR
   try {
     const user = await requirePermission("invoice.read");
     const tenant = await getTenantDbFromSession();
-    const detail = await tenant.run(() => getInvoiceDetail(tenant.prisma, invoiceId));
+    const { detail, access } = await tenant.run(async () => ({
+      detail: await getInvoiceDetail(tenant.prisma, invoiceId),
+      access: await getUserAccess(user.id),
+    }));
     if (!detail) return { success: false, error: "الفاتورة غير موجودة." };
 
     // Cost and margin are only returned to sessions explicitly allowed to view cost.
-    const access = await getUserAccess(user.id);
     if (!can(user.role, "part.viewCost") || !hasPermission(access, "canViewCostPrice")) {
       return ok({
         ...detail,

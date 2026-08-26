@@ -191,3 +191,7 @@
 - [x] Audit the active Treasury deletion action, actual relation counts, default designation, and client modal behavior.
 - [x] Implement tenant-scoped default-treasury protection, linked-history archival, and clear Arabic deletion outcomes.
 - [ ] Add Treasury deletion safeguard regressions, validate, deploy, and obtain authenticated acceptance.
+- [x] Audit the active invoice-details action and modal along with current inventory import and stock-movement conventions.
+- [x] Fix invoice detail tenant loading and null-safe response serialization for item-ledger links.
+- [x] Implement guarded Excel physical-count matching, discrepancy preview, and audited stock quantity reconciliation.
+- [ ] Add invoice-details and physical-stock reconciliation regressions, validate, deploy, and obtain authenticated acceptance.
