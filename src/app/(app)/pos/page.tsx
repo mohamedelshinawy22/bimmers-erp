@@ -59,6 +59,7 @@ export default async function PosPage() {
         defaultAccountId={walkIn?.id ?? null}
         defaultTreasuryId={cashDrawer?.id ?? null}
         canOverrideMinPrice={can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice")}
+        canOverrideCreditLimit={can(user.role, "invoice.overrideCreditLimit")}
         taxRatePercent={taxRatePercent}
         companyName={companyName}
         enforceCreditLimit={enforceCredit === "true"}

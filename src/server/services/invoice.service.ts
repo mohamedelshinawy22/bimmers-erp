@@ -53,6 +53,8 @@ export interface InvoiceActor {
   maxDiscountValue?: number;
   /** Resource scope checked before any cash movement is posted. */
   canUseTreasury?: (treasuryId: string) => boolean;
+  /** Manager-level approval for a registered customer's credit-limit exception. */
+  canOverrideCreditLimit?: boolean;
   /** Optional reason recorded when a voided invoice is permanently purged. */
   purgeReason?: string;
 }
@@ -247,16 +249,27 @@ export async function createSaleInvoice(
       if ((input.paymentMethod === "ON_ACCOUNT" || remainingAmount.gt(0)) && isWalkInCashAccount(account)) {
         throw new BusinessRuleError(WALK_IN_CREDIT_ERROR);
       }
+      let creditOverride: { creditLimit: number; previousDebt: number; newDebt: number; remainingAmount: number; approvedBy: string } | null = null;
       if (remainingAmount.gt(0) && enforceCreditLimit) {
         const balanceAfter = account.currentBalance.sub(remainingAmount);
         if (balanceAfter.lt(0)) {
-          if (account.creditLimit.eq(0)) {
+          const debtAfter = balanceAfter.abs();
+          const exceedsCredit = account.creditLimit.eq(0) || debtAfter.gt(account.creditLimit);
+          if (exceedsCredit && actor.canOverrideCreditLimit) {
+            creditOverride = {
+              creditLimit: Number(account.creditLimit),
+              previousDebt: account.currentBalance.lt(0) ? Number(account.currentBalance.abs()) : 0,
+              newDebt: Number(debtAfter),
+              remainingAmount: Number(remainingAmount),
+              approvedBy: actor.id,
+            };
+          }
+          if (account.creditLimit.eq(0) && !actor.canOverrideCreditLimit) {
             throw new BusinessRuleError(
               `الحساب "${account.name}" غير مسموح له بالبيع الآجل (حد الائتمان = صفر).`,
             );
           }
-          const debtAfter = balanceAfter.abs();
-          if (debtAfter.gt(account.creditLimit)) {
+          if (debtAfter.gt(account.creditLimit) && !actor.canOverrideCreditLimit) {
             throw new BusinessRuleError(
               `تجاوز حد الائتمان للحساب "${account.name}". ` +
                 `الحد: ${formatMoney(account.creditLimit)}، ` +
@@ -360,7 +373,7 @@ export async function createSaleInvoice(
         tableName: "Invoice",
         recordId: invoice.id,
         action: "INSERT",
-        newData: { ...invoice, itemCount: lines.length },
+        newData: { ...invoice, itemCount: lines.length, ...(creditOverride ? { creditOverride } : {}) },
         performedBy: actor.id,
       });
 

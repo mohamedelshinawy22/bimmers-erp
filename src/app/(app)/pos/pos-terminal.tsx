@@ -77,6 +77,7 @@ interface PosTerminalProps {
   defaultAccountId: string | null;
   defaultTreasuryId: string | null;
   canOverrideMinPrice: boolean;
+  canOverrideCreditLimit?: boolean;
   taxRatePercent: number;
   companyName: string;
   /**
@@ -108,6 +109,7 @@ export function PosTerminal({
   defaultAccountId,
   defaultTreasuryId,
   canOverrideMinPrice,
+  canOverrideCreditLimit = false,
   taxRatePercent,
   companyName,
   enforceCreditLimit,
@@ -321,6 +323,8 @@ export function PosTerminal({
   const creditBlocked = enforceCreditLimit && wouldOweUs && account!.creditLimit === 0;
   const creditExceeded =
     enforceCreditLimit && wouldOweUs && account!.creditLimit > 0 && creditDebtAfter > account!.creditLimit;
+  const creditRequiresOverride = creditBlocked || creditExceeded;
+  const managerCreditOverride = creditRequiresOverride && canOverrideCreditLimit && !isWalkInCustomer;
 
   useEffect(() => {
     if (isWalkInCustomer && paymentMethod === "ON_ACCOUNT") {
@@ -334,8 +338,7 @@ export function PosTerminal({
     !!accountId &&
     grandTotal >= 0 &&
     !(belowMinLines.length > 0 && !overrideMinPrice) &&
-    !creditExceeded &&
-    !creditBlocked &&
+    (!creditRequiresOverride || managerCreditOverride) &&
     !(appliedPaid > 0 && !treasuryId);
 
   const holdCurrentCart = useCallback(() => {
@@ -738,7 +741,9 @@ export function PosTerminal({
               </Alert>
             ) : null}
 
-            {creditBlocked ? (
+            {managerCreditOverride ? (
+              <Alert variant="warning">⚠️ تنبيه: الحساب يتجاوز حد الائتمان، وسيتم إتمام البيع الآجل بصلاحية مدير النظام مع تسجيل الاستثناء في التدقيق.</Alert>
+            ) : creditBlocked ? (
               <Alert variant="error">هذا الحساب غير مسموح له بالبيع الآجل (حد الائتمان = صفر).</Alert>
             ) : creditExceeded ? (
               <Alert variant="error">
@@ -775,7 +780,7 @@ export function PosTerminal({
             <Button variant="ghost" onClick={() => setCheckoutOpen(false)} disabled={pending}>
               رجوع
             </Button>
-            <Button onClick={submit} loading={pending} disabled={appliedPaid > 0 && !treasuryId}>
+            <Button onClick={submit} loading={pending} disabled={(appliedPaid > 0 && !treasuryId) || (creditRequiresOverride && !managerCreditOverride)}>
               تأكيد وحفظ الفاتورة
             </Button>
           </>

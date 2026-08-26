@@ -253,3 +253,8 @@
 - [x] Return Arabic action results for prohibited walk-in credit sales and enforced credit-limit exceedance without uncaught exceptions.
 - [x] Disable or clearly warn about on-account checkout for the default cash customer and surface exact action errors in POS.
 - [ ] Add POS credit-validation regressions; validate, deploy, and obtain authenticated acceptance.
+- [x] Audit sale-credit override permissions, current credit gate, and invoice audit trail handling.
+- [x] Implement tenant-scoped manager/admin credit-limit override for registered customers while preserving the strict walk-in prohibition.
+- [x] Add POS manager override guidance and retain blocking feedback for unauthorized users.
+- [x] Add manager credit-override authorization and audit regressions; complete full suite, typecheck, and production-build validation.
+- [ ] Deploy the manager credit override and obtain authenticated POS acceptance for an authorized over-limit sale and an unauthorized blocked sale.

@@ -26,6 +26,7 @@ export const PERMISSIONS = {
   "invoice.purge": ["SUPER_ADMIN", "MANAGER"],
   "invoice.belowMinPrice": ["SUPER_ADMIN", "MANAGER"],
   "invoice.overrideDiscount": ["SUPER_ADMIN", "MANAGER"],
+  "invoice.overrideCreditLimit": ["SUPER_ADMIN", "MANAGER"],
   "account.read": ["SUPER_ADMIN", "MANAGER", "CASHIER", "STOREKEEPER"],
   "account.write": ["SUPER_ADMIN", "MANAGER", "CASHIER"],
   "account.viewStatement": ["SUPER_ADMIN", "MANAGER", "CASHIER"],

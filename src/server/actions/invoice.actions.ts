@@ -63,6 +63,7 @@ export async function createSaleInvoiceAction(
       // the permission — the server never trusts the request alone.
       canSellBelowMin: can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice"),
       canOverrideDiscount: input.allowDiscountOverride && can(user.role, "invoice.overrideDiscount"),
+      canOverrideCreditLimit: can(user.role, "invoice.overrideCreditLimit"),
       canAddDiscount: hasPermission(access, "canAddDiscount"),
       maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100),
       maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999),

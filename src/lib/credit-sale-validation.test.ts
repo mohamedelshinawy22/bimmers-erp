@@ -22,6 +22,19 @@ describe("walk-in on-account sale validation", () => {
     expect(WALK_IN_CREDIT_ERROR).toContain("لا يمكن البيع الآجل");
   });
 
+  it("permits only manager roles to post a registered-customer credit exception and records override metadata", () => {
+    const permissions = source("src/lib/permissions.ts");
+    const service = source("src/server/services/invoice.service.ts");
+    const action = source("src/server/actions/invoice.actions.ts");
+    const pos = source("src/app/(app)/pos/pos-terminal.tsx");
+    expect(permissions).toContain('"invoice.overrideCreditLimit": ["SUPER_ADMIN", "MANAGER"]');
+    expect(action).toContain('can(user.role, "invoice.overrideCreditLimit")');
+    expect(service).toContain("canOverrideCreditLimit?: boolean");
+    expect(service).toContain("...(creditOverride ? { creditOverride } : {})");
+    expect(pos).toContain("const managerCreditOverride = creditRequiresOverride && canOverrideCreditLimit && !isWalkInCustomer");
+    expect(pos).toContain("سيتم إتمام البيع الآجل بصلاحية مدير النظام");
+  });
+
   it("disables the POS on-account option and renders a customer-selection warning", () => {
     const pos = source("src/app/(app)/pos/pos-terminal.tsx");
     expect(pos).toContain("const onAccountDisabled = option.value === \"ON_ACCOUNT\" && isWalkInCustomer");
