@@ -170,3 +170,6 @@
 - [x] Complete granular role and permission controls with tenant-scoped persistence safeguards.
 - [ ] Add permissions-management regressions, validate, deploy, and obtain authenticated acceptance.
 - [x] Add a visually explicit ShieldCheck permissions action to the standalone /users table without duplicating its modal.
+- [x] Audit the existing accounts Excel parser and workbook header assumptions.
+- [x] Add dynamic Arabic header detection, index-column skipping, and safe account-type/balance fallbacks.
+- [ ] Add flexible account-workbook regression coverage, validate, deploy, and obtain authenticated import acceptance.
