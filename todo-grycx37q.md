@@ -269,4 +269,5 @@
 - [x] Bind sales and purchase return invoice lookup, permission access, and transactional service execution to the resolved tenant context.
 - [x] Add return-action tenant-context and safe error-boundary regression coverage.
 - [x] Complete full test, typecheck, and production-build validation for the return tenant-context repair.
-- [ ] Deploy the return tenant-context repair and obtain authenticated sales-return acceptance without creating test financial data.
+- [x] Deploy the return tenant-context repair and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated sales-return acceptance without creating test financial data.
