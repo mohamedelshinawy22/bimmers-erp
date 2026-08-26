@@ -30,7 +30,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 
 
 const deleteManualTreasuryTransactionsSchema = z.object({ transactionIds: z.array(z.string().uuid()).min(1).max(100) });
-const reconcileTreasuryBalanceSchema = z.object({ treasuryId: z.string().uuid(), targetBalance: z.coerce.number().finite().min(0).max(999_999_999.99), reason: z.string().trim().min(5, "سبب تسوية الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.").max(500) });
+const reconcileTreasuryBalanceSchema = z.object({ treasuryId: z.string().uuid(), targetBalance: z.coerce.number().finite().min(0).max(999_999_999.99), reason: z.string().trim().max(500).default("") });
 
 /** Manual voucher forms may submit an empty select value or the Arabic accountless label. Neither may reach Prisma as an empty foreign key. */
 function normalizeOptionalVoucherAccountId(value: unknown): string | undefined {
@@ -75,12 +75,14 @@ export async function reconcileTreasuryBalanceAction(raw: { treasuryId: string; 
     const user = await requirePermission("treasury.manage");
     if (user.role !== "SUPER_ADMIN" && user.role !== "MANAGER") throw new BusinessRuleError("صلاحية تسوية أرصدة الخزائن متاحة لمدير النظام أو المدير المالي فقط.");
     const input = reconcileTreasuryBalanceSchema.parse(raw);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
       const locked = await lockTreasuriesForUpdate(tx, [input.treasuryId]);
       const treasury = locked.get(input.treasuryId)!;
       const previousBalance = money(treasury.currentBalance);
       const targetBalance = money(input.targetBalance);
       const delta = money(targetBalance.sub(previousBalance));
+      if (!delta.eq(0) && input.reason.length < 5) throw new BusinessRuleError("سبب تسوية الرصيد مطلوب ويجب أن يتكون من ٥ أحرف على الأقل.");
       const updated = await tx.treasury.update({ where: { id: treasury.id }, data: { currentBalance: targetBalance } });
       let transactionNumber: string | null = null;
       if (!delta.eq(0)) {
@@ -90,7 +92,7 @@ export async function reconcileTreasuryBalanceAction(raw: { treasuryId: string; 
       }
       await writeAudit(tx, { tableName: "Treasury", recordId: treasury.id, action: "UPDATE", oldData: treasury, newData: { ...updated, event: "TREASURY_BALANCE_RECONCILED", previousBalance, targetBalance, delta, reason: input.reason, reconciliationTransactionNumber: transactionNumber }, performedBy: user.id });
       return { transactionNumber, previousBalance: Number(previousBalance), targetBalance: Number(targetBalance), delta: Number(delta) };
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
     await invalidateCache("dashboard");
     for (const path of ["/", "/treasury", "/accounts", "/vouchers", "/reports/daily-movement"]) revalidatePath(path);
     return ok(result);

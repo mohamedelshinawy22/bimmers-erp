@@ -185,3 +185,6 @@
 - [x] Assess duplicate-account merge dependencies and define confirmation, tenant-scoping, and audit safeguards before any merge implementation.
 - [x] Implement a separately confirmed, audited duplicate-account merge workflow only after dependency safeguards are validated.
 - [ ] Add balance-filter regressions, validate, deploy, and obtain authenticated acceptance for customer and supplier cross-direction cases.
+- [x] Audit the active Treasury reconciliation action, modal payload, transaction numbering, and error path against the reported deficit failure.
+- [x] Fix reconciliation adjustment direction, positive persisted amount, validation, tenant scoping, and Arabic error containment.
+- [ ] Add cash reconciliation regressions, validate, deploy, and obtain authenticated acceptance for deficit and surplus cases.

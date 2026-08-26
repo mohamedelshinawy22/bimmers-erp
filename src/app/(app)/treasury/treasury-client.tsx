@@ -500,7 +500,7 @@ function TreasuryReconciliationModal({ treasury, onClose, onDone }: { treasury: 
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const target = Number(targetBalance || 0); const delta = target - treasury.currentBalance;
+  const target = Number(String(targetBalance || "0").replace(/,/g, "").trim()); const delta = target - treasury.currentBalance;
   const submit = () => startTransition(async () => {
     setError(null);
     const result = await reconcileTreasuryBalanceAction({ treasuryId: treasury.id, targetBalance: target, reason });
