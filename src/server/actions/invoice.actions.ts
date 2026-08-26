@@ -128,13 +128,14 @@ export async function updatePurchaseInvoiceAction(raw: UpdatePurchaseInvoiceInpu
 export async function createInvoiceReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
   try {
     const input = createInvoiceReturnSchema.parse(raw);
-    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    const tenant = await getTenantDbFromSession();
+    const original = await tenant.run(() => tenant.prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } }));
     const user = await requirePermission(original?.type === "PURCHASE" ? "invoice.purchase" : "invoice.sale");
-    const result = await createInvoiceReturn(input, {
+    const result = await tenant.run(() => createInvoiceReturn(input, {
       id: user.id,
       canSellBelowMin: can(user.role, "invoice.belowMinPrice"),
       canOverrideDiscount: can(user.role, "invoice.overrideDiscount"),
-    });
+    }));
     await revalidateAfterInvoice(["/", "/invoices", "/sales/returns", "/purchases/returns", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {
@@ -145,10 +146,11 @@ export async function createInvoiceReturnAction(raw: CreateInvoiceReturnInput): 
 export async function createSalesReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
   try {
     const input = createInvoiceReturnSchema.parse(raw);
-    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    const tenant = await getTenantDbFromSession();
+    const original = await tenant.run(() => tenant.prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } }));
     if (original?.type !== "SALE") return { success: false, error: "يجب اختيار فاتورة بيع أصلية لإنشاء مرتجع البيع." };
     const user = await requirePermission("invoice.sale");
-    const result = await createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    const result = await tenant.run(() => createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") }));
     await revalidateAfterInvoice(["/", "/invoices", "/sales/returns", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {
@@ -159,10 +161,11 @@ export async function createSalesReturnAction(raw: CreateInvoiceReturnInput): Pr
 export async function createPurchaseReturnAction(raw: CreateInvoiceReturnInput): Promise<ActionResult<InvoiceResult>> {
   try {
     const input = createInvoiceReturnSchema.parse(raw);
-    const original = await prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } });
+    const tenant = await getTenantDbFromSession();
+    const original = await tenant.run(() => tenant.prisma.invoice.findUnique({ where: { id: input.originalInvoiceId }, select: { type: true } }));
     if (original?.type !== "PURCHASE") return { success: false, error: "يجب اختيار فاتورة شراء أصلية لإنشاء مرتجع الشراء." };
     const user = await requirePermission("invoice.purchase");
-    const result = await createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    const result = await tenant.run(() => createInvoiceReturn(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") }));
     await revalidateAfterInvoice(["/", "/invoices", "/purchases/returns", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {

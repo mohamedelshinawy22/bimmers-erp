@@ -265,3 +265,8 @@
 - [x] Add pure-credit sale and POS returned-error regressions; complete full test, typecheck, and production-build validation.
 - [x] Deploy the POS tenant-context repair and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated pure-credit POS acceptance without creating test invoices.
+- [x] Trace the reported sales-return tenant-context failure through return actions, services, and deployed runtime evidence.
+- [x] Bind sales and purchase return invoice lookup, permission access, and transactional service execution to the resolved tenant context.
+- [x] Add return-action tenant-context and safe error-boundary regression coverage.
+- [x] Complete full test, typecheck, and production-build validation for the return tenant-context repair.
+- [ ] Deploy the return tenant-context repair and obtain authenticated sales-return acceptance without creating test financial data.

@@ -45,6 +45,15 @@ describe("walk-in on-account sale validation", () => {
     expect(service).toContain("if (paidAmount.gt(0) && input.treasuryId)");
   });
 
+  it("runs all return entry points inside the authenticated tenant boundary", () => {
+    const action = source("src/server/actions/invoice.actions.ts");
+    expect(action).toContain("const tenant = await getTenantDbFromSession();");
+    expect(action).toContain("tenant.run(() => tenant.prisma.invoice.findUnique");
+    expect(action).toContain("tenant.run(() => createInvoiceReturn(input");
+    expect(action.match(/tenant\.run\(\(\) => tenant\.prisma\.invoice\.findUnique/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(action.match(/tenant\.run\(\(\) => createInvoiceReturn\(input/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("disables the POS on-account option and renders a customer-selection warning", () => {
     const pos = source("src/app/(app)/pos/pos-terminal.tsx");
     expect(pos).toContain("const onAccountDisabled = option.value === \"ON_ACCOUNT\" && isWalkInCustomer");
