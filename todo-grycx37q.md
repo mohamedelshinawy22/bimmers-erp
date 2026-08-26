@@ -209,3 +209,6 @@
 - [x] Implement sequential bounded stocktake batches with user-visible progress and clear batch failure outcomes.
 - [x] Improve name-only stocktake matching with conservative active-product and contextual-data disambiguation.
 - [ ] Add scalable stocktake regressions, validate, deploy, and obtain authenticated 581-row acceptance.
+- [x] Audit Inventory Excel import preview rows and confirmation-step invalid-row data.
+- [x] Add expandable excluded-row details and a downloadable invalid-row CSV report in Inventory import confirmation.
+- [ ] Add Inventory import exclusion-report regressions, validate, deploy, and obtain authenticated acceptance.
