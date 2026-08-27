@@ -318,4 +318,5 @@
 - [x] Add an Inventory price manager modal with scope controls, editable preview values, margin indicators, and clear financial confirmation.
 - [x] Add price calculation, authorization, confirmation, and audit-metadata regressions.
 - [x] Complete full test, typecheck, and production-build validation for the Inventory price manager.
-- [ ] Deploy the price manager and obtain authenticated preview acceptance; require separate explicit consent before any production price mutation.
+- [x] Deploy the Inventory price manager and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated price-preview acceptance; require separate explicit consent before any production price mutation.
