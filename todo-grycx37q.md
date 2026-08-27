@@ -290,3 +290,9 @@
 - [x] Complete full test, typecheck, and production-build validation for the purchase-cost synchronization repair.
 - [x] Deploy the purchase-cost repair and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated catalog cost-display acceptance for 83515 without creating or altering financial records.
+- [x] Audit Inventory catalog pagination, tenant-scoped query limits, filter semantics, and current table rendering performance.
+- [x] Retrieve the full filtered tenant catalog for Inventory and preserve existing server-side search/filter correctness.
+- [x] Remove Inventory pagination controls and provide continuous scrolling with a sticky header and displayed-total summary.
+- [x] Add full-catalog and pagination-removal regression coverage.
+- [x] Complete full test, typecheck, and production-build validation for the Inventory continuous-catalog release.
+- [ ] Visually verify, deploy, and obtain authenticated Inventory full-catalog acceptance without modifying catalog data.

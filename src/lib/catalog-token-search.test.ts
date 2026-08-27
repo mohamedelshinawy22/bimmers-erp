@@ -53,7 +53,7 @@ describe("Arabic-normalized catalog token search", () => {
     expect(action).toContain("quickSearchParts(tenant.prisma, query, 15, filters)");
   });
 
-  it("wires controlled automotive quick filters through POS, Inventory, and their tenant search boundaries", () => {
+  it("wires controlled automotive quick filters through POS and Inventory's full client catalog", () => {
     const service = source("src/server/services/parts.service.ts");
     const pos = source("src/app/(app)/pos/pos-terminal.tsx");
     const inventory = source("src/app/(app)/inventory/inventory-client.tsx");
@@ -63,7 +63,8 @@ describe("Arabic-normalized catalog token search", () => {
     expect(pos).toContain("QuickCatalogFilterBar");
     expect(pos).toContain("searchPartsForPosAction(term, { brandId");
     expect(inventory).toContain("QuickCatalogFilterBar");
-    expect(inventory).toContain("available: next.inStockOnly ? \"1\" : null");
+    expect(inventory).toContain("updateCatalogFilters({ chassis: next.chassis, brandId: next.brandId, inStockOnly: next.inStockOnly })");
+    expect(inventory).toContain("filterInventoryCatalog(rows");
     expect(filterBar).toContain('label: "X5", value: "E70,F15,G05"');
     expect(filterBar).toContain("المتوفر بالمخزن فقط");
   });
@@ -76,12 +77,11 @@ describe("Arabic-normalized catalog token search", () => {
     expect(searchCatalogProducts("x5 كوعه", products).map((item) => item.id)).toEqual(["turbo-elbow"]);
   });
 
-  it("debounces Inventory query changes into a no-scroll URL replacement and clears the query without requiring Enter", () => {
+  it("filters Inventory's loaded full catalog immediately without a route replacement or pagination reset", () => {
     const inventory = source("src/app/(app)/inventory/inventory-client.tsx");
-    expect(inventory).toContain("window.setTimeout(() => replaceSearchQuery(query), 220)");
-    expect(inventory).toContain('next.delete("page")');
-    expect(inventory).toContain('router.replace(`/inventory?${next.toString()}`, { scroll: false })');
-    expect(inventory).toContain("جارٍ تحديث النتائج…");
-    expect(inventory).toContain('replaceSearchQuery("")');
+    expect(inventory).toContain("filterInventoryCatalog(rows, { ...catalogFilters, query })");
+    expect(inventory).toContain("setQuery(\"\")");
+    expect(inventory).not.toContain("replaceSearchQuery");
+    expect(inventory).not.toContain("pageCount");
   });
 });

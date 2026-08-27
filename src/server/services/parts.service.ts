@@ -190,7 +190,7 @@ export async function searchParts(
     // Column-to-column comparison; Prisma's query builder cannot express it, so
     // it is pushed down as a raw filter. Printing deliberately expands this
     // prefilter to the same guarded upper bound as the final unpaginated query.
-    and.push({ id: { in: await lowStockPartIds(db, input.isForPrint ? 10_000 : input.pageSize * input.page + input.pageSize) } });
+    and.push({ id: { in: await lowStockPartIds(db, input.isForPrint || input.unpaginated ? undefined : input.pageSize * input.page + input.pageSize) } });
   }
   if (and.length) where.AND = and;
 
@@ -199,14 +199,14 @@ export async function searchParts(
       where,
       include: partInclude,
       orderBy: [{ isActive: "desc" }, { nameAr: "asc" }],
-      skip: input.isForPrint ? undefined : (input.page - 1) * input.pageSize,
-      take: input.isForPrint ? 10_000 : input.pageSize,
+      skip: input.isForPrint || input.unpaginated ? undefined : (input.page - 1) * input.pageSize,
+      take: input.isForPrint ? 10_000 : input.unpaginated ? undefined : input.pageSize,
     }),
     db.partItem.count({ where }),
   ]);
 
   const duplicates = await getDuplicateMetadata(db, rows);
-  return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.isForPrint ? rows.length : input.pageSize };
+  return { rows: rows.map((row) => toRow(row, duplicates)), total, page: input.page, pageSize: input.isForPrint || input.unpaginated ? rows.length : input.pageSize };
 }
 
 /**
@@ -341,9 +341,13 @@ export async function getPartById(db: PartsDb, id: string): Promise<PartRow | nu
 }
 
 /** Ids of parts at or below their reorder level, worst deficit first. */
-async function lowStockPartIds(db: PartsDb, limit: number): Promise<string[]> {
+async function lowStockPartIds(db: PartsDb, limit?: number): Promise<string[]> {
   const rows = await db.$queryRaw<Array<{ id: string }>>(
-    Prisma.sql`
+    limit === undefined ? Prisma.sql`
+      SELECT "id" FROM "PartItem"
+      WHERE "isActive" = true AND "isDeleted" = false AND "stockQuantity" <= "minReorderLevel"
+      ORDER BY ("stockQuantity" - "minReorderLevel") ASC
+    ` : Prisma.sql`
       SELECT "id" FROM "PartItem"
       WHERE "isActive" = true AND "isDeleted" = false AND "stockQuantity" <= "minReorderLevel"
       ORDER BY ("stockQuantity" - "minReorderLevel") ASC

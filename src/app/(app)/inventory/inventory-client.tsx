@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   MapPin,
@@ -43,12 +43,11 @@ import { UniversalPrintModal } from "@/components/print/universal-print-modal";
 import { PartCatalogPrintDocument } from "@/components/print/templates/universal-document-templates";
 import type { PartCatalogPrintData } from "@/components/print/universal-print-types";
 import { QuickCatalogFilterBar } from "@/components/catalog/quick-catalog-filter-bar";
+import { filterInventoryCatalog, type InventoryCatalogFilters } from "@/lib/inventory-catalog-filter";
 
 interface InventoryClientProps {
   rows: PartRow[];
   total: number;
-  page: number;
-  pageSize: number;
   filters: { query: string; chassis: string; category: string; brandId: string; inStockOnly: boolean; lowStock: boolean };
   options: {
     brands: Array<{ id: string; name: string; isOem: boolean }>;
@@ -80,8 +79,6 @@ interface InventoryClientProps {
 export function InventoryClient({
   rows,
   total,
-  page,
-  pageSize,
   filters,
   options,
   permissions,
@@ -99,7 +96,7 @@ export function InventoryClient({
   const [ledgerPart, setLedgerPart] = useState<PartRow | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(openPurchaseOnMount);
   const [query, setQuery] = useState(filters.query);
-  const [isSearchPending, startSearchTransition] = useTransition();
+  const [catalogFilters, setCatalogFilters] = useState<InventoryCatalogFilters>(filters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [catalogPrintOpen, setCatalogPrintOpen] = useState(false);
@@ -110,6 +107,11 @@ export function InventoryClient({
   const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
+  const visibleRows = useMemo(
+    () => filterInventoryCatalog(rows, { ...catalogFilters, query }),
+    [rows, catalogFilters, query],
+  );
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((part) => selectedIds.includes(part.id));
   const openCatalogPrint = async () => {
     setCatalogPrintError(null);
     if (selectedParts.length) {
@@ -118,43 +120,15 @@ export function InventoryClient({
       return;
     }
     setCatalogPrintLoading(true);
-    const result = await getPartsForPrintAction({ query: filters.query, chassisCode: filters.chassis || undefined, category: filters.category || undefined, brandId: filters.brandId || undefined, inStockOnly: filters.inStockOnly, lowStockOnly: filters.lowStock });
+    const result = await getPartsForPrintAction({ query, chassisCode: catalogFilters.chassis || undefined, category: catalogFilters.category || undefined, brandId: catalogFilters.brandId || undefined, inStockOnly: catalogFilters.inStockOnly, lowStockOnly: catalogFilters.lowStock });
     setCatalogPrintLoading(false);
     if (!result.success) { setCatalogPrintError(result.error); return; }
     setCatalogPrintData(toCatalogPrintData(result.data.rows, company, "كتالوج وقائمة أسعار الأصناف المصفاة"));
     setCatalogPrintOpen(true);
   };
 
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-
-  const replaceSearchQuery = (nextQuery: string) => {
-    const next = new URLSearchParams(params.toString());
-    const normalizedQuery = nextQuery.trim();
-    if (normalizedQuery) next.set("q", normalizedQuery);
-    else next.delete("q");
-    next.delete("page");
-    startSearchTransition(() => router.replace(`/inventory?${next.toString()}`, { scroll: false }));
-  };
-
-  useEffect(() => {
-    setQuery(filters.query);
-  }, [filters.query]);
-
-  useEffect(() => {
-    if (query.trim() === filters.query.trim()) return;
-    const timer = window.setTimeout(() => replaceSearchQuery(query), 220);
-    return () => window.clearTimeout(timer);
-  }, [query, filters.query]);
-
-  const pushParams = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === null || value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    // Any filter change invalidates the current page offset.
-    if (!("page" in patch)) next.delete("page");
-    router.push(`/inventory?${next.toString()}`);
+  const updateCatalogFilters = (patch: Partial<InventoryCatalogFilters>) => {
+    setCatalogFilters((current) => ({ ...current, ...patch }));
   };
 
   return (
@@ -179,7 +153,7 @@ export function InventoryClient({
               <ShoppingBag size={16} /> فاتورة شراء
             </Button>
           ) : null}
-          <Button variant="outline" onClick={() => void openCatalogPrint()} loading={catalogPrintLoading} disabled={total === 0}><Printer size={16} /> {selectedParts.length ? `طباعة قائمة أسعار (${selectedParts.length})` : `طباعة جميع النتائج (${formatInt(total)})`}</Button>
+          <Button variant="outline" onClick={() => void openCatalogPrint()} loading={catalogPrintLoading} disabled={visibleRows.length === 0}><Printer size={16} /> {selectedParts.length ? `طباعة قائمة أسعار (${selectedParts.length})` : `طباعة جميع النتائج (${formatInt(visibleRows.length)})`}</Button>
           {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
           {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
           {permissions.canAdjust ? <Button variant="outline" onClick={() => setStocktakeOpen(true)}><FileSpreadsheet size={16} /> جرد وتسوية كميات</Button> : null}
@@ -211,7 +185,7 @@ export function InventoryClient({
             className="relative md:col-span-2"
             onSubmit={(e) => {
               e.preventDefault();
-              replaceSearchQuery(query);
+              setQuery(query);
             }}
           >
             <Search size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-bmw-muted" />
@@ -221,11 +195,10 @@ export function InventoryClient({
               placeholder="ابحث فورياً بالاسم أو OEM أو الباركود أو الماركة…"
               className="pl-9 pr-9"
             />
-            {query ? <button type="button" onClick={() => { setQuery(""); replaceSearchQuery(""); }} aria-label="مسح بحث الكتالوج" className="absolute left-2 top-1/2 -translate-y-1/2 rounded p-1 text-bmw-muted transition-colors hover:bg-bmw-card hover:text-white"><X size={15} /></button> : null}
-            {isSearchPending ? <span className="absolute -bottom-4 right-0 text-[10px] text-bmw-blue">جارٍ تحديث النتائج…</span> : null}
+            {query ? <button type="button" onClick={() => setQuery("")} aria-label="مسح بحث الكتالوج" className="absolute left-2 top-1/2 -translate-y-1/2 rounded p-1 text-bmw-muted transition-colors hover:bg-bmw-card hover:text-white"><X size={15} /></button> : null}
           </form>
 
-          <Select value={filters.chassis} onChange={(e) => pushParams({ chassis: e.target.value })}>
+          <Select value={catalogFilters.chassis} onChange={(e) => updateCatalogFilters({ chassis: e.target.value })}>
             <option value="">كل أكواد الشاسيه</option>
             {options.chassis.map((c) => (
               <option key={c.id} value={c.code}>
@@ -234,7 +207,7 @@ export function InventoryClient({
             ))}
           </Select>
 
-          <Select value={filters.category} onChange={(e) => pushParams({ category: e.target.value })}>
+          <Select value={catalogFilters.category} onChange={(e) => updateCatalogFilters({ category: e.target.value })}>
             <option value="">كل التصنيفات</option>
             {options.categories.map((c) => (
               <option key={c} value={c}>
@@ -246,18 +219,18 @@ export function InventoryClient({
           <div className="flex items-center gap-2 md:col-span-4">
             <Button
               size="sm"
-              variant={filters.lowStock ? "danger" : "outline"}
-              onClick={() => pushParams({ lowStock: filters.lowStock ? null : "1" })}
+              variant={catalogFilters.lowStock ? "danger" : "outline"}
+              onClick={() => updateCatalogFilters({ lowStock: !catalogFilters.lowStock })}
             >
               <SlidersHorizontal size={14} /> النواقص الحرجة فقط
             </Button>
-            {(filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock) && (
+            {(query || catalogFilters.chassis || catalogFilters.category || catalogFilters.brandId || catalogFilters.inStockOnly || catalogFilters.lowStock) && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => {
                   setQuery("");
-                  router.push("/inventory");
+                  setCatalogFilters({ query: "", chassis: "", category: "", brandId: "", inStockOnly: false, lowStock: false });
                 }}
               >
                 مسح الفلاتر
@@ -266,21 +239,23 @@ export function InventoryClient({
           </div>
           <div className="md:col-span-4">
             <QuickCatalogFilterBar
-              value={{ chassis: filters.chassis, brandId: filters.brandId, inStockOnly: filters.inStockOnly }}
+              value={{ chassis: catalogFilters.chassis, brandId: catalogFilters.brandId, inStockOnly: catalogFilters.inStockOnly }}
               brands={options.brands}
-              onChange={(next) => pushParams({ chassis: next.chassis, brand: next.brandId, available: next.inStockOnly ? "1" : null })}
-              onClear={() => { setQuery(""); router.push("/inventory"); }}
+              onChange={(next) => updateCatalogFilters({ chassis: next.chassis, brandId: next.brandId, inStockOnly: next.inStockOnly })}
+              onClear={() => { setQuery(""); setCatalogFilters({ query: "", chassis: "", category: "", brandId: "", inStockOnly: false, lowStock: false }); }}
             />
           </div>
         </CardContent>
       </Card>
 
       {/* Catalog */}
-      <Card>
+      <Card className="overflow-hidden">
+        <div className="flex max-h-[calc(100vh-17rem)] min-h-[24rem] flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <Table>
-          <THead>
+          <THead className="sticky top-0 z-20 shadow-sm">
             <TR>
-              <TH><input aria-label="تحديد الكل" type="checkbox" checked={rows.length > 0 && selectedIds.length === rows.length} onChange={(event) => setSelectedIds(event.target.checked ? rows.map((part) => part.id) : [])}/></TH>
+              <TH><input aria-label="تحديد الكل المعروض" type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedIds(event.target.checked ? [...new Set([...selectedIds, ...visibleRows.map((part) => part.id)])] : selectedIds.filter((id) => !visibleRows.some((part) => part.id === id)))}/></TH>
               <TH>رقم OEM</TH>
               <TH>الصنف</TH>
               <TH>الماركة</TH>
@@ -295,20 +270,20 @@ export function InventoryClient({
             </TR>
           </THead>
           <TBody>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <EmptyState
                 colSpan={permissions.canViewCost ? 12 : 11}
-                title={filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock ? "لا توجد أصناف مطابقة" : "لا توجد أصناف في الكتالوج بعد"}
-                description={filters.query || filters.chassis || filters.category || filters.brandId || filters.inStockOnly || filters.lowStock ? "عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج." : "ابدأ بإدخال صنف جديد أو استيراد قائمة البضاعة من ملف إكسيل."}
+                title={query || catalogFilters.chassis || catalogFilters.category || catalogFilters.brandId || catalogFilters.inStockOnly || catalogFilters.lowStock ? "لا توجد أصناف مطابقة" : "لا توجد أصناف في الكتالوج بعد"}
+                description={query || catalogFilters.chassis || catalogFilters.category || catalogFilters.brandId || catalogFilters.inStockOnly || catalogFilters.lowStock ? "عدّل معايير البحث أو أضف صنفاً جديداً للكتالوج." : "ابدأ بإدخال صنف جديد أو استيراد قائمة البضاعة من ملف إكسيل."}
                 icon={<Boxes size={32} />}
               >
-                {!filters.query && !filters.chassis && !filters.category && !filters.brandId && !filters.inStockOnly && !filters.lowStock && permissions.canWrite ? <>
+                {!query && !catalogFilters.chassis && !catalogFilters.category && !catalogFilters.brandId && !catalogFilters.inStockOnly && !catalogFilters.lowStock && permissions.canWrite ? <>
                   <Button size="sm" onClick={() => setAddOpen(true)}><PackagePlus size={14} /> إدخال صنف جديد</Button>
                   <Button size="sm" variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={14} /> استيراد بضاعة من إكسيل</Button>
                 </> : null}
               </EmptyState>
             ) : (
-              rows.map((part) => {
+              visibleRows.map((part) => {
                 const canOpenLedger = permissions.canViewLedger;
                 return (
                 <TR
@@ -423,33 +398,12 @@ export function InventoryClient({
             )}
           </TBody>
         </Table>
-
-        {pageCount > 1 ? (
-          <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3">
-            <p className="text-xs text-bmw-muted">
-              صفحة <span className="tabular font-bold text-white">{page}</span> من{" "}
-              <span className="tabular">{pageCount}</span> • {formatInt(total)} صنف
-            </p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page <= 1}
-                onClick={() => pushParams({ page: String(page - 1) })}
-              >
-                السابق
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page >= pageCount}
-                onClick={() => pushParams({ page: String(page + 1) })}
-              >
-                التالي
-              </Button>
-            </div>
-          </div>
-        ) : null}
+        </div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-black/95 px-4 py-3 text-xs backdrop-blur">
+          <p className="text-bmw-silver">إجمالي الأصناف المعروضة: <span className="tabular font-bold text-white">{formatInt(visibleRows.length)}</span> صنف من أصل <span className="tabular font-bold text-white">{formatInt(total)}</span>.</p>
+          <p className="hidden text-bmw-muted md:block">بحث وفلاتر فورية داخل الكتالوج المحمّل</p>
+        </div>
+        </div>
       </Card>
 
       {/* Modals */}

@@ -21,7 +21,6 @@ interface PageProps {
     brand?: string;
     available?: string;
     lowStock?: string;
-    page?: string;
     new?: string;
     purchase?: string;
   };
@@ -35,7 +34,6 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       const access = await getUserAccess(user.id);
       if (!hasApplicationPermission(access, "part.read")) redirect("/");
 
-      const page = Math.max(1, Number(searchParams.page ?? 1) || 1);
       const query = searchParams.q ?? "";
       const chassisCode = searchParams.chassis ?? "";
       const category = searchParams.category ?? "";
@@ -45,17 +43,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
       const canPurchase = can(user.role, "invoice.purchase");
 
       const [result, options, categories, purchaseOptions, taxRateRaw, company] = await Promise.all([
-    searchParts(tenant.prisma, {
-      query,
-      chassisCode: chassisCode || undefined,
-      engineCode: searchParams.engine || undefined,
-      category: category || undefined,
-      brandId: brandId || undefined,
-      inStockOnly,
-      lowStockOnly,
-      page,
-      pageSize: 25,
-    }).catch(() => ({ rows: [], total: 0, page, pageSize: 25 })),
+    searchParts(tenant.prisma, { unpaginated: true }).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 0 })),
     getPartFormOptions(tenant.prisma).catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
     getPartCategories(tenant.prisma).catch(() => []),
     (canPurchase ? getPurchaseFormOptions(tenant.prisma) : Promise.resolve({ suppliers: [], treasuries: [] })).catch(() => ({ suppliers: [], treasuries: [] })),
@@ -73,8 +61,6 @@ export default async function InventoryPage({ searchParams }: PageProps) {
         <InventoryClient
       rows={serializeData(rows)}
       total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
       filters={{ query, chassis: chassisCode, category, brandId, inStockOnly, lowStock: lowStockOnly }}
       options={{
         brands: serializeData(options.brands),

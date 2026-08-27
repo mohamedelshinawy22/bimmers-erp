@@ -130,6 +130,8 @@ export const searchPartsSchema = z.object({
   lowStockOnly: z.boolean().default(false),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),
+  /** Inventory's continuous catalog view deliberately loads the full tenant catalog. */
+  unpaginated: z.boolean().default(false),
   isForPrint: z.boolean().default(false),
 });
 
