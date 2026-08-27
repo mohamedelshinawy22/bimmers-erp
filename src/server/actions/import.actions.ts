@@ -18,6 +18,7 @@ import { getCompanyProfile } from "@/server/services/settings.service";
 import { tenantFileToken } from "@/lib/import-export/workbook";
 import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
 import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
+import { isGenericBrandName, mergeAutomotiveCodes, parseAutomotiveMetadata } from "@/lib/automotive-metadata";
 
 const nonNegativeSpreadsheetNumber = z.preprocess(
   (value) => parseSpreadsheetNumber(value),
@@ -113,15 +114,19 @@ export async function executeInventoryImportAction(raw: ImportInput, options?: {
 
     const rows = validation
       .filter((entry): entry is { sourceRowNumber: number; result: { success: true; data: ValidImportRow } } => entry.result.success)
-      .map(({ sourceRowNumber, result }) => ({
+      .map(({ sourceRowNumber, result }) => {
+        const inferred = parseAutomotiveMetadata(result.data.nameAr);
+        return {
         ...result.data,
         sourceRowNumber: result.data.sourceRowNumber ?? sourceRowNumber,
         oemNumber: result.data.oemNumber.replace(/\s+/g, "").toUpperCase(),
-        brand: result.data.brand?.trim() || "عام",
+        brand: isGenericBrandName(result.data.brand) && inferred.brand ? inferred.brand : result.data.brand?.trim() || "عام",
         category: result.data.category?.trim() || "بدون تصنيف",
+        chassis: mergeAutomotiveCodes(codes(result.data.chassis), inferred.chassis).join(","),
+        engine: mergeAutomotiveCodes(codes(result.data.engine), inferred.engines).join(","),
         // Missing spreadsheet values are never represented as an empty unique value or a shared OEM fallback.
         barcode: cleanBarcode(result.data.barcode),
-      }));
+      }; });
 
     if (rows.length === 0) throw new BusinessRuleError("لا توجد أصناف سليمة قابلة للاستيراد بعد استبعاد الصفوف غير الصالحة.");
 

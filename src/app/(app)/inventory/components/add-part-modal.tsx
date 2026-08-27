@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { PackagePlus, Save } from "lucide-react";
+import { PackagePlus, Save, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select } from "@/components/ui/input";
 import { Alert, Modal } from "@/components/ui/modal";
@@ -11,6 +11,7 @@ import { formatOemNumber } from "@/lib/utils";
 import type { PartRow } from "@/server/services/parts.service";
 import { BinLocator, type BinOption } from "./bin-locator";
 import { FitmentMatrix, type ChassisOption, type EngineOption } from "./fitment-matrix";
+import { isGenericBrandName, mergeAutomotiveCodes, parseAutomotiveMetadata } from "@/lib/automotive-metadata";
 
 interface AddPartModalProps {
   open: boolean;
@@ -104,11 +105,31 @@ export function AddPartModal({
   const [isActive, setIsActive] = useState(part?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [lastAutoExtractedName, setLastAutoExtractedName] = useState("");
 
   const set = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: event.target.value }));
 
   const numeric = (v: string) => (v.trim() === "" ? 0 : Number(v));
+
+  const applyAutomotiveMetadata = () => {
+    const extracted = parseAutomotiveMetadata(`${form.nameAr} ${form.nameEn}`);
+    const knownChassis = chassis.filter((item) => extracted.chassis.includes(item.code));
+    const knownEngines = engines.filter((item) => extracted.engines.includes(item.code));
+    setChassisIds((current) => [...new Set([...current, ...knownChassis.map((item) => item.id)])]);
+    setEngineIds((current) => [...new Set([...current, ...knownEngines.map((item) => item.id)])]);
+    setChassisCodes((current) => mergeAutomotiveCodes(current, extracted.chassis.filter((code) => !knownChassis.some((item) => item.code === code))));
+    setEngineCodes((current) => mergeAutomotiveCodes(current, extracted.engines.filter((code) => !knownEngines.some((item) => item.code === code))));
+    setForm((current) => ({ ...current, brandName: isGenericBrandName(current.brandName) && extracted.brand ? extracted.brand : current.brandName }));
+  };
+
+  useEffect(() => {
+    const noExistingMetadata = !chassisIds.length && !engineIds.length && !chassisCodes.length && !engineCodes.length && isGenericBrandName(form.brandName);
+    if (open && form.nameAr.trim() && form.nameAr !== lastAutoExtractedName && noExistingMetadata) {
+      applyAutomotiveMetadata();
+      setLastAutoExtractedName(form.nameAr);
+    }
+  }, [open, form.nameAr, chassisIds.length, engineIds.length, chassisCodes.length, engineCodes.length, form.brandName, lastAutoExtractedName]);
 
   const reset = () => {
     setForm(emptyForm);
@@ -120,6 +141,7 @@ export function AddPartModal({
     setIsActive(true);
     setError(null);
     setFieldErrors({});
+    setLastAutoExtractedName("");
   };
 
   const submit = () => {
@@ -223,7 +245,7 @@ export function AddPartModal({
             </Field>
 
             <Field label="اسم الصنف بالعربية" required error={err("nameAr")}>
-              <Input value={form.nameAr} onChange={set("nameAr")} placeholder="طقم تيل فرامل أمامي" />
+              <div className="flex gap-2"><Input value={form.nameAr} onChange={set("nameAr")} placeholder="طقم تيل فرامل أمامي" /><Button type="button" variant="outline" size="sm" onClick={applyAutomotiveMetadata} disabled={!form.nameAr.trim()} title="استخراج الأكواد والماركة تلقائياً"><Sparkles size={15} /> استخراج تلقائي ذكي</Button></div>
             </Field>
 
             <Field label="الاسم بالإنجليزية" error={err("nameEn")}>

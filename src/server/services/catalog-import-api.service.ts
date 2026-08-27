@@ -8,6 +8,7 @@ import { recordStockMovement } from "@/server/services/inventory.service";
 import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
 import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
+import { isGenericBrandName, mergeAutomotiveCodes, parseAutomotiveMetadata } from "@/lib/automotive-metadata";
 
 type Db = PrismaClient;
 type ImportRow = { sourceRowNumber?: number; nameAr?: unknown; oemNumber?: unknown; barcode?: unknown; brand?: unknown; category?: unknown; chassis?: unknown; engine?: unknown; cost?: unknown; price?: unknown; quantity?: unknown; bin?: unknown };
@@ -35,9 +36,10 @@ function normalizedRow(raw: unknown, fallbackRow: number) {
     const safe = parsed === null || !Number.isFinite(parsed) ? 0 : Math.abs(parsed);
     return integer ? Math.trunc(safe) : safe;
   };
+  const inferred = parseAutomotiveMetadata(nameAr);
   return { row: {
     sourceRowNumber, nameAr, oemNumber: oemNumber.replace(/\s+/g, "").toUpperCase(), barcode: normalizeImportText(row.barcode) || null,
-    brand: normalizeImportText(row.brand) || "عام", category: normalizeImportText(row.category) || "بدون تصنيف", chassis: normalizeImportText(row.chassis), engine: normalizeImportText(row.engine), bin: normalizeImportText(row.bin),
+    brand: isGenericBrandName(normalizeImportText(row.brand)) && inferred.brand ? inferred.brand : normalizeImportText(row.brand) || "عام", category: normalizeImportText(row.category) || "بدون تصنيف", chassis: mergeAutomotiveCodes(codes(normalizeImportText(row.chassis)), inferred.chassis).join(","), engine: mergeAutomotiveCodes(codes(normalizeImportText(row.engine)), inferred.engines).join(","), bin: normalizeImportText(row.bin),
     cost: number(row.cost), price: number(row.price), quantity: number(row.quantity, true),
   } } as const;
 }

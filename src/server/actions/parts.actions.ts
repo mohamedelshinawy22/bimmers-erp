@@ -28,6 +28,7 @@ import { TX_OPTIONS, withTxRetry } from "@/server/services/tx";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
 import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
+import { enrichAutomotiveMetadata, isGenericBrandName, mergeAutomotiveCodes, parseAutomotiveMetadata } from "@/lib/automotive-metadata";
 
 function normalizeOptionalPartReference(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -53,7 +54,7 @@ export async function createPartAction(
     const user = await requirePermission("part.write");
     const tenant = await getTenantDbFromSession();
     await tenant.run(() => ensureCatalogCompositeIdentity(tenant.prisma));
-    const input = createPartSchema.parse({
+    const input = createPartSchema.parse(enrichAutomotiveMetadata({
       ...raw,
       binLocationId: normalizeOptionalPartReference(raw.binLocationId),
       buyPriceLast: normalizePartNumber(raw.buyPriceLast),
@@ -62,7 +63,7 @@ export async function createPartAction(
       sellPriceMin: normalizePartNumber(raw.sellPriceMin),
       openingQuantity: Math.trunc(normalizePartNumber(raw.openingQuantity)),
       minReorderLevel: Math.trunc(normalizePartNumber(raw.minReorderLevel, 2)),
-    });
+    }));
 
     const masters = await tenant.run(async () => {
       let brandId = input.brandId;
@@ -165,7 +166,7 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
     const user = await requirePermission("part.write");
     const tenant = await getTenantDbFromSession();
     await tenant.run(() => ensureCatalogCompositeIdentity(tenant.prisma));
-    const input = updatePartSchema.parse({ ...raw, binLocationId: normalizeOptionalPartReference(raw.binLocationId) });
+    const input = updatePartSchema.parse(enrichAutomotiveMetadata({ ...raw, binLocationId: normalizeOptionalPartReference(raw.binLocationId) }));
     if (input.costPrice !== undefined) await requirePermission("part.editCost");
 
     await tenant.run(() => tenant.prisma.$transaction(async (tx) => {
@@ -270,6 +271,66 @@ export async function updatePartAction(raw: UpdatePartInput): Promise<ActionResu
     return ok({ id: input.id });
   } catch (error) {
     return toActionError(error, "updatePartAction");
+  }
+}
+
+const BULK_AUTOMOTIVE_TAG_CONFIRMATION = "تحديث وسوم السيارات تلقائياً";
+const BULK_AUTOMOTIVE_TAG_BATCH_SIZE = 100;
+const bulkAutomotiveTagSchema = z.object({ confirmation: z.string().trim(), cursor: z.string().uuid().optional() });
+
+/** Processes a bounded, manager-confirmed batch; the client deliberately advances the cursor. */
+export async function bulkAutoTagPartsAction(raw: unknown): Promise<ActionResult<{ processed: number; updated: number; nextCursor: string | null }>> {
+  try {
+    const user = await requirePermission("part.bulkAutoTag");
+    const input = bulkAutomotiveTagSchema.parse(raw);
+    if (input.confirmation !== BULK_AUTOMOTIVE_TAG_CONFIRMATION) {
+      throw new BusinessRuleError(`اكتب عبارة التأكيد التالية كاملة: ${BULK_AUTOMOTIVE_TAG_CONFIRMATION}`);
+    }
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      const parts = await tx.partItem.findMany({
+        where: { isDeleted: false, ...(input.cursor ? { id: { gt: input.cursor } } : {}) },
+        orderBy: { id: "asc" },
+        take: BULK_AUTOMOTIVE_TAG_BATCH_SIZE,
+        include: {
+          brand: { select: { name: true } },
+          compatibleChassis: { select: { chassisId: true, chassis: { select: { code: true } } } },
+          compatibleEngines: { select: { engineId: true, engine: { select: { code: true } } } },
+        },
+      });
+      let updated = 0;
+      for (const part of parts) {
+        const inferred = parseAutomotiveMetadata(`${part.nameAr} ${part.nameEn ?? ""}`);
+        const knownChassisCodes = part.compatibleChassis.map((item) => item.chassis.code);
+        const knownEngineCodes = part.compatibleEngines.map((item) => item.engine.code);
+        const addedChassisCodes = mergeAutomotiveCodes(knownChassisCodes, inferred.chassis).filter((code) => !knownChassisCodes.includes(code));
+        const addedEngineCodes = mergeAutomotiveCodes(knownEngineCodes, inferred.engines).filter((code) => !knownEngineCodes.includes(code));
+        const shouldChangeBrand = Boolean(inferred.brand && isGenericBrandName(part.brand.name));
+        if (!addedChassisCodes.length && !addedEngineCodes.length && !shouldChangeBrand) continue;
+
+        const brand = shouldChangeBrand
+          ? await tx.brand.upsert({ where: { normalizedName: inferred.brand!.toLocaleLowerCase("ar-EG") }, update: {}, create: { name: inferred.brand!, normalizedName: inferred.brand!.toLocaleLowerCase("ar-EG") }, select: { id: true, name: true } })
+          : null;
+        const [chassisIds, engineIds] = await Promise.all([
+          Promise.all(addedChassisCodes.map(async (code) => (await tx.bmwChassis.upsert({ where: { code }, update: {}, create: { code, series: "غير محدد", productionStartYear: 0 }, select: { id: true } })).id)),
+          Promise.all(addedEngineCodes.map(async (code) => (await tx.bmwEngine.upsert({ where: { code }, update: {}, create: { code }, select: { id: true } })).id)),
+        ]);
+        if (brand) await tx.partItem.update({ where: { id: part.id }, data: { brandId: brand.id } });
+        if (chassisIds.length) await tx.partChassis.createMany({ data: chassisIds.map((chassisId) => ({ partId: part.id, chassisId })), skipDuplicates: true });
+        if (engineIds.length) await tx.partEngine.createMany({ data: engineIds.map((engineId) => ({ partId: part.id, engineId })), skipDuplicates: true });
+        await writeAudit(tx, {
+          tableName: "PartItem", recordId: part.id, action: "UPDATE", performedBy: user.id,
+          oldData: { brandName: part.brand.name, chassisCodes: knownChassisCodes, engineCodes: knownEngineCodes },
+          newData: { event: "AUTOMOTIVE_METADATA_BULK_TAG", source: "EXPLICIT_MANAGER_BATCH", brandName: brand?.name ?? part.brand.name, addedChassisCodes, addedEngineCodes },
+        });
+        updated += 1;
+      }
+      return { processed: parts.length, updated, nextCursor: parts.length === BULK_AUTOMOTIVE_TAG_BATCH_SIZE ? parts.at(-1)?.id ?? null : null };
+    }, TX_OPTIONS)));
+    if (!result.nextCursor) { revalidatePath("/inventory"); revalidatePath("/pos"); }
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "bulkAutoTagPartsAction");
   }
 }
 

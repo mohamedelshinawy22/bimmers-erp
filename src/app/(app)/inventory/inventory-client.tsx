@@ -18,6 +18,7 @@ import {
   Download,
   ChevronDown,
   X,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -27,7 +28,7 @@ import { Alert, Modal } from "@/components/ui/modal";
 import { EmptyState, TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { CURRENCY, formatInt, formatMoney, formatOemNumber } from "@/lib/utils";
 import type { PartRow } from "@/server/services/parts.service";
-import { adjustStockAction, deletePartAction, getPartsForPrintAction } from "@/server/actions/parts.actions";
+import { adjustStockAction, bulkAutoTagPartsAction, deletePartAction, getPartsForPrintAction } from "@/server/actions/parts.actions";
 import { exportInventoryDataAction } from "@/server/actions/inventory-export.actions";
 import { AddPartModal } from "./components/add-part-modal";
 import type { BinOption } from "./components/bin-locator";
@@ -65,6 +66,7 @@ interface InventoryClientProps {
     canPurchase: boolean;
     canViewLedger: boolean;
     canDelete: boolean;
+    canBulkAutoTag: boolean;
   };
   purchaseOptions: {
     accounts: Array<{ id: string; name: string; accountNumber: string; type: string; phone?: string | null; currentBalance: number }>;
@@ -106,6 +108,11 @@ export function InventoryClient({
   const [deleteTarget, setDeleteTarget] = useState<PartRow[] | null>(null);
   const [excelImportOpen, setExcelImportOpen] = useState(() => params.get("import") === "1");
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkTagConfirmation, setBulkTagConfirmation] = useState("");
+  const [bulkTagProgress, setBulkTagProgress] = useState<{ processed: number; updated: number } | null>(null);
+  const [bulkTagError, setBulkTagError] = useState<string | null>(null);
+  const [bulkTagPending, setBulkTagPending] = useState(false);
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
   const visibleRows = useMemo(
     () => filterInventoryCatalog(rows, { ...catalogFilters, query }),
@@ -129,6 +136,33 @@ export function InventoryClient({
 
   const updateCatalogFilters = (patch: Partial<InventoryCatalogFilters>) => {
     setCatalogFilters((current) => ({ ...current, ...patch }));
+  };
+
+  const runBulkAutomotiveTagging = async () => {
+    setBulkTagError(null);
+    if (bulkTagConfirmation.trim() !== "تحديث وسوم السيارات تلقائياً") {
+      setBulkTagError("اكتب عبارة التأكيد كاملة قبل التنفيذ.");
+      return;
+    }
+    setBulkTagPending(true);
+    let cursor: string | undefined;
+    let processed = 0;
+    let updated = 0;
+    try {
+      do {
+        const result = await bulkAutoTagPartsAction({ confirmation: bulkTagConfirmation, cursor });
+        if (!result.success) throw new Error(result.error);
+        processed += result.data.processed;
+        updated += result.data.updated;
+        setBulkTagProgress({ processed, updated });
+        cursor = result.data.nextCursor ?? undefined;
+      } while (cursor);
+      router.refresh();
+    } catch (error) {
+      setBulkTagError(error instanceof Error ? error.message : "تعذر تحديث وسوم السيارات تلقائياً.");
+    } finally {
+      setBulkTagPending(false);
+    }
   };
 
   return (
@@ -157,6 +191,7 @@ export function InventoryClient({
           {selectedParts.length > 0 ? <Button variant="outline" onClick={() => setBarcodePrintOpen(true)}><Printer size={16} /> طباعة ملصقات الباركود ({selectedParts.length})</Button> : null}
           {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
           {permissions.canAdjust ? <Button variant="outline" onClick={() => setStocktakeOpen(true)}><FileSpreadsheet size={16} /> جرد وتسوية كميات</Button> : null}
+          {permissions.canBulkAutoTag ? <Button variant="outline" onClick={() => { setBulkTagError(null); setBulkTagProgress(null); setBulkTagOpen(true); }}><Sparkles size={16} /> استخراج وسوم السيارات</Button> : null}
           {permissions.canWrite ? (
             <Button onClick={() => setAddOpen(true)}>
               <PackagePlus size={16} /> إدخال صنف جديد
@@ -462,6 +497,7 @@ export function InventoryClient({
       {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
       {stocktakeOpen ? <StocktakeReconciliationModal onClose={() => setStocktakeOpen(false)} onDone={() => { setStocktakeOpen(false); router.refresh(); }} /> : null}
+      {bulkTagOpen ? <Modal open onClose={() => !bulkTagPending && setBulkTagOpen(false)} title="استخراج وسوم السيارات تلقائياً" description="سيحلل النظام أسماء الأصناف على دفعات ويضيف فقط أكواد الشاسيه والمحرك والماركة المستخرجة إلى الحقول الفارغة أو العامة. لا يغيّر الأسعار أو الرصيد أو الفواتير." size="md" footer={<><Button variant="ghost" onClick={() => setBulkTagOpen(false)} disabled={bulkTagPending}>إلغاء</Button><Button onClick={() => void runBulkAutomotiveTagging()} loading={bulkTagPending}>اعتماد التحديث</Button></>}><div className="space-y-3">{bulkTagError ? <Alert variant="error">{bulkTagError}</Alert> : null}{bulkTagProgress ? <Alert variant="success">تمت معالجة {formatInt(bulkTagProgress.processed)} صنف وتحديث {formatInt(bulkTagProgress.updated)} صنف.</Alert> : null}<Alert variant="warning">هذه عملية جماعية مدققة ومتدرجة. لن تبدأ إلا بعد كتابة عبارة التأكيد، وتحتفظ بالأكواد والماركات التي اختارها المستخدم مسبقاً.</Alert><Field label="عبارة التأكيد" required hint="اكتب: تحديث وسوم السيارات تلقائياً"><Input value={bulkTagConfirmation} onChange={(event) => setBulkTagConfirmation(event.target.value)} disabled={bulkTagPending} /></Field></div></Modal> : null}
 
       {permissions.canPurchase ? (
         <PurchaseInvoiceModal

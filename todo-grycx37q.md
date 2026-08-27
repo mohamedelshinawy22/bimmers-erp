@@ -304,3 +304,10 @@
 - [x] Complete full test, typecheck, and production-build validation for the all-account Purchase Invoice selector.
 - [x] Deploy the all-account Purchase Invoice selector and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated Purchase Invoice account-selector acceptance without creating financial test data.
+- [x] Audit product schema, existing chassis/engine/brand taxonomies, form state, and metadata update actions for smart automotive extraction.
+- [x] Add deterministic automotive name parsing for recognized BMW chassis, engine codes, and approved brand aliases.
+- [x] Add explicit «استخراج الأكواد والماركة تلقائياً» controls to product create and edit forms without silently overwriting existing metadata.
+- [x] Implement a manager-authorized, confirmation-protected, audited bulk auto-tagging action that is never run during deployment or startup.
+- [x] Add parser, form integration, authorization, and audit-metadata regressions.
+- [x] Complete full test, typecheck, and production-build validation for smart automotive metadata extraction.
+- [ ] Deploy the smart metadata release and obtain authenticated product-form acceptance for ابره فانوس n13 f30 avortex; request separate consent before any bulk data change.
