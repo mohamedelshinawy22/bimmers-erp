@@ -302,4 +302,5 @@
 - [x] Update the Purchase Invoice selector label, placeholder, account-type badge, and balance context for all account types.
 - [x] Add all-account purchase lookup and payable-posting regressions.
 - [x] Complete full test, typecheck, and production-build validation for the all-account Purchase Invoice selector.
-- [ ] Deploy the selector update and obtain authenticated Purchase Invoice acceptance without creating financial test data.
+- [x] Deploy the all-account Purchase Invoice selector and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated Purchase Invoice account-selector acceptance without creating financial test data.
