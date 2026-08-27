@@ -336,4 +336,5 @@
 - [x] Audit why Bavaria Settings receives stale or placeholder tenant-route license dates instead of the current Master License Hub record.
 - [x] Bind the Settings subscription card to authoritative live license dates and user/device quotas without hardcoded Bavaria values or secret disclosure.
 - [x] Add quota presentation and stale-date regression coverage for the Settings subscription data boundary.
-- [ ] Validate, deploy, and obtain authenticated Bavaria Settings acceptance for the synchronized subscription dates and quotas.
+- [x] Validate and deploy the ERP subscription synchronization release, then verify its non-mutating production health and runtime logs.
+- [ ] Obtain authenticated Bavaria Settings acceptance for the synchronized subscription dates and quotas.
