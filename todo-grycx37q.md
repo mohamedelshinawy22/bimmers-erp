@@ -283,3 +283,9 @@
 - [x] Complete full test, typecheck, and production-build validation for the Arabic catalog-search repair.
 - [x] Deploy the Arabic catalog-search repair and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated Inventory/POS search acceptance for طلمبة مياه إضافية N63 and طلمبه مياه F02.
+- [x] Audit purchase invoice stock-cost posting, catalog cost mapping, and reliable tenant ledger fallback sources.
+- [x] Synchronize future purchase invoice cost into the product cost field and display a non-mutating historical purchase-cost fallback for legacy zero-cost catalog entries.
+- [x] Evaluate a separately authorized historical cost backfill; do not run startup or deployment data mutations.
+- [x] Add purchase-cost synchronization and historical fallback regressions.
+- [x] Complete full test, typecheck, and production-build validation for the purchase-cost synchronization repair.
+- [ ] Deploy the repair and obtain authenticated catalog cost-display acceptance for 83515 without creating or altering financial records.

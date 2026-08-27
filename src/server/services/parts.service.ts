@@ -4,6 +4,7 @@ import { money, num, sanitizeOemForSearch } from "@/lib/utils";
 import { normalizeSearchTerm } from "@/lib/search-utils";
 import { mapStockLedgerFinancials } from "@/lib/stock-ledger-financials";
 import { searchCatalogProducts, searchTokens } from "@/lib/catalog-token-search";
+import { resolveCatalogPurchaseCost } from "@/lib/catalog-purchase-cost";
 import { searchPartsSchema, type SearchPartsInput } from "@/lib/validations/parts";
 
 /** Plain-JSON shape safe to hand to client components (no Decimal instances). */
@@ -45,6 +46,14 @@ const partInclude = {
   binLocation: { select: { fullCode: true } },
   compatibleChassis: { select: { chassisId: true, chassis: { select: { code: true } } } },
   compatibleEngines: { select: { engineId: true, engine: { select: { code: true } } } },
+  // Read-only fallback for legacy catalog rows that were created before their
+  // purchase cost was persisted to PartItem.buyPriceAvg.
+  invoiceItems: {
+    where: { invoice: { type: "PURCHASE", isVoided: false } },
+    orderBy: { invoice: { createdAt: "desc" } },
+    take: 1,
+    select: { unitCostSnapshot: true, unitPrice: true },
+  },
 } satisfies Prisma.PartItemInclude;
 
 type PartWithRelations = Prisma.PartItemGetPayload<{ include: typeof partInclude }>;
@@ -84,6 +93,12 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
   const brandName = p.brand?.name?.trim() || "بدون علامة تجارية";
   const oemNumber = p.oemNumber?.trim() || p.id;
   const nameAr = p.nameAr?.trim() || "صنف بدون اسم";
+  const latestPurchase = p.invoiceItems[0];
+  const effectivePurchaseCost = resolveCatalogPurchaseCost(
+    num(p.buyPriceAvg),
+    latestPurchase ? num(latestPurchase.unitCostSnapshot) : null,
+    latestPurchase ? num(latestPurchase.unitPrice) : null,
+  );
   return {
     id: p.id,
     oemNumber,
@@ -99,7 +114,7 @@ function toRow(p: PartWithRelations, duplicates: DuplicateMetadata = { oemCounts
     sidePosition: p.sidePosition,
     binLocationId: p.binLocationId,
     binCode: p.binLocation?.fullCode ?? null,
-    buyPriceAvg: num(p.buyPriceAvg),
+    buyPriceAvg: effectivePurchaseCost,
     sellPriceRetail: num(p.sellPriceRetail),
     sellPriceWholesale: num(p.sellPriceWholesale),
     sellPriceMin: num(p.sellPriceMin),

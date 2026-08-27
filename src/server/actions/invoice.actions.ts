@@ -86,12 +86,12 @@ export async function createPurchaseInvoiceAction(
   try {
     const user = await requirePermission("invoice.purchase");
     const input = createPurchaseInvoiceSchema.parse(raw);
-
-    const result = await createPurchaseInvoice(input, {
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => createPurchaseInvoice(input, {
       id: user.id,
       canSellBelowMin: can(user.role, "invoice.belowMinPrice"),
       canOverrideDiscount: can(user.role, "invoice.overrideDiscount"),
-    });
+    }));
 
     await revalidateAfterInvoice(["/", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
@@ -117,7 +117,8 @@ export async function updatePurchaseInvoiceAction(raw: UpdatePurchaseInvoiceInpu
   try {
     const user = await requirePermission("invoice.purchase");
     const input = updatePurchaseInvoiceSchema.parse(raw);
-    const result = await updatePurchaseInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") });
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => updatePurchaseInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount") }));
     await revalidateAfterInvoice(["/", "/invoices", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {
