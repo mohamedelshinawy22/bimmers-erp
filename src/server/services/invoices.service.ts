@@ -228,13 +228,13 @@ export async function getInvoiceDetail(db: InvoiceDb, invoiceId: string) {
 
 export type InvoiceDetail = NonNullable<Awaited<ReturnType<typeof getInvoiceDetail>>>;
 
-/** Suppliers for the goods-receipt screen. */
+/** Active ledger accounts for the goods-receipt screen, including dual-role parties. */
 export async function getPurchaseFormOptions(db: PurchaseOptionsDb) {
-  const [suppliers, treasuries] = await Promise.all([
+  const [accounts, treasuries] = await Promise.all([
     db.account.findMany({
-      where: { isActive: true, type: "SUPPLIER" },
+      where: { isActive: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, accountNumber: true, phone: true, currentBalance: true },
+      select: { id: true, name: true, accountNumber: true, phone: true, type: true, currentBalance: true },
     }),
     db.treasury.findMany({
       where: { isActive: true },
@@ -243,7 +243,7 @@ export async function getPurchaseFormOptions(db: PurchaseOptionsDb) {
     }),
   ]);
   return {
-    suppliers: suppliers.map((s) => ({ ...s, currentBalance: num(s.currentBalance) })),
+    accounts: accounts.map((account) => ({ ...account, currentBalance: num(account.currentBalance) })),
     treasuries: treasuries.map((t) => ({ ...t, currentBalance: num(t.currentBalance) })),
   };
 }

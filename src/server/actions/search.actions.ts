@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { toActionError, ok, type ActionResult } from "@/lib/action-result";
 import { quickSearchParts, type PosPartRow } from "@/server/services/parts.service";
 import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
-import { getAccountVehicles, searchPosAccounts, searchSupplierAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
+import { getAccountVehicles, searchPosAccounts, searchPurchaseAccounts, type AccountVehicle, type PosAccount } from "@/server/services/accounts.service";
 import { z } from "zod";
 
 const posPartSearchFiltersSchema = z.object({
@@ -30,13 +30,13 @@ export async function searchPosAccountsAction(query: string): Promise<ActionResu
   }
 }
 
-export async function searchSuppliersAction(query: string): Promise<ActionResult<PosAccount[]>> {
+export async function searchPurchaseAccountsAction(query: string): Promise<ActionResult<PosAccount[]>> {
   try {
     await requirePermission("account.read");
     const tenant = await getTenantDbFromSession();
-    return ok(await tenant.run(() => searchSupplierAccounts(query, 30)));
+    return ok(await tenant.run(() => searchPurchaseAccounts(query, 30)));
   } catch (error) {
-    return toActionError(error, "searchSuppliersAction");
+    return toActionError(error, "searchPurchaseAccountsAction");
   }
 }
 

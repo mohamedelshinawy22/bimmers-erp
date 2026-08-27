@@ -67,7 +67,7 @@ interface InventoryClientProps {
     canDelete: boolean;
   };
   purchaseOptions: {
-    suppliers: Array<{ id: string; name: string; accountNumber: string; currentBalance: number }>;
+    accounts: Array<{ id: string; name: string; accountNumber: string; type: string; phone?: string | null; currentBalance: number }>;
     treasuries: Array<{ id: string; name: string; currentBalance: number }>;
     taxRatePercent: number;
   };
@@ -467,7 +467,7 @@ export function InventoryClient({
         <PurchaseInvoiceModal
           open={purchaseOpen}
           onClose={() => setPurchaseOpen(false)}
-          suppliers={purchaseOptions.suppliers}
+          accounts={purchaseOptions.accounts}
           treasuries={purchaseOptions.treasuries}
           taxRatePercent={purchaseOptions.taxRatePercent}
           company={{ name: company.name, logoUrl: company.logoUrl }}

@@ -297,3 +297,9 @@
 - [x] Complete full test, typecheck, and production-build validation for the Inventory continuous-catalog release.
 - [x] Deploy the Inventory continuous-catalog release and verify its non-mutating production health and runtime-log boundary.
 - [ ] Visually verify and obtain authenticated Inventory full-catalog acceptance without modifying catalog data.
+- [x] Audit Purchase Invoice account lookup, account-type validation, and payable posting semantics for active customer, workshop, and general accounts.
+- [x] Allow any active tenant account in Purchase Invoice lookup and server validation while preserving tenant isolation and correct payable balance signs.
+- [x] Update the Purchase Invoice selector label, placeholder, account-type badge, and balance context for all account types.
+- [x] Add all-account purchase lookup and payable-posting regressions.
+- [x] Complete full test, typecheck, and production-build validation for the all-account Purchase Invoice selector.
+- [ ] Deploy the selector update and obtain authenticated Purchase Invoice acceptance without creating financial test data.

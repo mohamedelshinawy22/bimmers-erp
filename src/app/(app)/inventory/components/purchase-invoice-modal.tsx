@@ -18,7 +18,7 @@ import { createQuickPosAccountAction } from "@/server/actions/accounts.actions";
 import { useInvoicePrint } from "@/hooks/use-invoice-print";
 import { PrintContainer } from "@/components/print/print-container";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
-import { SupplierCombobox, type SupplierOption } from "@/components/purchases/supplier-combobox";
+import { PurchaseAccountCombobox, type PurchaseAccountOption } from "@/components/purchases/supplier-combobox";
 
 interface Line {
   part: PosPartRow;
@@ -30,7 +30,7 @@ interface Line {
 interface PurchaseInvoiceModalProps {
   open: boolean;
   onClose: () => void;
-  suppliers: SupplierOption[];
+  accounts: PurchaseAccountOption[];
   treasuries: Array<{ id: string; name: string; currentBalance: number }>;
   taxRatePercent: number;
   initialDraft?: { invoiceId: string; accountId: string; treasuryId: string | null; paymentMethod: "CASH" | "VISA" | "ON_ACCOUNT"; discountAmount: number; paidAmount: number; notes: string | null; lines: Line[] };
@@ -44,7 +44,7 @@ interface PurchaseInvoiceModalProps {
  * added through manual adjustment, which had no cost input — so received parts
  * were valued at zero and every subsequent sale reported ~100% margin.
  */
-function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (supplier: SupplierOption) => void }) {
+function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: string; onClose: () => void; onCreated: (supplier: PurchaseAccountOption) => void }) {
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -54,7 +54,7 @@ function QuickSupplierModal({ initialName, onClose, onCreated }: { initialName: 
   const submit = () => startTransition(async () => {
     const result = await createQuickPosAccountAction({ name, phone, address, openingBalance: Number(openingBalance) || 0, type: "SUPPLIER", defaultPriceTier: "RETAIL", notes: "إنشاء سريع من فاتورة شراء" });
     if (!result.success) { setError(result.error); return; }
-    onCreated({ id: result.data.id, name: result.data.name, accountNumber: result.data.accountNumber, phone: phone.trim() || null, currentBalance: result.data.currentBalance });
+    onCreated({ id: result.data.id, name: result.data.name, accountNumber: result.data.accountNumber, type: "SUPPLIER", phone: phone.trim() || null, currentBalance: result.data.currentBalance });
   });
   return <Modal open onClose={onClose} title="مورد جديد سريع" description="سيتم اختيار المورد الجديد في فاتورة الشراء الحالية دون فقدان بنود المسودة." size="md" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button loading={pending} disabled={!name.trim()} onClick={submit}>إنشاء واختيار</Button></>}><div className="grid gap-3 sm:grid-cols-2">{error ? <div className="sm:col-span-2"><Alert variant="error">{error}</Alert></div> : null}<Field label="اسم المورد" required className="sm:col-span-2"><Input value={name} onChange={(event) => setName(event.target.value)} autoFocus placeholder="اسم المورد" /></Field><Field label="الهاتف"><Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="رقم الهاتف (اختياري)" dir="ltr" className="text-left" /></Field><Field label="الرصيد الافتتاحي"><Input type="number" step="0.01" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} /></Field><Field label="العنوان" className="sm:col-span-2"><Textarea rows={2} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="العنوان (اختياري)" /></Field></div></Modal>;
 }
@@ -68,7 +68,7 @@ function QuickPartModal({ initialName, onClose, onCreated }: { initialName: stri
 export function PurchaseInvoiceModal({
   open,
   onClose,
-  suppliers,
+  accounts,
   treasuries,
   taxRatePercent,
   initialDraft,
@@ -78,7 +78,7 @@ export function PurchaseInvoiceModal({
   const [pending, startTransition] = useTransition();
 
   const [supplierId, setSupplierId] = useState("");
-  const [supplierOptions, setSupplierOptions] = useState(suppliers);
+  const [accountOptions, setAccountOptions] = useState(accounts);
   const [treasuryId, setTreasuryId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "VISA" | "ON_ACCOUNT">("ON_ACCOUNT");
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
@@ -97,7 +97,7 @@ export function PurchaseInvoiceModal({
   const isEditMode = Boolean(initialDraft);
   const { data: printData, format, state: printState, print, onAfterPrint } = useInvoicePrint(done?.invoiceId);
 
-  useEffect(() => { setSupplierOptions(suppliers); }, [suppliers]);
+  useEffect(() => { setAccountOptions(accounts); }, [accounts]);
 
   useEffect(() => {
     if (!open) return;
@@ -291,14 +291,14 @@ export function PurchaseInvoiceModal({
         {error ? <Alert variant="error">{error}</Alert> : null}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="المورد" required>
+          <Field label="الحساب / المورد" required>
             <div className="space-y-1.5">
-              <SupplierCombobox
-                suppliers={supplierOptions}
+              <PurchaseAccountCombobox
+                accounts={accountOptions}
                 selectedId={supplierId}
-                onSelect={(supplier) => {
-                  setSupplierOptions((current) => current.some((item) => item.id === supplier.id) ? current : [...current, supplier].sort((a, b) => a.name.localeCompare(b.name, "ar")));
-                  setSupplierId(supplier.id);
+                onSelect={(account) => {
+                  setAccountOptions((current) => current.some((item) => item.id === account.id) ? current : [...current, account].sort((a, b) => a.name.localeCompare(b.name, "ar")));
+                  setSupplierId(account.id);
                 }}
                 onQuickCreate={() => setQuickSupplierOpen(true)}
                 onMoveToPartSearch={() => searchRef.current?.focus()}
@@ -390,7 +390,7 @@ export function PurchaseInvoiceModal({
         {query.trim().length >= 2 && !searching && results.length === 0 ? <Button type="button" variant="outline" className="w-full" onClick={() => setQuickPartOpen(true)}><Plus size={16}/> إضافة صنف جديد "{query.trim()}"</Button> : null}
         <Button type="button" variant="ghost" size="sm" onClick={() => setQuickPartOpen(true)}><Plus size={14}/> صنف جديد (Alt+P)</Button>
         {quickPartOpen ? <QuickPartModal initialName={query} onClose={() => setQuickPartOpen(false)} onCreated={async (oemNumber, cost) => { const result = await searchPartsForPosAction(oemNumber); if (result.success) { const part = result.data.find((item) => item.oemNumber === oemNumber); if (part) { addLine(part); setLines((current) => current.map((line) => line.part.id === part.id ? { ...line, unitPrice: cost } : line)); } } setQuickPartOpen(false); }} /> : null}
-        {quickSupplierOpen ? <QuickSupplierModal initialName="" onClose={() => setQuickSupplierOpen(false)} onCreated={(supplier) => { setSupplierOptions((current) => current.some((item) => item.id === supplier.id) ? current : [...current, supplier].sort((a, b) => a.name.localeCompare(b.name, "ar"))); setSupplierId(supplier.id); setQuickSupplierOpen(false); }} /> : null}
+        {quickSupplierOpen ? <QuickSupplierModal initialName="" onClose={() => setQuickSupplierOpen(false)} onCreated={(supplier) => { setAccountOptions((current) => current.some((item) => item.id === supplier.id) ? current : [...current, supplier].sort((a, b) => a.name.localeCompare(b.name, "ar"))); setSupplierId(supplier.id); setQuickSupplierOpen(false); }} /> : null}
 
         {lines.length === 0 ? (
           <Card>

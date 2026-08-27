@@ -224,25 +224,19 @@ export async function lockAccountForUpdate(
 }
 
 /**
- * Account type must match the document type.
- *
- * `Account.currentBalance` is a single signed field, so booking a credit sale
- * against a SUPPLIER would net a receivable against a payable and make the
- * amount invisible to both the receivables and payables dashboard KPIs (which
- * filter by type *and* sign).
+ * Sales remain restricted to customer-facing accounts. Purchases may be
+ * recorded against any active ledger account: the service credits
+ * `currentBalance` for the unpaid amount regardless of the account type,
+ * preserving the account's signed balance history for dual-role parties.
  */
-const ALLOWED_ACCOUNT_TYPES: Record<"SALE" | "PURCHASE", readonly AccountType[]> = {
-  SALE: ["CUSTOMER", "WORKSHOP_BMW"],
-  PURCHASE: ["SUPPLIER"],
-};
+const SALE_ACCOUNT_TYPES: readonly AccountType[] = ["CUSTOMER", "WORKSHOP_BMW"];
 
 export function assertAccountTypeFor(
   document: "SALE" | "PURCHASE",
   account: { name: string; type: AccountType },
 ): void {
-  const allowed = ALLOWED_ACCOUNT_TYPES[document];
-  if (!allowed.includes(account.type)) {
-    const label = document === "SALE" ? "فاتورة بيع" : "فاتورة شراء";
+  if (document === "SALE" && !SALE_ACCOUNT_TYPES.includes(account.type)) {
+    const label = "فاتورة بيع";
     throw new BusinessRuleError(
       `لا يمكن تحرير ${label} على الحساب "${account.name}" لأن نوعه (${account.type}) غير مناسب.`,
     );

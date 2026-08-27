@@ -46,7 +46,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
     searchParts(tenant.prisma, { unpaginated: true }).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 0 })),
     getPartFormOptions(tenant.prisma).catch(() => ({ brands: [], chassis: [], engines: [], bins: [] })),
     getPartCategories(tenant.prisma).catch(() => []),
-    (canPurchase ? getPurchaseFormOptions(tenant.prisma) : Promise.resolve({ suppliers: [], treasuries: [] })).catch(() => ({ suppliers: [], treasuries: [] })),
+    (canPurchase ? getPurchaseFormOptions(tenant.prisma) : Promise.resolve({ accounts: [], treasuries: [] })).catch(() => ({ accounts: [], treasuries: [] })),
     getSetting("TAX_RATE_PERCENT", "0", tenant.prisma),
     getCompanyProfile(tenant.prisma),
   ]);
@@ -80,7 +80,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
         canDelete: can(user.role, "part.deactivate"),
       }}
       purchaseOptions={{
-        suppliers: serializeData(purchaseOptions.suppliers),
+        accounts: serializeData(purchaseOptions.accounts),
         treasuries: serializeData(purchaseOptions.treasuries),
         taxRatePercent: Math.min(100, Math.max(0, Number(taxRateRaw) || 0)),
       }}

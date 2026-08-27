@@ -184,13 +184,13 @@ export async function searchPosAccounts(query: string, limit = 30): Promise<PosA
   }));
 }
 
-export async function searchSupplierAccounts(query: string, limit = 30): Promise<PosAccount[]> {
+/** Purchase counterparties may be any active account, including dual-role parties. */
+export async function searchPurchaseAccounts(query: string, limit = 30): Promise<PosAccount[]> {
   const term = query.trim();
   const { variations } = normalizeSearchTerm(term);
   const accounts = await prisma.account.findMany({
     where: {
       isActive: true,
-      type: "SUPPLIER",
       ...(term ? {
         OR: variations.flatMap((value) => [
           { name: { contains: value } },
