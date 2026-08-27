@@ -281,4 +281,5 @@
 - [x] Normalize Arabic letters and punctuation consistently for multi-keyword catalog search without introducing global-database access or risky tenant schema changes.
 - [x] Add Arabic spelling-variant and chassis-token catalog search regressions.
 - [x] Complete full test, typecheck, and production-build validation for the Arabic catalog-search repair.
-- [ ] Deploy the Arabic catalog-search repair and obtain authenticated Inventory/POS acceptance for طلمبة مياه إضافية N63 and طلمبه مياه F02.
+- [x] Deploy the Arabic catalog-search repair and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated Inventory/POS search acceptance for طلمبة مياه إضافية N63 and طلمبه مياه F02.
