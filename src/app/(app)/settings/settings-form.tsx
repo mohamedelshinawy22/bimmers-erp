@@ -10,8 +10,10 @@ import { Alert } from "@/components/ui/modal";
 import { UsersPanel } from "./users-panel";
 import { FullSystemResetModal } from "@/components/settings/full-system-reset-modal";
 import { BackupRecoveryHub } from "@/components/settings/backup-recovery-hub";
+import { LicenseSubscriptionCard } from "@/components/settings/license-subscription-card";
 import type { ManagedUser } from "@/server/services/audit.service";
 import type { CompanyProfile } from "@/server/services/settings.service";
+import type { SubscriptionDetails } from "@/lib/license-subscription";
 import { updateCompanySettingsAction, updateSettingsAction } from "@/server/actions/settings.actions";
 import {
   BOOLEAN_SETTING_KEYS as BOOLEAN_KEYS,
@@ -33,6 +35,7 @@ interface SettingsFormProps {
   users: ManagedUser[] | null;
   currentUserId: string;
   companyProfile: CompanyProfile;
+  subscription: SubscriptionDetails;
   tenantQuota: { maxSubUsers: number; activeSubUsers: number } | null;
   treasuries: Array<{ id: string; name: string; type: string }>;
   warehouses: string[];
@@ -44,7 +47,7 @@ interface SettingsFormProps {
 
 const PROFILE_KEYS = new Set(["COMPANY_NAME", "COMMERCIAL_NAME", "COMPANY_PHONE", "COMPANY_PHONE_SECONDARY", "COMPANY_ADDRESS", "TAX_NUMBER", "COMMERCIAL_REGISTER", "COMPANY_LOGO_URL", "INVOICE_FOOTER"]);
 
-export function SettingsForm({ groups, canWrite, canFactoryReset, users, currentUserId, companyProfile, tenantQuota, treasuries, warehouses }: SettingsFormProps) {
+export function SettingsForm({ groups, canWrite, canFactoryReset, users, currentUserId, companyProfile, subscription, tenantQuota, treasuries, warehouses }: SettingsFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -214,21 +217,7 @@ export function SettingsForm({ groups, canWrite, canFactoryReset, users, current
 
       {canFactoryReset ? <Card className="border-2 border-bmw-mRed/50 bg-bmw-mRed/5"><CardHeader><CardTitle className="text-rose-300"><Flame size={18} /> منطقة الخطر: إعادة ضبط المصنع وتصفير النظام</CardTitle><p className="text-xs text-bmw-muted">يحذف هذا الإجراء جميع البيانات التشغيلية نهائياً، ثم ينشئ خط أساس نظيفاً. لا يمكن تنفيذه إلا من حساب مدير النظام وبعد إدخال عبارة التأكيد وكلمة المرور الحالية.</p></CardHeader><CardContent className="flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-rose-200">تتضمن العملية الفواتير والسندات والأرصدة والأصناف والمخزون والحركات والسجل التدقيقي السابق.</div><Button variant="danger" onClick={() => setFactoryResetOpen(true)}><Flame size={16} /> مسح وتصفير كافة البيانات</Button></CardContent></Card> : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>معلومات البنية التحتية</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="grid grid-cols-1 gap-2 font-mono text-[11px] text-bmw-muted sm:grid-cols-2">
-            <li>• PostgreSQL 16 — عزل Serializable + أقفال صفوف FOR UPDATE</li>
-            <li>• WAL continuous archiving مُفعّل (استرجاع لأي نقطة زمنية)</li>
-            <li>• Redis 7 — كاش اختياري لمؤشرات لوحة القيادة (لا يُستخدم في أقفال المخزون)</li>
-            <li>• pg_trgm GIN — بحث فوري على OEM والاسم العربي</li>
-            <li>• سجل تدقيق على مستوى الصف لكل عملية مالية (متاح من صفحة سجل التدقيق)</li>
-            <li>• دفتر حركة مخزون Append-only غير قابل للحذف</li>
-          </ul>
-        </CardContent>
-      </Card>
+      <LicenseSubscriptionCard subscription={subscription} />
       {factoryResetOpen ? <FullSystemResetModal onClose={() => setFactoryResetOpen(false)} /> : null}
     </div>
   );

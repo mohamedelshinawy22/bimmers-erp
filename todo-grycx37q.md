@@ -327,3 +327,8 @@
 - [x] Complete full test, typecheck, and production-build validation for Inventory sorting.
 - [x] Deploy Inventory sorting and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated Inventory sorting acceptance without modifying catalog data.
+- [x] Audit Settings infrastructure UI and authoritative tenant license data available through the authenticated ERP or Master License Hub boundary.
+- [x] Add safe server-resolved subscription calculations without fabricating license identifiers, dates, or tenant status.
+- [x] Replace the raw Settings infrastructure card with an Arabic license and subscription details card.
+- [x] Add subscription calculation, license data-boundary, and Settings UI regressions.
+- [ ] Validate, deploy, and obtain authenticated Settings license-card acceptance without exposing technical infrastructure details.

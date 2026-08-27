@@ -5,6 +5,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { getCompanyProfile, getSettingsGrouped } from "@/server/services/settings.service";
 import { listUsers } from "@/server/services/audit.service";
 import { getTenantContext } from "@/lib/tenant-routing";
+import { getTenantSubscriptionDetails } from "@/lib/license-subscription";
 import { SettingsForm } from "./settings-form";
 
 export const metadata = { title: "الإعدادات" };
@@ -47,6 +48,7 @@ export default async function SettingsPage() {
         users={users}
         currentUserId={user.id}
         companyProfile={companyProfile}
+        subscription={getTenantSubscriptionDetails(tenant.context.route)}
         tenantQuota={tenantQuota}
         treasuries={treasuries}
         warehouses={bins.map((bin) => bin.warehouseName)}

@@ -25,5 +25,16 @@ describe("fresh tenant system settings", () => {
     expect(page).toContain("getSettingsGrouped(tenant.prisma)");
     expect(page).toContain("getCompanyProfile(tenant.prisma)");
     expect(page).toContain("listUsers(tenant.prisma)");
+    expect(page).toContain("getTenantSubscriptionDetails(tenant.context.route)");
+  });
+
+  it("replaces infrastructure disclosures with the privacy-safe subscription card", () => {
+    const form = source("src/app/(app)/settings/settings-form.tsx");
+    const card = source("src/components/settings/license-subscription-card.tsx");
+    expect(form).toContain('<LicenseSubscriptionCard subscription={subscription} />');
+    expect(form).not.toContain("معلومات البنية التحتية");
+    expect(form).not.toContain("PostgreSQL 16");
+    expect(card).toContain("بيانات ترخيص واشتراك النظام");
+    expect(card).toContain("مرجع الترخيص:");
   });
 });
