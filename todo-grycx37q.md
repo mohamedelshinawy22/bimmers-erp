@@ -320,3 +320,9 @@
 - [x] Complete full test, typecheck, and production-build validation for the Inventory price manager.
 - [x] Deploy the Inventory price manager and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated price-preview acceptance; require separate explicit consent before any production price mutation.
+- [x] Audit the continuous Inventory catalog filter pipeline and table header structure for client-side sorting integration.
+- [x] Add deterministic three-state in-memory sorting for OEM, product name, brand, cost, retail, wholesale, minimum, and stock quantity.
+- [x] Add accessible sortable table headers with clear Arabic labels and ascending, descending, and reset indicators.
+- [x] Add numeric, Arabic locale text, alphanumeric OEM, and three-state sorting regressions.
+- [x] Complete full test, typecheck, and production-build validation for Inventory sorting.
+- [ ] Deploy Inventory sorting and obtain authenticated acceptance without modifying catalog data.

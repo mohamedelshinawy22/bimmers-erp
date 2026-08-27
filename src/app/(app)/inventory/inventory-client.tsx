@@ -10,6 +10,8 @@ import {
   SlidersHorizontal,
   Boxes,
   ArrowUpDown,
+  ArrowDown,
+  ArrowUp,
   History,
   ShoppingBag,
   Printer,
@@ -47,6 +49,7 @@ import { PartCatalogPrintDocument } from "@/components/print/templates/universal
 import type { PartCatalogPrintData } from "@/components/print/universal-print-types";
 import { QuickCatalogFilterBar } from "@/components/catalog/quick-catalog-filter-bar";
 import { filterInventoryCatalog, type InventoryCatalogFilters } from "@/lib/inventory-catalog-filter";
+import { sortInventoryCatalog, toggleInventoryCatalogSort, type InventoryCatalogSortField } from "@/lib/inventory-catalog-sorting";
 
 interface InventoryClientProps {
   rows: PartRow[];
@@ -102,6 +105,7 @@ export function InventoryClient({
   const [purchaseOpen, setPurchaseOpen] = useState(openPurchaseOnMount);
   const [query, setQuery] = useState(filters.query);
   const [catalogFilters, setCatalogFilters] = useState<InventoryCatalogFilters>(filters);
+  const [catalogSort, setCatalogSort] = useState<{ field: InventoryCatalogSortField | null; direction: "asc" | "desc" | null }>({ field: null, direction: null });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [catalogPrintOpen, setCatalogPrintOpen] = useState(false);
@@ -122,6 +126,7 @@ export function InventoryClient({
     () => filterInventoryCatalog(rows, { ...catalogFilters, query }),
     [rows, catalogFilters, query],
   );
+  const sortedVisibleRows = useMemo(() => sortInventoryCatalog(visibleRows, catalogSort), [visibleRows, catalogSort]);
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((part) => selectedIds.includes(part.id));
   const openCatalogPrint = async () => {
     setCatalogPrintError(null);
@@ -296,16 +301,16 @@ export function InventoryClient({
           <THead className="sticky top-0 z-20 shadow-sm">
             <TR>
               <TH><input aria-label="تحديد الكل المعروض" type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedIds(event.target.checked ? [...new Set([...selectedIds, ...visibleRows.map((part) => part.id)])] : selectedIds.filter((id) => !visibleRows.some((part) => part.id === id)))}/></TH>
-              <TH>رقم OEM</TH>
-              <TH>الصنف</TH>
-              <TH>الماركة</TH>
+              <SortableCatalogHeader label="رقم OEM" field="oemNumber" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
+              <SortableCatalogHeader label="الصنف" field="nameAr" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
+              <SortableCatalogHeader label="الماركة" field="brandName" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
               <TH>الموقع</TH>
               <TH>التوافق</TH>
-              {permissions.canViewCost ? <TH>التكلفة</TH> : null}
-              <TH>قطاعي</TH>
-              <TH>جملة</TH>
-              <TH>الحد الأدنى</TH>
-              <TH>الرصيد</TH>
+              {permissions.canViewCost ? <SortableCatalogHeader label="التكلفة" field="buyPriceAvg" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} /> : null}
+              <SortableCatalogHeader label="قطاعي" field="sellPriceRetail" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
+              <SortableCatalogHeader label="جملة" field="sellPriceWholesale" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
+              <SortableCatalogHeader label="الحد الأدنى" field="sellPriceMin" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
+              <SortableCatalogHeader label="الرصيد" field="stockQuantity" sort={catalogSort} onSort={(field) => setCatalogSort((current) => toggleInventoryCatalogSort(current, field))} />
               <TH />
             </TR>
           </THead>
@@ -323,7 +328,7 @@ export function InventoryClient({
                 </> : null}
               </EmptyState>
             ) : (
-              visibleRows.map((part) => {
+              sortedVisibleRows.map((part) => {
                 const canOpenLedger = permissions.canViewLedger;
                 return (
                 <TR
@@ -563,6 +568,30 @@ function DeletePartsModal({ parts, onClose, onDeleted }: { parts: PartRow[]; onC
   };
   const title = parts.length === 1 ? `حذف الصنف: ${parts[0]?.nameAr ?? ""}` : `حذف ${parts.length} أصناف محددة`;
   return <Modal open onClose={onClose} title={title} description="لا يمكن التراجع عن حذف صنف من الكتالوج." size="sm" footer={<><Button variant="ghost" onClick={onClose} disabled={pending}>إلغاء</Button><Button variant="danger" onClick={submit} loading={pending}><Trash2 size={15} /> تأكيد الحذف</Button></>}><div className="space-y-3">{error ? <Alert variant="error">{error}</Alert> : null}<Alert variant="warning">سيجري النظام فحص كل صنف قبل الحذف. أي فاتورة بيع أو شراء أو مرتجع أو حركة مخزون أو عملية بيع معلقة مرتبطة بالصنف ستمنع الحذف بالكامل لحماية السجل المحاسبي.</Alert><div className="max-h-36 space-y-1 overflow-auto rounded-xl border border-bmw-cardBorder bg-bmw-carbon p-3 text-xs">{parts.map((part) => <p key={part.id}><b className="text-white">{part.nameAr}</b> <span className="font-mono text-bmw-muted">{formatOemNumber(part.oemNumber)}</span></p>)}</div></div></Modal>;
+}
+
+function SortableCatalogHeader({
+  label,
+  field,
+  sort,
+  onSort,
+}: {
+  label: string;
+  field: InventoryCatalogSortField;
+  sort: { field: InventoryCatalogSortField | null; direction: "asc" | "desc" | null };
+  onSort: (field: InventoryCatalogSortField) => void;
+}) {
+  const active = sort.field === field;
+  const direction = active ? sort.direction : null;
+  const nextAction = !active || direction === "desc" ? "ترتيب تصاعدي" : "ترتيب تنازلي";
+  return (
+    <TH aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"} className="whitespace-nowrap p-0">
+      <button type="button" onClick={() => onSort(field)} className="flex w-full items-center gap-1.5 px-3 py-3 text-right text-xs font-semibold text-bmw-silver transition-colors hover:bg-bmw-card hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bmw-blue" title={`${label}: ${nextAction}`} aria-label={`${label}: ${nextAction}`}>
+        <span>{label}</span>
+        {direction === "asc" ? <ArrowUp size={14} className="text-bmw-blue" aria-hidden /> : direction === "desc" ? <ArrowDown size={14} className="text-bmw-blue" aria-hidden /> : <ArrowUpDown size={14} className="text-bmw-muted" aria-hidden />}
+      </button>
+    </TH>
+  );
 }
 
 function AdjustStockModal({
