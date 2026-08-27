@@ -1,4 +1,4 @@
-import { AlertTriangle, Calendar, Clock, KeyRound, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Calendar, Clock, KeyRound, Laptop, ShieldCheck, Users } from "lucide-react";
 import type { SubscriptionDetails } from "@/lib/license-subscription";
 
 export function LicenseSubscriptionCard({ subscription }: { subscription: SubscriptionDetails }) {
@@ -17,7 +17,11 @@ export function LicenseSubscriptionCard({ subscription }: { subscription: Subscr
             <p className="mt-1 text-xs text-bmw-muted">{subscription.planName}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-bmw-cardBorder bg-bmw-black/55 px-3 py-2 text-xs text-bmw-muted"><KeyRound size={14} className="text-bmw-silver" /><span>مرجع الترخيص:</span><span className="font-mono tracking-wider text-bmw-silver" dir="ltr">{subscription.licenseKeyDisplay}</span></div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <QuotaBadge icon={<Users size={14} />} label="حصة المستخدمين" quota={subscription.quotas.users} />
+          <QuotaBadge icon={<Laptop size={14} />} label="الأجهزة المعتمدة" quota={subscription.quotas.devices} />
+          <div className="flex items-center gap-2 rounded-lg border border-bmw-cardBorder bg-bmw-black/55 px-3 py-2 text-xs text-bmw-muted"><KeyRound size={14} className="text-bmw-silver" /><span>مرجع الترخيص:</span><span className="font-mono tracking-wider text-bmw-silver" dir="ltr">{subscription.licenseKeyDisplay}</span></div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 px-5 py-4 md:grid-cols-3">
@@ -36,4 +40,9 @@ export function LicenseSubscriptionCard({ subscription }: { subscription: Subscr
 
 function SubscriptionStat({ icon, label, value, accent = "text-bmw-silver" }: { icon: React.ReactNode; label: string; value: string; accent?: string }) {
   return <div className="flex items-center gap-3 rounded-lg border border-bmw-cardBorder bg-bmw-black/35 p-3.5"><span className={accent}>{icon}</span><div><p className="text-[11px] text-bmw-muted">{label}</p><p className={`mt-0.5 text-sm font-bold ${accent}`}>{value}</p></div></div>;
+}
+
+function QuotaBadge({ icon, label, quota }: { icon: React.ReactNode; label: string; quota: { current: number | null; max: number | null } }) {
+  const value = quota.current === null || quota.max === null ? "غير متاح" : `${quota.current} / ${quota.max}`;
+  return <div className="flex items-center gap-1.5 rounded-lg border border-bmw-cardBorder bg-bmw-black/55 px-3 py-2 text-xs text-bmw-muted"><span className="text-bmw-blue">{icon}</span><span>{label}:</span><span className="font-mono font-bold text-bmw-silver" dir="ltr">{value}</span></div>;
 }

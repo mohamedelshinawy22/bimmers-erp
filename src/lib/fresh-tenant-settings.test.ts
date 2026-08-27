@@ -36,5 +36,9 @@ describe("fresh tenant system settings", () => {
     expect(form).not.toContain("PostgreSQL 16");
     expect(card).toContain("بيانات ترخيص واشتراك النظام");
     expect(card).toContain("مرجع الترخيص:");
+    expect(card).toContain("حصة المستخدمين");
+    expect(card).toContain("الأجهزة المعتمدة");
+    expect(card).not.toContain("4144 يوم متبقي");
+    expect(card).not.toContain("31 ديسمبر 2037");
   });
 });

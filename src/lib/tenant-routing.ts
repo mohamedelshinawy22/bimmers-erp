@@ -12,8 +12,11 @@ export type TenantRoute = {
   deploymentIdentifier: string;
   databaseUrl: string;
   initialAdminUsername?: string | null;
+  planName?: string | null;
   maxSubUsers: number;
   maxDevices: number;
+  activeSubUsers?: number | null;
+  approvedDevices?: number | null;
   issuedAt: string;
   expiresAt: string;
 };

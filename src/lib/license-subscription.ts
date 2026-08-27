@@ -2,6 +2,11 @@ export interface TenantSubscriptionRoute {
   licenseKey: string;
   issuedAt: string;
   expiresAt: string;
+  planName?: string | null;
+  maxSubUsers?: number | null;
+  maxDevices?: number | null;
+  activeSubUsers?: number | null;
+  approvedDevices?: number | null;
 }
 
 export interface SubscriptionDetails {
@@ -9,6 +14,10 @@ export interface SubscriptionDetails {
   licenseKeyDisplay: string;
   startDate: string;
   expiryDate: string;
+  quotas: {
+    users: { current: number | null; max: number | null };
+    devices: { current: number | null; max: number | null };
+  };
   hasAuthoritativeTimeline: boolean;
   totalDays: number;
   daysRemaining: number;
@@ -30,6 +39,10 @@ function maskedLicenseKey(value: string): string {
   return `••••••••${key.slice(-8)}`;
 }
 
+function safeNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 /**
  * Formats license dates from the already-authenticated Master Hub route. It
  * intentionally masks the route license identifier because that identifier is
@@ -48,12 +61,17 @@ export function getTenantSubscriptionDetails(route: TenantSubscriptionRoute, now
   const progressPercentage = !hasAuthoritativeTimeline ? 0 : isExpired ? 100 : Math.min(100, Math.max(0, Math.round((consumedDays / totalDays) * 100)));
   const statusText = !expiry ? "بيانات الترخيص غير متاحة" : isExpired ? "منتهي الصلاحية" : daysRemaining <= 30 ? "يوشك على الانتهاء" : "ساري ونشط";
   const dateFormat = { year: "numeric", month: "long", day: "numeric" } as const;
+  const planName = route.planName?.trim() ? `Bimmers ERP — ${route.planName.trim()}` : "Bimmers ERP — نسخة سحابية مرخصة";
 
   return {
-    planName: "Bimmers ERP — نسخة سحابية مرخصة",
+    planName,
     licenseKeyDisplay: maskedLicenseKey(route.licenseKey),
     startDate: issued?.toLocaleDateString("ar-EG", dateFormat) ?? "غير متاح",
     expiryDate: expiry?.toLocaleDateString("ar-EG", dateFormat) ?? "غير متاح",
+    quotas: {
+      users: { current: safeNonNegativeInteger(route.activeSubUsers), max: safeNonNegativeInteger(route.maxSubUsers) },
+      devices: { current: safeNonNegativeInteger(route.approvedDevices), max: safeNonNegativeInteger(route.maxDevices) },
+    },
     hasAuthoritativeTimeline,
     totalDays,
     daysRemaining,

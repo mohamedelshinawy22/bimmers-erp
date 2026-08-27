@@ -333,3 +333,7 @@
 - [x] Add subscription calculation, license data-boundary, and Settings UI regressions.
 - [x] Validate and deploy the Settings license-card release with non-mutating production health verification and no technical infrastructure disclosure.
 - [ ] Obtain authenticated Settings license-card acceptance by checking the actual dates, status, days remaining, temporal progress, and absence of raw infrastructure details.
+- [x] Audit why Bavaria Settings receives stale or placeholder tenant-route license dates instead of the current Master License Hub record.
+- [x] Bind the Settings subscription card to authoritative live license dates and user/device quotas without hardcoded Bavaria values or secret disclosure.
+- [x] Add quota presentation and stale-date regression coverage for the Settings subscription data boundary.
+- [ ] Validate, deploy, and obtain authenticated Bavaria Settings acceptance for the synchronized subscription dates and quotas.
