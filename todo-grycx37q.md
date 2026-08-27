@@ -331,4 +331,5 @@
 - [x] Add safe server-resolved subscription calculations without fabricating license identifiers, dates, or tenant status.
 - [x] Replace the raw Settings infrastructure card with an Arabic license and subscription details card.
 - [x] Add subscription calculation, license data-boundary, and Settings UI regressions.
-- [ ] Validate, deploy, and obtain authenticated Settings license-card acceptance without exposing technical infrastructure details.
+- [x] Validate and deploy the Settings license-card release with non-mutating production health verification and no technical infrastructure disclosure.
+- [ ] Obtain authenticated Settings license-card acceptance by checking the actual dates, status, days remaining, temporal progress, and absence of raw infrastructure details.
