@@ -79,6 +79,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
         canViewLedger: can(user.role, "stock.viewLedger"),
         canDelete: can(user.role, "part.deactivate"),
         canBulkAutoTag: can(user.role, "part.bulkAutoTag"),
+        canBulkPrice: can(user.role, "part.bulkPrice"),
       }}
       purchaseOptions={{
         accounts: serializeData(purchaseOptions.accounts),

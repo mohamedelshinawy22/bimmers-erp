@@ -29,6 +29,7 @@ import { getTenantDbFromSession } from "@/server/db/get-tenant-db";
 import { ensureCatalogCompositeIdentity } from "@/server/services/catalog-identity.service";
 import { hasSameCatalogIdentity } from "@/lib/catalog-identity";
 import { enrichAutomotiveMetadata, isGenericBrandName, mergeAutomotiveCodes, parseAutomotiveMetadata } from "@/lib/automotive-metadata";
+import { PRICE_MANAGER_CONFIRMATION, validateProposedProductPrice } from "@/lib/product-price-adjustment";
 
 function normalizeOptionalPartReference(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -331,6 +332,68 @@ export async function bulkAutoTagPartsAction(raw: unknown): Promise<ActionResult
     return ok(result);
   } catch (error) {
     return toActionError(error, "bulkAutoTagPartsAction");
+  }
+}
+
+const priceChangeSchema = z.object({
+  id: z.string().uuid(),
+  cost: z.number().finite().min(0).max(10_000_000),
+  retail: z.number().finite().min(0).max(10_000_000),
+  wholesale: z.number().finite().min(0).max(10_000_000),
+  minimum: z.number().finite().min(0).max(10_000_000),
+});
+const applyPriceChangesSchema = z.object({
+  confirmation: z.string().trim(),
+  changes: z.array(priceChangeSchema).min(1).max(100),
+});
+
+/** Applies an already reviewed preview batch. It never accepts unbounded catalog writes in one action. */
+export async function applyProductPriceChangesAction(raw: unknown): Promise<ActionResult<{ updated: number }>> {
+  try {
+    const user = await requirePermission("part.bulkPrice");
+    const input = applyPriceChangesSchema.parse(raw);
+    if (input.confirmation !== PRICE_MANAGER_CONFIRMATION) {
+      throw new BusinessRuleError(`اكتب عبارة التأكيد التالية كاملة: ${PRICE_MANAGER_CONFIRMATION}`);
+    }
+    const uniqueChanges = [...new Map(input.changes.map((change) => [change.id, change])).values()];
+    if (uniqueChanges.length !== input.changes.length) throw new BusinessRuleError("لا يمكن تكرار الصنف نفسه في دفعة تعديل الأسعار.");
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => tenant.prisma.$transaction(async (tx) => {
+      const parts = await tx.partItem.findMany({
+        where: { id: { in: uniqueChanges.map((change) => change.id) }, isDeleted: false, isActive: true },
+        select: { id: true, nameAr: true, buyPriceLast: true, buyPriceAvg: true, sellPriceRetail: true, sellPriceWholesale: true, sellPriceMin: true },
+      });
+      if (parts.length !== uniqueChanges.length) throw new BusinessRuleError("أحد الأصناف المحددة غير موجود أو غير نشط. أعد تجهيز المعاينة قبل الحفظ.");
+      const partsById = new Map(parts.map((part) => [part.id, part]));
+      for (const change of uniqueChanges) {
+        const before = partsById.get(change.id)!;
+        const validationError = validateProposedProductPrice(change);
+        if (validationError) throw new BusinessRuleError(`${before.nameAr}: ${validationError}`);
+        const changed = !money(change.cost).eq(before.buyPriceAvg)
+          || !money(change.retail).eq(before.sellPriceRetail)
+          || !money(change.wholesale).eq(before.sellPriceWholesale)
+          || !money(change.minimum).eq(before.sellPriceMin);
+        if (!changed) continue;
+        await tx.partItem.update({
+          where: { id: change.id },
+          data: { buyPriceLast: money(change.cost), buyPriceAvg: money(change.cost), sellPriceRetail: money(change.retail), sellPriceWholesale: money(change.wholesale), sellPriceMin: money(change.minimum) },
+        });
+        await writeAudit(tx, {
+          tableName: "PartItem", recordId: change.id, action: "UPDATE", performedBy: user.id,
+          oldData: { event: "PRODUCT_PRICE_MANAGER_UPDATE", purchaseCost: before.buyPriceAvg, retailPrice: before.sellPriceRetail, wholesalePrice: before.sellPriceWholesale, minimumPrice: before.sellPriceMin },
+          newData: { event: "PRODUCT_PRICE_MANAGER_UPDATE", source: "EXPLICIT_MANAGER_PRICE_PREVIEW", purchaseCost: change.cost, retailPrice: change.retail, wholesalePrice: change.wholesale, minimumPrice: change.minimum },
+        });
+      }
+      return { updated: uniqueChanges.filter((change) => {
+        const before = partsById.get(change.id)!;
+        return !money(change.cost).eq(before.buyPriceAvg) || !money(change.retail).eq(before.sellPriceRetail) || !money(change.wholesale).eq(before.sellPriceWholesale) || !money(change.minimum).eq(before.sellPriceMin);
+      }).length };
+    }, TX_OPTIONS)));
+    revalidatePath("/inventory");
+    revalidatePath("/pos");
+    return ok(result);
+  } catch (error) {
+    return toActionError(error, "applyProductPriceChangesAction");
   }
 }
 

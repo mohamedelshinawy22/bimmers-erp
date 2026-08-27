@@ -312,3 +312,10 @@
 - [x] Complete full test, typecheck, and production-build validation for smart automotive metadata extraction.
 - [x] Deploy the smart metadata release and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated product-form acceptance for ابره فانوس n13 f30 avortex; request separate consent before any bulk data change.
+- [x] Audit catalog price fields, current price-edit permission guards, tenant-scoped update patterns, and price audit conventions.
+- [x] Add pure, validated price-adjustment calculations with percentage, fixed-amount, target-field, and rounding rules.
+- [x] Add manager-authorized tenant-scoped price preview and confirmation-protected bounded batch apply actions with immutable per-item audit entries.
+- [x] Add an Inventory price manager modal with scope controls, editable preview values, margin indicators, and clear financial confirmation.
+- [x] Add price calculation, authorization, confirmation, and audit-metadata regressions.
+- [x] Complete full test, typecheck, and production-build validation for the Inventory price manager.
+- [ ] Deploy the price manager and obtain authenticated preview acceptance; require separate explicit consent before any production price mutation.

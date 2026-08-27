@@ -19,6 +19,7 @@ import {
   ChevronDown,
   X,
   Sparkles,
+  Banknote,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -38,6 +39,7 @@ import { StockLedgerModal } from "./components/stock-ledger-modal";
 import { BarcodePrintModal } from "@/components/printing/barcode-print-modal";
 import { ExcelImportModal } from "@/components/inventory/excel-import-modal";
 import { StocktakeReconciliationModal } from "@/components/inventory/stocktake-reconciliation-modal";
+import { PriceAdjustmentModal } from "./components/price-adjustment-modal";
 import { OemCode } from "@/components/inventory/oem-code";
 import type { CompanyProfile } from "@/server/services/settings.service";
 import { UniversalPrintModal } from "@/components/print/universal-print-modal";
@@ -67,6 +69,7 @@ interface InventoryClientProps {
     canViewLedger: boolean;
     canDelete: boolean;
     canBulkAutoTag: boolean;
+    canBulkPrice: boolean;
   };
   purchaseOptions: {
     accounts: Array<{ id: string; name: string; accountNumber: string; type: string; phone?: string | null; currentBalance: number }>;
@@ -113,6 +116,7 @@ export function InventoryClient({
   const [bulkTagProgress, setBulkTagProgress] = useState<{ processed: number; updated: number } | null>(null);
   const [bulkTagError, setBulkTagError] = useState<string | null>(null);
   const [bulkTagPending, setBulkTagPending] = useState(false);
+  const [priceManagerOpen, setPriceManagerOpen] = useState(false);
   const selectedParts = rows.filter((part) => selectedIds.includes(part.id));
   const visibleRows = useMemo(
     () => filterInventoryCatalog(rows, { ...catalogFilters, query }),
@@ -192,6 +196,7 @@ export function InventoryClient({
           {permissions.canWrite ? <Button variant="outline" onClick={() => setExcelImportOpen(true)}><FileSpreadsheet size={16} /> استيراد من إكسيل</Button> : null}
           {permissions.canAdjust ? <Button variant="outline" onClick={() => setStocktakeOpen(true)}><FileSpreadsheet size={16} /> جرد وتسوية كميات</Button> : null}
           {permissions.canBulkAutoTag ? <Button variant="outline" onClick={() => { setBulkTagError(null); setBulkTagProgress(null); setBulkTagOpen(true); }}><Sparkles size={16} /> استخراج وسوم السيارات</Button> : null}
+          {permissions.canBulkPrice ? <Button variant="outline" onClick={() => setPriceManagerOpen(true)}><Banknote size={16} /> تعديل الأسعار</Button> : null}
           {permissions.canWrite ? (
             <Button onClick={() => setAddOpen(true)}>
               <PackagePlus size={16} /> إدخال صنف جديد
@@ -497,6 +502,7 @@ export function InventoryClient({
       {deleteTarget ? <DeletePartsModal parts={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); setSelectedIds([]); router.refresh(); }} /> : null}
       {excelImportOpen ? <ExcelImportModal open onClose={() => { setExcelImportOpen(false); router.refresh(); }} /> : null}
       {stocktakeOpen ? <StocktakeReconciliationModal onClose={() => setStocktakeOpen(false)} onDone={() => { setStocktakeOpen(false); router.refresh(); }} /> : null}
+      {priceManagerOpen ? <PriceAdjustmentModal open onClose={() => setPriceManagerOpen(false)} rows={rows} visibleRows={visibleRows} selectedIds={selectedIds} onDone={() => { setPriceManagerOpen(false); router.refresh(); }} /> : null}
       {bulkTagOpen ? <Modal open onClose={() => !bulkTagPending && setBulkTagOpen(false)} title="استخراج وسوم السيارات تلقائياً" description="سيحلل النظام أسماء الأصناف على دفعات ويضيف فقط أكواد الشاسيه والمحرك والماركة المستخرجة إلى الحقول الفارغة أو العامة. لا يغيّر الأسعار أو الرصيد أو الفواتير." size="md" footer={<><Button variant="ghost" onClick={() => setBulkTagOpen(false)} disabled={bulkTagPending}>إلغاء</Button><Button onClick={() => void runBulkAutomotiveTagging()} loading={bulkTagPending}>اعتماد التحديث</Button></>}><div className="space-y-3">{bulkTagError ? <Alert variant="error">{bulkTagError}</Alert> : null}{bulkTagProgress ? <Alert variant="success">تمت معالجة {formatInt(bulkTagProgress.processed)} صنف وتحديث {formatInt(bulkTagProgress.updated)} صنف.</Alert> : null}<Alert variant="warning">هذه عملية جماعية مدققة ومتدرجة. لن تبدأ إلا بعد كتابة عبارة التأكيد، وتحتفظ بالأكواد والماركات التي اختارها المستخدم مسبقاً.</Alert><Field label="عبارة التأكيد" required hint="اكتب: تحديث وسوم السيارات تلقائياً"><Input value={bulkTagConfirmation} onChange={(event) => setBulkTagConfirmation(event.target.value)} disabled={bulkTagPending} /></Field></div></Modal> : null}
 
       {permissions.canPurchase ? (

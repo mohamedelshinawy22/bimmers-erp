@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   "part.editCost": ["SUPER_ADMIN", "MANAGER"],
   "part.deactivate": ["SUPER_ADMIN", "MANAGER"],
   "part.bulkAutoTag": ["SUPER_ADMIN", "MANAGER"],
+  "part.bulkPrice": ["SUPER_ADMIN", "MANAGER"],
   "part.viewCost": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],
   "stock.adjust": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],
   "stock.viewLedger": ["SUPER_ADMIN", "MANAGER", "STOREKEEPER"],
