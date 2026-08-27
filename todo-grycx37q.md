@@ -277,3 +277,8 @@
 - [x] Complete full test, typecheck, and production-build validation for the return print-loader repair.
 - [x] Deploy the return print-loader repair and verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated return-print preview acceptance without creating financial data.
+- [x] Audit Inventory and POS catalog search normalization, query strategy, and tenant-scoped execution for Arabic variant matching.
+- [x] Normalize Arabic letters and punctuation consistently for multi-keyword catalog search without introducing global-database access or risky tenant schema changes.
+- [x] Add Arabic spelling-variant and chassis-token catalog search regressions.
+- [x] Complete full test, typecheck, and production-build validation for the Arabic catalog-search repair.
+- [ ] Deploy the Arabic catalog-search repair and obtain authenticated Inventory/POS acceptance for طلمبة مياه إضافية N63 and طلمبه مياه F02.

@@ -147,7 +147,7 @@ export async function searchParts(
           { barcode: { equals: tokenNormalized.numericNormalized } },
           { oemNumber: { contains: tokenOemKey || token, mode: "insensitive" } },
           ...tokenNormalized.variations.flatMap((term) => [
-            { nameAr: { contains: term } },
+            { nameAr: { contains: term, mode: "insensitive" as const } },
             { nameEn: { contains: term, mode: "insensitive" as const } },
             { brandPartNumber: { contains: term, mode: "insensitive" as const } },
             { brand: { name: { contains: term, mode: "insensitive" as const } } },
@@ -244,7 +244,7 @@ export async function quickSearchParts(db: PartsDb, query: string, limit = 15, f
         { barcode: { equals: normalizeSearchTerm(token).numericNormalized } },
         { oemNumber: { contains: sanitizeOemForSearch(token) || token, mode: "insensitive" } },
         ...tokenVariants.flatMap((term) => [
-          { nameAr: { contains: term } },
+          { nameAr: { contains: term, mode: "insensitive" as const } },
           { nameEn: { contains: term, mode: "insensitive" as const } },
           { brandPartNumber: { contains: term, mode: "insensitive" as const } },
           { brand: { name: { contains: term, mode: "insensitive" as const } } },

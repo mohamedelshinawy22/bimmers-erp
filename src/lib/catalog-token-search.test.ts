@@ -10,6 +10,7 @@ describe("Arabic-normalized catalog token search", () => {
   const products = [
     { id: "turbo-elbow", nameAr: "كوعه تربو X5 F15 / F16 X6", oemNumber: "51757424887", brandName: "STERN", compatibility: "F15 F16 X5 X6" },
     { id: "other", nameAr: "خرطوم مياه F15", oemNumber: "111111", brandName: "AVORTEX", compatibility: "F15" },
+    { id: "aux-water-pump", nameAr: "طلمبه مياه اضافيه 6F02 N63", oemNumber: "11517629916", brandName: "BMW", compatibility: "F02 N63" },
   ];
 
   it("normalizes Arabic character variants and returns an item only when every keyword matches", () => {
@@ -29,6 +30,14 @@ describe("Arabic-normalized catalog token search", () => {
     expect(normalizeSearchTerm("كوعه").variations).toContain("كوعة");
     expect(normalizeSearchTerm("إكص").variations).toContain("اكص");
     expect(normalizeSearchTerm("فتى").variations).toContain("فتي");
+  });
+
+  it("finds Arabic spelling variants together with uppercase chassis and engine codes", () => {
+    const service = source("src/server/services/parts.service.ts");
+    expect(searchTokens("طلمبة مياه إضافية N63")).toEqual(["طلمبه", "مياه", "اضافيه", "n63"]);
+    expect(searchCatalogProducts("طلمبة مياه إضافية N63", products).map((item) => item.id)).toEqual(["aux-water-pump"]);
+    expect(searchCatalogProducts("طلمبه مياه F02", products).map((item) => item.id)).toEqual(["aux-water-pump"]);
+    expect(service.match(/nameAr: \{ contains: term, mode: "insensitive" as const \}/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("wires all-token database conditions, shared post-filtering, live-combobox semantics, and fifteen-result action limit", () => {
