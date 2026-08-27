@@ -295,4 +295,5 @@
 - [x] Remove Inventory pagination controls and provide continuous scrolling with a sticky header and displayed-total summary.
 - [x] Add full-catalog and pagination-removal regression coverage.
 - [x] Complete full test, typecheck, and production-build validation for the Inventory continuous-catalog release.
-- [ ] Visually verify, deploy, and obtain authenticated Inventory full-catalog acceptance without modifying catalog data.
+- [x] Deploy the Inventory continuous-catalog release and verify its non-mutating production health and runtime-log boundary.
+- [ ] Visually verify and obtain authenticated Inventory full-catalog acceptance without modifying catalog data.
