@@ -288,4 +288,5 @@
 - [x] Evaluate a separately authorized historical cost backfill; do not run startup or deployment data mutations.
 - [x] Add purchase-cost synchronization and historical fallback regressions.
 - [x] Complete full test, typecheck, and production-build validation for the purchase-cost synchronization repair.
-- [ ] Deploy the repair and obtain authenticated catalog cost-display acceptance for 83515 without creating or altering financial records.
+- [x] Deploy the purchase-cost repair and verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated catalog cost-display acceptance for 83515 without creating or altering financial records.
