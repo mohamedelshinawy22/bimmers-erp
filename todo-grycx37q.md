@@ -367,4 +367,5 @@
 - [x] Repair valid authenticated Bavaria resolution without default-tenant fallbacks or cross-tenant access.
 - [x] Classify and surface localized Copilot action errors without leaking secrets or raw connection details.
 - [x] Add regressions for valid sessions, missing-tenant rejection, tenant isolation, and live non-hardcoded answers.
-- [ ] Validate, deploy, and obtain authenticated Bavaria acceptance for live sales and supplier-payables questions.
+- [x] Validate and deploy the Bavaria Copilot session-error classification fix, verify production health and the protected API boundary, and confirm no financial mutations are performed.
+- [ ] Obtain authenticated Bavaria acceptance for live sales and supplier-payables questions.
