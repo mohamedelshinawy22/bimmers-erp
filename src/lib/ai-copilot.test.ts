@@ -37,6 +37,24 @@ describe("Bimmers AI Copilot security and grounding contracts", () => {
     expect(tools).toContain("supplierPayables: money(supplierDebt._sum.currentBalance)");
   });
 
+  it("does not mislabel provider failures as missing tenant sessions", () => {
+    const action = source("src/server/actions/ai/askCopilot.ts");
+    const classifier = source("src/server/ai/copilot-error.ts");
+    expect(classifier).toContain("تعذر الاتصال بخدمة المساعد الذكي حالياً.");
+    expect(classifier).toContain("if (error instanceof AuthError || error instanceof ForbiddenError || error instanceof ConfigurationError)");
+    expect(classifier).toContain("return \"تعذر قراءة بيانات المؤسسة أو معالجة السؤال حالياً.");
+    expect(action).toContain("safeCopilotErrorMessage(error)");
+    expect(action).not.toContain("return { success: false, error: \"تعذر تجهيز سياق المؤسسة للجلسة الحالية. أعد تسجيل الدخول ثم أعد المحاولة.\" }");
+  });
+
+  it("rejects unsafe default-tenant fallbacks", () => {
+    const action = source("src/server/actions/ai/askCopilot.ts");
+    expect(action).toContain("getTenantDbFromSession()");
+    expect(action).not.toContain("tenantId = \"elshafei\"");
+    expect(action).not.toContain("tenantId = \"bavaria\"");
+    expect(action).not.toContain("tenantId || \"elshafei\"");
+  });
+
   it("mounts the Arabic Copilot only in the authenticated application shell", () => {
     const layout = source("src/app/(app)/layout.tsx");
     const widget = source("src/components/ai/copilot-floating-widget.tsx");

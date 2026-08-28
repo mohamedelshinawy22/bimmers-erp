@@ -363,3 +363,8 @@
 - [x] Update Copilot grounding instructions and UI wording for shared organization context.
 - [x] Add regression coverage for sub-user parity, tenant isolation, hidden sensitive fields, and read-only behavior.
 - [x] Validate and deploy the shared-organization Copilot with 150 tests, a production build, live health, and protected API checks; retain authenticated acceptance as pending.
+- [x] Audit the authenticated Copilot Server Action failure and compare it with the established ERP session authority and tenant resolver.
+- [x] Repair valid authenticated Bavaria resolution without default-tenant fallbacks or cross-tenant access.
+- [x] Classify and surface localized Copilot action errors without leaking secrets or raw connection details.
+- [x] Add regressions for valid sessions, missing-tenant rejection, tenant isolation, and live non-hardcoded answers.
+- [ ] Validate, deploy, and obtain authenticated Bavaria acceptance for live sales and supplier-payables questions.
