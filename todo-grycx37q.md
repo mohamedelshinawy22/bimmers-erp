@@ -362,4 +362,4 @@
 - [x] Preserve manager-only sensitive fields and staff restrictions for cost, wholesale pricing, storewide profit, and per-user performance.
 - [x] Update Copilot grounding instructions and UI wording for shared organization context.
 - [x] Add regression coverage for sub-user parity, tenant isolation, hidden sensitive fields, and read-only behavior.
-- [x] Validate the shared-organization Copilot with 150 tests, a production build, and read-only checks; retain deployment and authenticated acceptance as pending.
+- [x] Validate and deploy the shared-organization Copilot with 150 tests, a production build, live health, and protected API checks; retain authenticated acceptance as pending.
