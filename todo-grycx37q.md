@@ -342,4 +342,5 @@
 - [x] Wrap the authoritative invoice update and on-account payment path in the session-bound tenant context with safe localized errors.
 - [x] Preserve payment-modal recovery state and render returned action failures without a generic crash boundary.
 - [x] Add tenant-context, idempotent financial-effect, and payment-modal error regressions.
-- [ ] Validate, deploy, and obtain authenticated acceptance for editing and completing an on-account sales invoice.
+- [x] Validate and deploy the invoice edit and payment tenant-context repair, then verify its non-mutating production health and runtime-log boundary.
+- [ ] Obtain authenticated acceptance for editing and completing an on-account sales invoice.
