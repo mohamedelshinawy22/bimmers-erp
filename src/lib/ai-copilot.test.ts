@@ -7,11 +7,16 @@ const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf
 describe("Bimmers AI Copilot security and grounding contracts", () => {
   it("uses the authenticated tenant context and exposes only bounded read tools", () => {
     const route = source("src/app/api/ai/copilot/route.ts");
+    const action = source("src/server/actions/ai/askCopilot.ts");
+    const runner = source("src/server/ai/copilot-runner.ts");
     const tools = source("src/server/ai/copilot-tools.ts");
     expect(route).toContain("getTenantDbFromSession()");
-    expect(route).toContain("tenant.run(async () =>");
-    expect(route).toContain("invokeLLM");
-    expect(route).not.toContain("OPENAI_API_KEY");
+    expect(route).toContain("tenant.run(() => runCopilotConversation(tenant, messages))");
+    expect(action).toContain("\"use server\"");
+    expect(action).toContain("getTenantDbFromSession()");
+    expect(action).toContain("tenant.run(() => runCopilotConversation(tenant, normalized))");
+    expect(runner).toContain("invokeLLM");
+    expect(runner).not.toContain("OPENAI_API_KEY");
     expect(tools).toContain("createScopedCopilotTools");
     expect(tools).toContain("db.invoice");
     expect(tools).toContain("db.partItem");
@@ -36,7 +41,7 @@ describe("Bimmers AI Copilot security and grounding contracts", () => {
     const layout = source("src/app/(app)/layout.tsx");
     const widget = source("src/components/ai/copilot-floating-widget.tsx");
     expect(layout).toContain("CopilotFloatingWidget");
-    expect(widget).toContain("/api/ai/copilot");
+    expect(widget).toContain("askCopilotAction");
     expect(widget).toContain("المساعد الذكي");
     expect(widget).toContain("اكتب سؤالك بالمصري أو بالعربية");
     expect(widget).toContain("setError");

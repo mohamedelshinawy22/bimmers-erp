@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, ChevronDown, Send, Sparkles, X } from "lucide-react";
+import { askCopilotAction } from "@/server/actions/ai/askCopilot";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -28,10 +29,9 @@ export function CopilotFloatingWidget() {
     setError(null);
     setLoading(true);
     try {
-      const response = await fetch("/api/ai/copilot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: nextMessages }) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "تعذر جلب إجابة المساعد حالياً.");
-      setMessages((current) => [...current, { role: "assistant", content: data.reply || "لم أجد إجابة لهذا السؤال." }]);
+      const result = await askCopilotAction(nextMessages);
+      if (!result.success) throw new Error(result.error);
+      setMessages((current) => [...current, { role: "assistant", content: result.reply || "لم أجد إجابة لهذا السؤال." }]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "تعذر جلب إجابة المساعد حالياً.");
     } finally { setLoading(false); }

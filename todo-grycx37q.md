@@ -351,3 +351,8 @@
 - [x] Add security, RBAC, grounding, schema, no-mutation, and client error regression coverage.
 - [x] Validate and deploy the built-in Forge Copilot, verify its live health and unauthenticated boundary, and confirm no financial mutations are performed by the tool layer.
 - [ ] Obtain authenticated Admin and staff acceptance for representative read-only Copilot questions.
+- [x] Audit the Copilot widget request and server session boundary for the reported tenant-context failure.
+- [x] Repair Copilot invocation with a session-preserving Server Action or explicit authenticated request boundary while retaining tenant.run.
+- [x] Preserve Copilot chat state and display localized returned errors without generic session failures.
+- [x] Add regression coverage proving authenticated invocation, tenant isolation, RBAC, and live non-hardcoded financial results.
+- [ ] Validate, deploy, and obtain authenticated acceptance for supplier-payables and staff-scope Copilot questions.
