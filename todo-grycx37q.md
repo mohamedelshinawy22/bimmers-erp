@@ -349,4 +349,5 @@
 - [x] Implement the guarded `/api/ai/copilot` endpoint using server-side `invokeLLM` and tool-calling grounded in live tenant data.
 - [x] Implement and mount the Egyptian-Arabic floating Copilot widget across authenticated ERP pages.
 - [x] Add security, RBAC, grounding, schema, no-mutation, and client error regression coverage.
-- [ ] Validate, deploy, and obtain authenticated acceptance for representative Admin and staff Copilot questions.
+- [x] Validate and deploy the built-in Forge Copilot, verify its live health and unauthenticated boundary, and confirm no financial mutations are performed by the tool layer.
+- [ ] Obtain authenticated Admin and staff acceptance for representative read-only Copilot questions.
