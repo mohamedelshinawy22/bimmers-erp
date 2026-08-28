@@ -6,6 +6,7 @@ import { MStripe } from "@/components/layout/m-stripe";
 import { HotkeysListener } from "@/components/layout/hotkeys-listener";
 import { SidebarProvider } from "@/components/layout/sidebar-context";
 import { getCompanyProfile } from "@/server/services/settings.service";
+import { CopilotFloatingWidget } from "@/components/ai/copilot-floating-widget";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -67,6 +68,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <MStripe className="no-print" />
           <Header user={user} branding={branding} />
           <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
+          <CopilotFloatingWidget />
         </div>
       </div>
     </SidebarProvider>

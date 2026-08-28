@@ -344,3 +344,9 @@
 - [x] Add tenant-context, idempotent financial-effect, and payment-modal error regressions.
 - [x] Validate and deploy the invoice edit and payment tenant-context repair, then verify its non-mutating production health and runtime-log boundary.
 - [ ] Obtain authenticated acceptance for editing and completing an on-account sales invoice.
+- [x] Audit the ERP schema, tenant helpers, existing Copilot scaffold, built-in Forge LLM helper, and authenticated layout mount.
+- [x] Implement comprehensive tenant-scoped read-only Copilot tools with Admin/Manager versus Cashier/Staff RBAC filtering.
+- [x] Implement the guarded `/api/ai/copilot` endpoint using server-side `invokeLLM` and tool-calling grounded in live tenant data.
+- [x] Implement and mount the Egyptian-Arabic floating Copilot widget across authenticated ERP pages.
+- [x] Add security, RBAC, grounding, schema, no-mutation, and client error regression coverage.
+- [ ] Validate, deploy, and obtain authenticated acceptance for representative Admin and staff Copilot questions.
