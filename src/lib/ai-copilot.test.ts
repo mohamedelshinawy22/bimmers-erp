@@ -30,11 +30,11 @@ describe("Bimmers AI Copilot security and grounding contracts", () => {
   it("enforces manager-only financial visibility and hides cost data from staff results", () => {
     const tools = source("src/server/ai/copilot-tools.ts");
     expect(tools).toContain("const manager = isManager(user.role)");
-    expect(tools).toContain("if (!manager) return { error: \"هذا الملخص المالي متاح لمدير النظام فقط.\" }");
-    expect(tools).toContain("...(manager ? {} : { userId: user.userId })");
+    expect(tools).not.toContain("...(manager ? {} : { userId: user.userId })");
+    expect(tools).toContain("Account balances are shared operational data inside the current tenant.");
     expect(tools).toContain("costPrice: manager ? money(part.buyPriceAvg) : undefined");
-    expect(tools).toContain("createdByUser: user.userId");
     expect(tools).toContain("allowedTreasuryIds");
+    expect(tools).toContain("supplierPayables: money(supplierDebt._sum.currentBalance)");
   });
 
   it("mounts the Arabic Copilot only in the authenticated application shell", () => {

@@ -355,4 +355,11 @@
 - [x] Repair Copilot invocation with a session-preserving Server Action or explicit authenticated request boundary while retaining tenant.run.
 - [x] Preserve Copilot chat state and display localized returned errors without generic session failures.
 - [x] Add regression coverage proving authenticated invocation, tenant isolation, RBAC, and live non-hardcoded financial results.
-- [ ] Validate, deploy, and obtain authenticated acceptance for supplier-payables and staff-scope Copilot questions.
+- [x] Validate and deploy the cookie-preserving Copilot Server Action, verify production health and the protected API fallback boundary, and confirm no financial mutations are performed.
+- [ ] Obtain authenticated acceptance for supplier-payables and staff-scope Copilot questions.
+- [x] Audit the existing Copilot role filters against organization-shared operational access for sub-users.
+- [x] Allow authenticated sub-users to read the same tenant-wide operational products, invoices, vouchers, treasuries, and account balances without cross-tenant leakage.
+- [x] Preserve manager-only sensitive fields and staff restrictions for cost, wholesale pricing, storewide profit, and per-user performance.
+- [x] Update Copilot grounding instructions and UI wording for shared organization context.
+- [x] Add regression coverage for sub-user parity, tenant isolation, hidden sensitive fields, and read-only behavior.
+- [x] Validate the shared-organization Copilot with 150 tests, a production build, and read-only checks; retain deployment and authenticated acceptance as pending.

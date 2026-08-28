@@ -23,7 +23,8 @@ export function createScopedCopilotTools(db: PrismaClient, user: CopilotUserCont
   const ownTreasuryFilter = manager || user.allowedTreasuryIds.length === 0 ? {} : { treasuryId: { in: user.allowedTreasuryIds } };
   return {
     async getLiveDashboardMetrics() {
-      if (!manager) return { error: "هذا الملخص المالي متاح لمدير النظام فقط." };
+      // Sales, receivables, payables, and stock shortage counts are organization-wide operational data.
+      // Only the treasury aggregate is hidden from non-managers; authorized drawer reads remain available below.
       const from = startOfToday();
       const [sales, treasuries, supplierDebt, customerDebt, shortages] = await Promise.all([
         db.invoice.aggregate({ where: { type: "SALE", isVoided: false, createdAt: { gte: from } }, _sum: { grandTotal: true, paidAmount: true }, _count: true }),
@@ -35,8 +36,8 @@ export function createScopedCopilotTools(db: PrismaClient, user: CopilotUserCont
       return {
         date: from.toLocaleDateString("ar-EG"),
         todaySalesTotal: money(sales._sum.grandTotal), todayPaidTotal: money(sales._sum.paidAmount), todayInvoicesCount: sales._count,
-        totalActiveTreasuries: money(treasuries._sum.currentBalance), supplierPayables: money(supplierDebt._sum.currentBalance),
-        customerReceivables: Math.abs(money(customerDebt._sum?.currentBalance)), criticalShortagesCount: shortages,
+                totalActiveTreasuries: manager ? money(treasuries._sum.currentBalance) : undefined,
+        supplierPayables: money(supplierDebt._sum.currentBalance), customerReceivables: Math.abs(money(customerDebt._sum?.currentBalance)), criticalShortagesCount: shortages,
       };
     },
 
@@ -75,7 +76,8 @@ export function createScopedCopilotTools(db: PrismaClient, user: CopilotUserCont
       const accountName = typeof args?.accountName === "string" ? args.accountName.trim() : "";
       const where = {
         type: args?.type ?? undefined, isVoided: false, createdAt: { gte: from, lte: to },
-        ...(manager ? {} : { userId: user.userId }),
+        // Every authenticated member may read the current tenant's shared invoices;
+        // user performance attribution remains manager-only in its dedicated tool.
         ...(accountName ? { account: { name: { contains: accountName, mode: "insensitive" as const } } } : {}),
       };
       const invoices = await db.invoice.findMany({ where, select: { invoiceNumber: true, type: true, grandTotal: true, paidAmount: true, remainingAmount: true, paymentMethod: true, createdAt: true, account: { select: { name: true } }, user: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: limitOf(args?.type ? 12 : 15, 15) });
@@ -84,16 +86,17 @@ export function createScopedCopilotTools(db: PrismaClient, user: CopilotUserCont
 
     async queryVouchersAndTreasury(args: { type?: "RECEIPT" | "PAYMENT"; limit?: number }) {
       if (!manager && user.allowedTreasuryIds.length === 0) return { error: "لا توجد خزينة مصرح بها لهذا المستخدم." };
-      const vouchers = await db.treasuryTransaction.findMany({ where: { status: "ACTIVE", ...(args?.type ? { type: args.type } : {}), ...(manager ? {} : { createdByUser: user.userId, ...ownTreasuryFilter }) }, select: { transactionNumber: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } }, account: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: limitOf(args?.limit, 10, 20) });
+      const vouchers = await db.treasuryTransaction.findMany({ where: { status: "ACTIVE", ...(args?.type ? { type: args.type } : {}), ...(manager ? {} : ownTreasuryFilter) }, select: { transactionNumber: true, type: true, amount: true, description: true, createdAt: true, treasury: { select: { name: true } }, account: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: limitOf(args?.limit, 10, 20) });
       const cash = await db.treasury.findMany({ where: { isActive: true, ...(manager ? {} : { id: { in: user.allowedTreasuryIds } }) }, select: { name: true, currentBalance: true, isDefault: true }, orderBy: { isDefault: "desc" } });
       return { vouchers: vouchers.map((item) => ({ number: item.transactionNumber, type: item.type, amount: money(item.amount), description: item.description, treasury: item.treasury.name, account: item.account?.name ?? "نقدي عام", date: item.createdAt.toLocaleString("ar-EG") })), treasuries: cash.map((item) => ({ name: item.name, balance: money(item.currentBalance), isDefault: item.isDefault })) };
     },
 
     async queryAccountsAndDebts(args: { search?: string; type?: "CUSTOMER" | "SUPPLIER" | "WORKSHOP_BMW"; withDebtsOnly?: boolean }) {
-      if (!manager) return { error: "تفاصيل أرصدة الحسابات العامة متاحة لمدير النظام فقط." };
+      // Account balances are shared operational data inside the current tenant.
+      // Sensitive credit limits remain manager-only.
       const search = typeof args?.search === "string" ? args.search.trim() : "";
       const accounts = await db.account.findMany({ where: { isActive: true, status: "ACTIVE", ...(args?.type ? { type: args.type } : {}), ...(args?.withDebtsOnly ? { currentBalance: { not: 0 } } : {}), ...(search ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { phone: { contains: search } }, { accountNumber: { contains: search } }] } : {}) }, select: { accountNumber: true, name: true, type: true, phone: true, currentBalance: true, creditLimit: true }, orderBy: { currentBalance: "desc" }, take: limitOf(10, 10, 20) });
-      return accounts.map((account) => ({ code: account.accountNumber, name: account.name, type: account.type, phone: account.phone, balance: money(account.currentBalance), balanceMeaning: money(account.currentBalance) < 0 ? "مديونية علينا / رصيد دائن للحساب" : money(account.currentBalance) > 0 ? "مستحق لنا" : "متزن", creditLimit: money(account.creditLimit) }));
+      return accounts.map((account) => ({ code: account.accountNumber, name: account.name, type: account.type, phone: account.phone, balance: money(account.currentBalance), balanceMeaning: money(account.currentBalance) < 0 ? "مديونية علينا / رصيد دائن للحساب" : money(account.currentBalance) > 0 ? "مستحق لنا" : "متزن", creditLimit: manager ? money(account.creditLimit) : undefined }));
     },
 
     async queryUserPerformanceSummary(args: { dateFrom?: string }) {
