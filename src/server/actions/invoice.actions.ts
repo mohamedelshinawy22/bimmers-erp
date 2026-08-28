@@ -104,8 +104,9 @@ export async function updateSaleInvoiceAction(raw: UpdateSaleInvoiceInput): Prom
   try {
     const user = await requirePermission("invoice.sale");
     const input = updateSaleInvoiceSchema.parse(raw);
-    const access = await getUserAccess(user.id);
-    const result = await updateSaleInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount"), canAddDiscount: hasPermission(access, "canAddDiscount"), maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100), maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999), canUseTreasury: (treasuryId) => canUseTreasury(access, treasuryId) });
+    const tenant = await getTenantDbFromSession();
+    const access = await tenant.run(() => getUserAccess(user.id));
+    const result = await tenant.run(() => updateSaleInvoice(input, { id: user.id, canSellBelowMin: can(user.role, "invoice.belowMinPrice") && hasPermission(access, "canSellBelowMinPrice"), canOverrideDiscount: can(user.role, "invoice.overrideDiscount"), canAddDiscount: hasPermission(access, "canAddDiscount"), maxDiscountPercent: Number(access.permissions?.maxDiscountPercent ?? 100), maxDiscountValue: Number(access.permissions?.maxDiscountValue ?? 99_999_999), canUseTreasury: (treasuryId) => canUseTreasury(access, treasuryId) }));
     await revalidateAfterInvoice(["/", "/pos", "/invoices", "/inventory", "/treasury", "/accounts"]);
     return ok(result);
   } catch (error) {

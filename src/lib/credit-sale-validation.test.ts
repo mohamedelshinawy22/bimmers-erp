@@ -21,6 +21,7 @@ describe("walk-in on-account sale validation", () => {
     expect(action).toContain("getTenantDbFromSession()");
     expect(action).toContain("tenant.run(() => getUserAccess(user.id))");
     expect(action).toContain("tenant.run(() => createSaleInvoice");
+    expect(action).toContain("tenant.run(() => updateSaleInvoice");
     expect(searchActions).toContain("tenant.run(() => searchPosAccounts(query, 30))");
     expect(searchActions).toContain("tenant.run(() => getAccountVehicles(accountId))");
     expect(WALK_IN_CREDIT_ERROR).toContain("لا يمكن البيع الآجل");
@@ -62,5 +63,17 @@ describe("walk-in on-account sale validation", () => {
     expect(pos).toContain("disabled={onAccountDisabled}");
     expect(pos).toContain("البيع الآجل يتطلب تحديد حساب عميل / ورشة مسجل");
     expect(pos).toContain("setError(result.error)");
+  });
+
+  it("uses the session tenant context for invoice editing and settlement while keeping payment-dialog errors recoverable", () => {
+    const action = source("src/server/actions/invoice.actions.ts");
+    const treasuryActions = source("src/server/actions/treasury.actions.ts");
+    const invoices = source("src/app/(app)/invoices/invoices-client.tsx");
+    expect(action).toContain("const tenant = await getTenantDbFromSession();");
+    expect(action).toContain("tenant.run(() => updateSaleInvoice(input");
+    expect(treasuryActions).toContain("const tenant = await getTenantDbFromSession();");
+    expect(treasuryActions).toContain("tenant.run(() => withTxRetry(() => prisma.$transaction");
+    expect(invoices).toContain("if (pending) return;");
+    expect(invoices).toContain("setError(result.error || \"تعذر إتمام السداد حالياً. أعد المحاولة.\")");
   });
 });

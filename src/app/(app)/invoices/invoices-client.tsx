@@ -594,10 +594,11 @@ function InvoiceSettlementModal({ invoice, treasuries, onClose, onDone }: { invo
   const [pending, startTransition] = useTransition();
   const isSale = invoice.type === "SALE";
   const submit = () => {
+    if (pending) return;
     setError(null);
     startTransition(async () => {
       const result = await settleInvoiceAction({ invoiceId: invoice.id, treasuryId, amount: Number(amount), description });
-      if (!result.success) { setError(result.error); return; }
+      if (!result.success) { setError(result.error || "تعذر إتمام السداد حالياً. أعد المحاولة."); return; }
       onDone();
     });
   };

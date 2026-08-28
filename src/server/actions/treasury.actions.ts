@@ -179,7 +179,8 @@ export async function settleInvoiceAction(raw: SettleInvoiceInput): Promise<Acti
     const user = await requirePermission("treasury.transact");
     const input = settleInvoiceSchema.parse(raw);
     const amount = money(input.amount);
-    const result = await withTxRetry(() => prisma.$transaction(async (tx) => {
+    const tenant = await getTenantDbFromSession();
+    const result = await tenant.run(() => withTxRetry(() => prisma.$transaction(async (tx) => {
       const initial = await tx.invoice.findUnique({ where: { id: input.invoiceId }, select: { accountId: true } });
       if (!initial) throw new BusinessRuleError("الفاتورة غير موجودة.");
       await lockAccountForUpdate(tx, initial.accountId);
@@ -203,7 +204,7 @@ export async function settleInvoiceAction(raw: SettleInvoiceInput): Promise<Acti
       await writeAudit(tx, { tableName: "Invoice", recordId: invoice.id, action: "UPDATE", oldData: invoice, newData: updatedInvoice, performedBy: user.id });
       await writeAudit(tx, { tableName: "TreasuryTransaction", recordId: transaction.id, action: "INSERT", newData: transaction, performedBy: user.id });
       return { transactionNumber: transaction.transactionNumber, remainingAmount: Number(remainingAmount) };
-    }, TX_OPTIONS));
+    }, TX_OPTIONS)));
     await invalidateCache("dashboard");
     for (const path of ["/", "/invoices", "/treasury", "/accounts"]) revalidatePath(path);
     return ok(result);

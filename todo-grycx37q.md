@@ -338,3 +338,8 @@
 - [x] Add quota presentation and stale-date regression coverage for the Settings subscription data boundary.
 - [x] Validate and deploy the ERP subscription synchronization release, then verify its non-mutating production health and runtime logs.
 - [ ] Obtain authenticated Bavaria Settings acceptance for the synchronized subscription dates and quotas.
+- [x] Audit the active sales-invoice edit and payment completion actions for tenant-context loss and duplicate-posting risk.
+- [x] Wrap the authoritative invoice update and on-account payment path in the session-bound tenant context with safe localized errors.
+- [x] Preserve payment-modal recovery state and render returned action failures without a generic crash boundary.
+- [x] Add tenant-context, idempotent financial-effect, and payment-modal error regressions.
+- [ ] Validate, deploy, and obtain authenticated acceptance for editing and completing an on-account sales invoice.
