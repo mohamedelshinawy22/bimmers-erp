@@ -23,6 +23,8 @@ type DirectTools = {
     balance: number;
     balanceMeaning: string;
   }>>;
+  queryUsers: () => Promise<Array<{ name: string; username: string; role: string; createdAt: string }>>;
+  queryAccountStatement: (args: { search?: string }) => Promise<{ error?: string; name?: string; code?: string; type?: string; phone?: string | null; balance?: number; balanceMeaning?: string; transactions?: Array<{ type: string; amount: number; description: string; date: string }> }>;
 };
 
 const normalize = (value: string) => value
@@ -41,10 +43,28 @@ export async function resolveDirectDbIntent(query: string, tools: DirectTools): 
   const normalized = normalize(query);
   if (!normalized) return null;
 
+  const asksUsers = /(عدد المستخدمين|المستخدمين|الكاشيرات|مين شغال|طاقم العمل)/.test(normalized);
+  const asksStatement = /(كشف حساب|حساب ورشه|حساب عميل|حساب مورد)/.test(normalized);
   const asksSales = /(مبيعات|بيع|فواتير النهارده|فواتير اليوم|ملخص|الدرج|السيوله|خزينه)/.test(normalized);
   const asksShortages = /(نواقص|ناقص|حرج|خلص|مخزون قليل|اصناف قليله)/.test(normalized);
   const asksSuppliers = /(مورد|مستحقات|علينا|حسابات الموردين|مديونيات الموردين)/.test(normalized);
   const asksCustomers = /(مديوني|عميل|عملاء|ورش|لينا|مستحق لنا)/.test(normalized);
+
+  if (asksUsers) {
+    const users = await tools.queryUsers();
+    if (!users.length) return "لا توجد حسابات مستخدمين نشطة ظاهرة داخل المؤسسة الحالية.";
+    return [`**المستخدمون النشطون داخل المؤسسة الحالية:** **${users.length} مستخدم**`, ...users.map((user) => `- **${user.name || user.username}** — ${user.role} — تاريخ الإنشاء: ${user.createdAt}`)].join("\n");
+  }
+
+  if (asksStatement) {
+    const search = normalized.replace(/كشف حساب|حساب ورشه|حساب عميل|حساب مورد|حساب|ورشه|عميل|مورد/g, "").trim();
+    const statement = await tools.queryAccountStatement({ search });
+    if (statement.error) return statement.error;
+    const transactions = statement.transactions?.length
+      ? statement.transactions.map((item) => `- ${item.date} — ${item.type}: **${money(item.amount)}** — ${item.description}`).join("\n")
+      : "لا توجد حركات نشطة حديثة.";
+    return [`**كشف الحساب:** ${statement.name || "حساب"} (${statement.code || "بدون كود"})`, `- الرصيد: **${money(statement.balance || 0)}** — ${statement.balanceMeaning || "غير محدد"}`, `- الهاتف: ${statement.phone || "غير مسجل"}`, "**آخر الحركات:**", transactions].join("\n");
+  }
 
   if (asksSales) {
     const data = await tools.getLiveDashboardMetrics();

@@ -16,6 +16,8 @@ const tools = {
     ? [{ name: "تيل فرامل F30", oem: "341168600", stock: 0, stockStatus: "نافد", location: "MAIN-A0", retailPrice: 500 }]
     : []),
   queryAccountsAndDebts: vi.fn(async () => [{ name: "مورد BMW", type: "SUPPLIER", balance: 1255162.26, balanceMeaning: "مديونية علينا / رصيد دائن للحساب" }]),
+  queryUsers: vi.fn(async () => [{ name: "أحمد", username: "admin", role: "ADMIN", createdAt: "٢٨‏/٨‏/٢٠٢٦" }]),
+  queryAccountStatement: vi.fn(async () => ({ name: "ورشة BMW", code: "ACC-001", type: "WORKSHOP_BMW", phone: "0100", balance: 2500, balanceMeaning: "رصيد مدين على الحساب", transactions: [] })),
 };
 
 describe("deterministic Copilot intent resolver", () => {
@@ -39,6 +41,19 @@ describe("deterministic Copilot intent resolver", () => {
     expect(result).toContain("تيل فرامل F30");
     expect(result).toContain("الرصيد: **0**");
     expect(tools.queryProducts).toHaveBeenCalledWith({ lowStockOnly: true });
+  });
+
+  it("answers active-user questions from the organization-scoped tool", async () => {
+    const result = await resolveDirectDbIntent("عدد المستخدمين", tools);
+    expect(result).toContain("أحمد");
+    expect(tools.queryUsers).toHaveBeenCalledOnce();
+  });
+
+  it("answers account-statement questions without querying outside the tenant tools", async () => {
+    const result = await resolveDirectDbIntent("كشف حساب ورشة BMW", tools);
+    expect(result).toContain("ورشة BMW");
+    expect(result).toContain("2,500.00 ج.م");
+    expect(tools.queryAccountStatement).toHaveBeenCalledWith({ search: "bmw" });
   });
 
   it("returns null for an unsupported question instead of inventing an answer", async () => {

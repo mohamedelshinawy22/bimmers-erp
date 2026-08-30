@@ -19,7 +19,9 @@ export const copilotTools: ForgeTool[] = [
   { type: "function", function: { name: "queryProducts", description: "البحث الحي عن الأصناف برقم OEM أو الاسم أو الباركود أو الفئة والتوافق BMW مع الرصيد والأسعار المسموح بها.", parameters: { type: "object", properties: { query: { type: "string" }, chassis: { type: "string" }, engine: { type: "string" }, lowStockOnly: { type: "boolean" } }, additionalProperties: false } } },
   { type: "function", function: { name: "queryInvoices", description: "البحث الحي في فواتير البيع والشراء ضمن فترة أو حساب.", parameters: { type: "object", properties: { type: { type: "string", enum: ["SALE", "PURCHASE"] }, dateFrom: { type: "string" }, dateTo: { type: "string" }, accountName: { type: "string" } }, additionalProperties: false } } },
   { type: "function", function: { name: "queryVouchersAndTreasury", description: "قراءة سندات القبض والصرف وأرصدة الخزائن المصرح بها فقط.", parameters: { type: "object", properties: { type: { type: "string", enum: ["RECEIPT", "PAYMENT"] }, limit: { type: "integer", minimum: 1, maximum: 20 } }, additionalProperties: false } } },
-  { type: "function", function: { name: "queryAccountsAndDebts", description: "قراءة أرصدة العملاء والموردين والورش للمدير فقط.", parameters: { type: "object", properties: { search: { type: "string" }, type: { type: "string", enum: ["CUSTOMER", "SUPPLIER", "WORKSHOP_BMW"] }, withDebtsOnly: { type: "boolean" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "queryAccountsAndDebts", description: "قراءة أرصدة العملاء والموردين والورش داخل المؤسسة الحالية؛ التكلفة وحد الائتمان مقيدان حسب الدور.", parameters: { type: "object", properties: { search: { type: "string" }, type: { type: "string", enum: ["CUSTOMER", "SUPPLIER", "WORKSHOP_BMW"] }, withDebtsOnly: { type: "boolean" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "queryAccountStatement", description: "كشف حساب حي ومحدود لعميل أو ورشة أو مورد داخل المؤسسة الحالية.", parameters: { type: "object", properties: { search: { type: "string" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "queryUsers", description: "قائمة المستخدمين النشطين داخل المؤسسة الحالية.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "queryUserPerformanceSummary", description: "مقارنة مبيعات المستخدمين النشطين للمدير فقط.", parameters: { type: "object", properties: { dateFrom: { type: "string" } }, additionalProperties: false } } },
 ];
 
@@ -45,6 +47,8 @@ export async function runCopilotConversation(tenant: SessionTenantDb, messages: 
     getLiveDashboardMetrics: scopedTools.getLiveDashboardMetrics,
     queryProducts: scopedTools.queryProducts,
     queryAccountsAndDebts: scopedTools.queryAccountsAndDebts,
+    queryAccountStatement: scopedTools.queryAccountStatement,
+    queryUsers: scopedTools.queryUsers,
   };
   const lastUserMessage = messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
   const forgeConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);

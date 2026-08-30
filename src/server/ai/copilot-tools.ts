@@ -99,6 +99,26 @@ export function createScopedCopilotTools(db: PrismaClient, user: CopilotUserCont
       return accounts.map((account) => ({ code: account.accountNumber, name: account.name, type: account.type, phone: account.phone, balance: money(account.currentBalance), balanceMeaning: money(account.currentBalance) < 0 ? "مديونية علينا / رصيد دائن للحساب" : money(account.currentBalance) > 0 ? "مستحق لنا" : "متزن", creditLimit: manager ? money(account.creditLimit) : undefined }));
     },
 
+    async queryUsers() {
+      const users = await db.user.findMany({ where: { isActive: true }, select: { fullName: true, username: true, role: true, createdAt: true }, orderBy: { createdAt: "asc" }, take: 50 });
+      return users.map((item) => ({ name: item.fullName, username: item.username, role: item.role, createdAt: item.createdAt.toLocaleDateString("ar-EG") }));
+    },
+
+    async queryAccountStatement(args: { search?: string }) {
+      const search = typeof args?.search === "string" ? args.search.trim() : "";
+      if (search.length < 2) return { error: "اكتب اسم العميل أو الورشة أو المورد." };
+      const account = await db.account.findFirst({
+        where: { isActive: true, status: "ACTIVE", OR: [{ name: { contains: search, mode: "insensitive" } }, { phone: { contains: search } }, { accountNumber: { contains: search } }] },
+        select: { accountNumber: true, name: true, type: true, phone: true, currentBalance: true, transactions: { where: { status: "ACTIVE" }, select: { type: true, amount: true, description: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 8 } },
+      });
+      if (!account) return { error: "لم أعثر على حساب مطابق داخل المؤسسة الحالية." };
+      return {
+        code: account.accountNumber, name: account.name, type: account.type, phone: account.phone,
+        balance: money(account.currentBalance), balanceMeaning: money(account.currentBalance) < 0 ? "رصيد دائن للحساب" : money(account.currentBalance) > 0 ? "رصيد مدين على الحساب" : "متزن",
+        transactions: account.transactions.map((item) => ({ type: item.type, amount: money(item.amount), description: item.description, date: item.createdAt.toLocaleString("ar-EG") })),
+      };
+    },
+
     async queryUserPerformanceSummary(args: { dateFrom?: string }) {
       if (!manager) return { error: "تقرير أداء المستخدمين مخصص لمدير النظام فقط." };
       const from = dateOr(args?.dateFrom, startOfToday());
