@@ -374,4 +374,5 @@
 - [x] Use the deterministic resolver only as a live tenant-scoped fallback when Forge is unavailable, preserving RBAC and no-mutation behavior.
 - [x] Add regressions for no-config answers, tenant isolation, sensitive-field hiding, and no financial mutations.
 - [x] Validate the expanded deterministic intent engine with 158 tests, a production build, and no-mutation coverage; deployment and authenticated acceptance remain pending.
-- [ ] Deploy the expanded deterministic intent engine, verify production health and the protected API boundary, and obtain authenticated Bavaria acceptance for deterministic sales, shortage, and supplier-payables answers.
+- [x] Deploy the expanded deterministic intent engine and verify production health, the protected API boundary, and runtime logs without invoking financial mutations.
+- [ ] Obtain authenticated Bavaria acceptance for deterministic sales, shortage, supplier-payables, organization-user, and account-statement answers.
