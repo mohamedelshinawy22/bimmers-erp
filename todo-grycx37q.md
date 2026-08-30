@@ -373,4 +373,5 @@
 - [x] Implement a deterministic Egyptian-Arabic intent resolver over existing read-only tools for sales, shortages, supplier payables, customer balances, and product lookup.
 - [x] Use the deterministic resolver only as a live tenant-scoped fallback when Forge is unavailable, preserving RBAC and no-mutation behavior.
 - [x] Add regressions for no-config answers, tenant isolation, sensitive-field hiding, and no financial mutations.
-- [ ] Validate, deploy, and obtain authenticated Bavaria acceptance for deterministic Copilot answers.
+- [x] Validate and deploy the zero-configuration hybrid Copilot, verify production health and the protected API boundary, and confirm no financial mutations are performed.
+- [ ] Obtain authenticated Bavaria acceptance for deterministic sales, shortage, and supplier-payables answers.
