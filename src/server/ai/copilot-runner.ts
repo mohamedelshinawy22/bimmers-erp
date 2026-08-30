@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SessionTenantDb } from "@/server/db/get-tenant-db";
 import { createScopedCopilotTools } from "@/server/ai/copilot-tools";
+import { resolveDirectDbIntent } from "@/server/ai/intent-resolver";
 import { invokeLLM, type ForgeMessage, type ForgeTool } from "@/server/ai/forge-llm";
 
 const SYSTEM_PROMPT = `أنت Bimmers AI Copilot، مساعد ERP متخصص في قطع غيار BMW ويفهم العربية المصرية والفصحى.
@@ -40,9 +41,29 @@ export async function runCopilotConversation(tenant: SessionTenantDb, messages: 
   const dbUser = await tenant.prisma.user.findUnique({ where: { id: tenant.user.id }, select: { allowedTreasuryIds: true } });
   const userContext = { userId: tenant.user.id, fullName: tenant.user.fullName, role: String(tenant.user.role), tenantId: tenant.context.route.tenantId, allowedTreasuryIds: dbUser?.allowedTreasuryIds ?? [] };
   const scopedTools = createScopedCopilotTools(tenant.prisma, userContext);
+  const directTools = {
+    getLiveDashboardMetrics: scopedTools.getLiveDashboardMetrics,
+    queryProducts: scopedTools.queryProducts,
+    queryAccountsAndDebts: scopedTools.queryAccountsAndDebts,
+  };
+  const lastUserMessage = messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
+  const forgeConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);
+  if (!forgeConfigured) {
+    const directReply = await resolveDirectDbIntent(lastUserMessage, directTools);
+    return directReply || "الخدمة الذكية غير متاحة حالياً، لكن يمكنك سؤالي عن المبيعات أو النواقص أو المديونيات أو البحث عن صنف.";
+  }
   const conversation: ForgeMessage[] = [{ role: "system", content: `${SYSTEM_PROMPT}\nالمستخدم الحالي: ${userContext.fullName}؛ الدور: ${userContext.role}.` }, ...messages];
   for (let round = 0; round < 4; round += 1) {
-    const completion = await invokeLLM({ messages: conversation, tools: copilotTools, toolChoice: "auto", maxTokens: 900 });
+    let completion;
+    try {
+      completion = await invokeLLM({ messages: conversation, tools: copilotTools, toolChoice: "auto", maxTokens: 900 });
+    } catch (error) {
+      if (error instanceof Error && ["خدمة المساعد الذكي غير مهيأة حالياً.", "تعذر الاتصال بخدمة المساعد الذكي حالياً."].includes(error.message)) {
+        const directReply = await resolveDirectDbIntent(lastUserMessage, directTools);
+        if (directReply) return directReply;
+      }
+      throw error;
+    }
     const assistant = completion.choices?.[0]?.message;
     if (!assistant) return "تعذر تكوين إجابة من خدمة المساعد حالياً.";
     conversation.push(assistant);
