@@ -380,4 +380,4 @@
 - [x] Add responsive horizontal/vertical scroll containers and sticky headers without changing pagination or data queries.
 - [x] Reposition the Copilot trigger and add safe footer padding so pagination and summary controls remain clickable.
 - [x] Add source-contract and responsive layout regressions without financial or catalog mutations.
-- [x] Validate the responsive layouts with 166 tests and a production build; deployment and authenticated scrolling/overlap acceptance remain pending.
+- [x] Validate and deploy the responsive layouts with 166 tests, a production build, live health, and a protected Copilot boundary check; authenticated scrolling/overlap acceptance remains pending.
