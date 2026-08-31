@@ -197,8 +197,11 @@ export function AccountsClient({
 
       <SelectionActionToolbar count={selectedAccounts.length} itemLabel="حساب" onEdit={canWrite && selectedAccounts.length === 1 ? () => setEditAccount(selectedAccounts[0] ?? null) : undefined} onMerge={canForceCleanup && selectedAccounts.length === 2 ? () => setMergeTargets(selectedAccounts as [AccountRow, AccountRow]) : undefined} onDelete={canWrite ? () => setDeleteTarget(selectedAccounts) : undefined} deleteLabel="حذف نهائي" onClear={() => setSelectedIds([])} />
       <Card>
-        <Table>
-          <THead>
+        <Table
+          className="min-w-[980px]"
+          containerClassName="max-h-[calc(100vh-300px)] min-h-[420px] overflow-x-auto overflow-y-auto [scrollbar-color:#334155_transparent] [scrollbar-width:thin]"
+        >
+          <THead className="sticky top-0 z-20 bg-bmw-carbon/95 shadow-sm backdrop-blur-md">
             <TR>
               <TH><input aria-label="تحديد كل الحسابات الظاهرة" type="checkbox" checked={rows.length > 0 && rows.every((account) => selectedIds.includes(account.id))} onChange={(event) => setSelectedIds(event.target.checked ? rows.map((account) => account.id) : [])} /></TH>
               <TH>كود الحساب</TH>
@@ -348,10 +351,10 @@ export function AccountsClient({
           </TBody>
         </Table>
 
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-card/95 px-4 py-3 text-xs backdrop-blur"><span className="text-bmw-muted">إجمالي الأرصدة المعروضة في الصفحة</span><div className="flex flex-wrap gap-4"><span className="tabular text-amber-400">مدين — لنا: <b>{formatMoney(displayedReceivables)} {CURRENCY}</b></span><span className="tabular text-purple-400">دائن — علينا: <b>{formatMoney(displayedPayables)} {CURRENCY}</b></span><span className="tabular text-white">صافي المركز: <b>{formatMoney(displayedNet)} {CURRENCY}</b></span></div></div>
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-bmw-cardBorder bg-bmw-card/95 px-4 py-3 pl-44 text-xs backdrop-blur rtl:pr-4 rtl:pl-44"><span className="text-bmw-muted">إجمالي الأرصدة المعروضة في الصفحة</span><div className="flex flex-wrap gap-4"><span className="tabular text-amber-400">مدين — لنا: <b>{formatMoney(displayedReceivables)} {CURRENCY}</b></span><span className="tabular text-purple-400">دائن — علينا: <b>{formatMoney(displayedPayables)} {CURRENCY}</b></span><span className="tabular text-white">صافي المركز: <b>{formatMoney(displayedNet)} {CURRENCY}</b></span></div></div>
 
         {pageCount > 1 ? (
-          <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3">
+          <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3 pl-44 rtl:pr-4 rtl:pl-44">
             <p className="text-xs text-bmw-muted">
               صفحة <span className="tabular font-bold text-white">{page}</span> من{" "}
               <span className="tabular">{pageCount}</span>

@@ -200,8 +200,11 @@ export function InvoicesClient({
       />
 
       <Card>
-        <Table>
-          <THead>
+        <Table
+          className="min-w-[1120px]"
+          containerClassName="max-h-[calc(100vh-300px)] min-h-[420px] overflow-x-auto overflow-y-auto [scrollbar-color:#334155_transparent] [scrollbar-width:thin]"
+        >
+          <THead className="sticky top-0 z-20 bg-bmw-carbon/95 shadow-sm backdrop-blur-md">
             <TR>
               <TH><input aria-label="تحديد كل الفواتير الملغاة للحذف النهائي" type="checkbox" disabled={!permissions.canPurge || selectableVoidedInvoices.length === 0} checked={selectableVoidedInvoices.length > 0 && selectableVoidedInvoices.every((invoice) => selectedVoidedIds.has(invoice.id))} onChange={(event) => setSelectedVoidedIds(event.target.checked ? new Set(selectableVoidedInvoices.map((invoice) => invoice.id)) : new Set())} /></TH>
               <TH>رقم الفاتورة</TH>
@@ -273,7 +276,7 @@ export function InvoicesClient({
         </Table>
 
         {pageCount > 1 ? (
-          <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3">
+          <div className="flex items-center justify-between border-t border-bmw-cardBorder px-4 py-3 pl-44 rtl:pr-4 rtl:pl-44">
             <p className="text-xs text-bmw-muted">
               صفحة <span className="tabular font-bold text-white">{page}</span> من{" "}
               <span className="tabular">{pageCount}</span>

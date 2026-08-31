@@ -296,8 +296,8 @@ export function InventoryClient({
       {/* Catalog */}
       <Card className="overflow-hidden">
         <div className="flex max-h-[calc(100vh-17rem)] min-h-[24rem] flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <Table>
+        <div className="min-h-0 max-h-[calc(100vh-300px)] min-h-[420px] flex-1 overflow-x-auto overflow-y-auto overscroll-contain [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
+        <Table className="min-w-[1120px]">
           <THead className="sticky top-0 z-20 shadow-sm">
             <TR>
               <TH><input aria-label="تحديد الكل المعروض" type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedIds(event.target.checked ? [...new Set([...selectedIds, ...visibleRows.map((part) => part.id)])] : selectedIds.filter((id) => !visibleRows.some((part) => part.id === id)))}/></TH>

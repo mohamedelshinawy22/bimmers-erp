@@ -376,3 +376,8 @@
 - [x] Validate the expanded deterministic intent engine with 158 tests, a production build, and no-mutation coverage; deployment and authenticated acceptance remain pending.
 - [x] Deploy the expanded deterministic intent engine and verify production health, the protected API boundary, and runtime logs without invoking financial mutations.
 - [ ] Obtain authenticated Bavaria acceptance for deterministic sales, shortage, supplier-payables, organization-user, and account-statement answers.
+- [x] Audit catalog, invoice, return, and account table viewport and footer structures plus Copilot placement.
+- [x] Add responsive horizontal/vertical scroll containers and sticky headers without changing pagination or data queries.
+- [x] Reposition the Copilot trigger and add safe footer padding so pagination and summary controls remain clickable.
+- [x] Add source-contract and responsive layout regressions without financial or catalog mutations.
+- [x] Validate the responsive layouts with 166 tests and a production build; deployment and authenticated scrolling/overlap acceptance remain pending.
